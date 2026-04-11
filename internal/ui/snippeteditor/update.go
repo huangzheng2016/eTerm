@@ -1,0 +1,83 @@
+package snippeteditor
+
+import (
+	"strings"
+
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/eterm/eterm/internal/db"
+	"github.com/eterm/eterm/internal/types"
+)
+
+func (m Model) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "tab", "down":
+			m.inputs[m.focused].Blur()
+			m.focused = (m.focused + 1) % 2
+			return m, m.inputs[m.focused].Focus()
+		case "shift+tab", "up":
+			m.inputs[m.focused].Blur()
+			m.focused = (m.focused - 1 + 2) % 2
+			return m, m.inputs[m.focused].Focus()
+		case "ctrl+s":
+			return m, m.save()
+		case "enter":
+			if m.focused == 1 {
+				return m, m.save()
+			}
+			m.inputs[m.focused].Blur()
+			m.focused = 1
+			return m, m.inputs[1].Focus()
+		case "esc":
+			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
+		}
+
+		var cmd tea.Cmd
+		m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) save() tea.Cmd {
+	name := strings.TrimSpace(m.inputs[0].Value())
+	if name == "" {
+		m.err = "Name is required"
+		return nil
+	}
+	command := strings.TrimSpace(m.inputs[1].Value())
+	if command == "" {
+		m.err = "Command is required"
+		return nil
+	}
+
+	snippet := db.Snippet{Name: name, Command: command}
+	database := m.db
+	sid := m.snippetID
+
+	return func() tea.Msg {
+		if sid > 0 {
+			snippet.ID = sid
+			if err := database.Save(&snippet).Error; err != nil {
+				return types.ErrorMsg{Err: err}
+			}
+		} else {
+			if err := database.Create(&snippet).Error; err != nil {
+				return types.ErrorMsg{Err: err}
+			}
+		}
+		return types.SnippetSavedMsg{Snippet: snippet}
+	}
+}

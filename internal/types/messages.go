@@ -1,0 +1,206 @@
+package types
+
+type SwitchTabMsg struct {
+	Index int
+}
+
+type NewTabMsg struct {
+	Type  string
+	Title string
+	Data  interface{}
+}
+
+type CloseTabMsg struct {
+	Index int
+}
+
+type SSHConnectMsg struct {
+	HostID uint
+}
+
+// ForwardRuleStartMsg asks the app to connect (if needed) and start a saved port-forward rule.
+type ForwardRuleStartMsg struct {
+	RuleID uint
+}
+
+// ForwardRuleStopMsg asks the app to stop a running port-forward rule.
+type ForwardRuleStopMsg struct {
+	RuleID uint
+}
+
+// ForwardRuleResultMsg reports start/stop outcome for UI (running=false means stopped).
+type ForwardRuleResultMsg struct {
+	RuleID  uint
+	Err     error
+	Running bool
+}
+
+// ForwardRuleDeleteRequestMsg asks the app to confirm before deleting a forward rule.
+type ForwardRuleDeleteRequestMsg struct {
+	ID   uint
+	Desc string
+}
+
+// ForwardRuleDeletedMsg is sent after a forward rule is deleted.
+type ForwardRuleDeletedMsg struct {
+	ID uint
+}
+
+// ForwardRuleSavedMsg is sent after a forward rule is created or updated.
+type ForwardRuleSavedMsg struct {
+	Rule interface{}
+}
+
+// SSHReconnectMsg is sent from an SSH tab after a network-style disconnect; App
+// redials and replaces the same tab (see openSSHUITabMsg.replaceTabAt).
+type SSHReconnectMsg struct {
+	HostID   uint
+	StreamID uint64
+}
+
+type SSHDisconnectMsg struct {
+	Err      error
+	Alias    string // host display name (toast / fallback matching)
+	StreamID uint64 // which sshview.Model ended; 0 means match by Alias+Title only
+}
+
+type SFTPOpenMsg struct {
+	HostID uint
+}
+
+type MasterKeyUnlockedMsg struct {
+	Salt       string
+	Verifier   string
+	IsSetup    bool
+	NoPassword bool
+}
+
+type MasterKeyLockedMsg struct{}
+
+type ErrorMsg struct {
+	Err error
+}
+
+type SuccessMsg struct {
+	Message string
+}
+
+type RefreshListMsg struct{}
+
+type HostDeletedMsg struct {
+	ID uint
+}
+
+type HostSavedMsg struct {
+	Host interface{}
+}
+
+// HostDeleteRequestMsg asks the app to show a confirmation dialog before deleting.
+type HostDeleteRequestMsg struct {
+	ID    uint
+	Alias string
+}
+
+// HostCloneMsg asks the app to duplicate a host with a unique alias suffix.
+type HostCloneMsg struct {
+	HostID uint
+}
+
+// HostToggleHiddenMsg toggles the "hidden" tag on a host.
+type HostToggleHiddenMsg struct {
+	HostID uint
+}
+
+// AutoLockTickMsg is sent periodically to check master key timeout.
+type AutoLockTickMsg struct{}
+
+// FingerprintConfirmMsg asks the user to confirm an unknown host fingerprint.
+type FingerprintConfirmMsg struct {
+	HostID      uint
+	Hostname    string
+	Port        int
+	Algorithm   string
+	Fingerprint string
+	ConnType    string // "ssh", "sftp", "reconnect", "forward"
+	StreamID    uint64 // for reconnect
+	// ForwardRuleID is set when ConnType is "forward" (port-forward tab dial).
+	ForwardRuleID uint
+}
+
+// FingerprintAcceptedMsg is sent after the user accepts a fingerprint.
+type FingerprintAcceptedMsg struct {
+	HostID        uint
+	ConnType      string
+	StreamID      uint64
+	ForwardRuleID uint
+}
+
+// QuickConnectRequestMsg triggers the quick connect overlay.
+type QuickConnectRequestMsg struct{}
+
+// QuickConnectMsg carries parsed quick connect input.
+type QuickConnectMsg struct {
+	Hostname string
+	Port     int
+	Username string
+}
+
+// ImportSSHConfigMsg triggers SSH config import.
+type ImportSSHConfigMsg struct{}
+
+// ImportSSHConfigResultMsg reports import results.
+type ImportSSHConfigResultMsg struct {
+	Imported             int
+	Skipped              int
+	UnresolvedProxyJumps int
+	Err                  error
+}
+
+// ExportConfigMsg triggers config export.
+type ExportConfigMsg struct{}
+
+// ExportConfigResultMsg reports export results.
+type ExportConfigResultMsg struct {
+	Path string
+	Err  error
+}
+
+// SnippetPickerRequestMsg triggers the snippet picker overlay in SSH view.
+type SnippetPickerRequestMsg struct{}
+
+// SnippetSelectedMsg carries a selected snippet command to paste into SSH.
+type SnippetSelectedMsg struct {
+	Command string
+}
+
+// SnippetDeleteRequestMsg asks the app to show a confirmation dialog before deleting.
+type SnippetDeleteRequestMsg struct {
+	ID   uint
+	Name string
+}
+
+// SnippetDeletedMsg is sent after a snippet is actually deleted.
+type SnippetDeletedMsg struct {
+	ID uint
+}
+
+// SnippetSavedMsg is sent after a snippet is created or updated.
+type SnippetSavedMsg struct {
+	Snippet interface{}
+}
+
+// QuitRequestMsg asks the app to quit (with active-session check).
+type QuitRequestMsg struct{}
+
+// CLIConnectMsg triggers a direct connection from CLI arguments.
+type CLIConnectMsg struct {
+	Hostname string
+	Port     int
+	Username string
+}
+
+// UpdateAvailableMsg notifies that a newer version is available on GitHub.
+type UpdateAvailableMsg struct {
+	Version string
+	URL     string
+}

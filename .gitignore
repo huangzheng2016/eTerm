@@ -1,0 +1,46 @@
+# Binaries
+/eterm
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go build -o
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SQLite databases (local / demo)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Project-local DB folder at repo root (not internal/db)
+/db/
+
+# Local env / secrets (if ever added)
+.env
+.env.*
+!.env.example
+
+# Debug / temp
+*.log
+/tmp/

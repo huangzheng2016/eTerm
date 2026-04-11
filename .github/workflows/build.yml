@@ -1,0 +1,127 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Run tests
+        run: go test ./...
+
+  build-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Build for Linux AMD64
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          COMMIT="${GITHUB_SHA::8}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -ldflags="-s -w -X github.com/eterm/eterm/internal/version.Version=${VERSION} -X github.com/eterm/eterm/internal/version.Commit=${COMMIT}" \
+            -o eterm_linux_amd64 .
+      - name: Create archive
+        run: tar -czf eterm_linux_amd64.tar.gz eterm_linux_amd64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-amd64
+          path: eterm_linux_amd64.tar.gz
+
+  build-darwin:
+    needs: test
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+          - goarch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Build for Darwin ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          COMMIT="${GITHUB_SHA::8}"
+          CGO_ENABLED=0 GOARCH=${{ matrix.goarch }} go build \
+            -ldflags="-s -w -X github.com/eterm/eterm/internal/version.Version=${VERSION} -X github.com/eterm/eterm/internal/version.Commit=${COMMIT}" \
+            -o eterm_darwin_${{ matrix.goarch }} .
+      - name: Create archive
+        run: tar -czf eterm_darwin_${{ matrix.goarch }}.tar.gz eterm_darwin_${{ matrix.goarch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: darwin-${{ matrix.goarch }}
+          path: eterm_darwin_${{ matrix.goarch }}.tar.gz
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Build for Windows AMD64
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
+          $commit = $env:GITHUB_SHA.Substring(0, 8)
+          go build -ldflags="-s -w -X github.com/eterm/eterm/internal/version.Version=$version -X github.com/eterm/eterm/internal/version.Commit=$commit" -o eterm_windows_amd64.exe .
+      - name: Create archive
+        shell: pwsh
+        run: Compress-Archive -Path "eterm_windows_amd64.exe" -DestinationPath "eterm_windows_amd64.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-amd64
+          path: eterm_windows_amd64.zip
+
+  release:
+    needs: [build-linux, build-darwin, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v8
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find . -path ./release -prune -o \( -name "*.tar.gz" -o -name "*.zip" \) -type f -print | while read f; do cp "$f" release/; done
+          ls -la release/
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: eTerm ${{ steps.version.outputs.version }}
+          files: release/*
+          body: |
+            ## eTerm ${{ steps.version.outputs.version }}
+
+            ### 预编译二进制 / Prebuilt binaries
+
+            - **Linux AMD64**: `eterm_linux_amd64.tar.gz`
+            - **macOS AMD64**: `eterm_darwin_amd64.tar.gz`
+            - **macOS ARM64**: `eterm_darwin_arm64.tar.gz`
+            - **Windows AMD64**: `eterm_windows_amd64.zip`
+
+            解压后将可执行文件放到 `PATH` 中即可。首次运行会在 `~/.config/eterm/` 创建配置与数据库。
+
+            Extract the archive and place the binary on your `PATH`. On first run, config and database are created under `~/.config/eterm/`.
