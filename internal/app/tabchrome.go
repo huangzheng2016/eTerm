@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/eterm/eterm/internal/ui/components"
 	"charm.land/lipgloss/v2"
+	"github.com/eterm/eterm/internal/ui/components"
 )
 
 // layoutWidth returns terminal width for tab strip / body layout (minimum 80 when unknown).
@@ -31,6 +31,8 @@ func (a App) tabStripItems() []components.TabItem {
 			title = fmt.Sprintf("[P] %s", tab.Title)
 		case SnippetTab:
 			title = fmt.Sprintf("[B] %s", tab.Title)
+		case SessionHistoryTab:
+			title = fmt.Sprintf("[L] %s", tab.Title)
 		}
 		if i < 9 {
 			title = fmt.Sprintf("%d:%s", i+1, title)

@@ -4,8 +4,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/eterm/eterm/internal/ui"
 )
 
 type TabItem struct {
@@ -83,17 +81,6 @@ func (t TabsModel) PrevTab() TabsModel {
 		t.ensureActiveVisible()
 	}
 	return t
-}
-
-// Horizontal offset of first tab cell (matches View TitleBar PaddingLeft).
-const tabBarPadLeft = 2
-
-func tabItemCellWidth(activeIdx, i int, item TabItem) int {
-	s := ui.InactiveTabStyle.Render(item.Title)
-	if i == activeIdx {
-		s = ui.ActiveTabStyle.Render(item.Title)
-	}
-	return lipgloss.Width(s)
 }
 
 func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
@@ -216,152 +203,4 @@ func (t TabsModel) Update(msg tea.Msg) (TabsModel, tea.Cmd) {
 		t, _ = t.HandleClick(msg.X)
 	}
 	return t, nil
-}
-
-// tabWidths returns the rendered cell width of each tab item.
-func tabWidths(items []TabItem, activeIdx int) []int {
-	widths := make([]int, len(items))
-	for i, item := range items {
-		widths[i] = tabItemCellWidth(activeIdx, i, item)
-	}
-	return widths
-}
-
-const (
-	arrowLeft  = "< "
-	arrowRight = " >"
-	arrowWidth = 2
-	tabGap     = 1 // space between tabs
-)
-
-// ensureActiveVisible adjusts scrollIdx so the active tab is within the visible window.
-func (t *TabsModel) ensureActiveVisible() {
-	if len(t.items) == 0 || t.width <= 0 {
-		t.scrollIdx = 0
-		return
-	}
-	widths := tabWidths(t.items, t.activeIdx)
-
-	// Clamp scrollIdx
-	if t.scrollIdx > t.activeIdx {
-		t.scrollIdx = t.activeIdx
-	}
-
-	// Scroll right until active tab fits in the visible area
-	for {
-		avail := t.width - tabBarPadLeft*2 // left+right padding
-		if avail <= 0 {
-			// Terminal too narrow for any content; just pin to active tab.
-			t.scrollIdx = t.activeIdx
-			return
-		}
-		hasLeft := t.scrollIdx > 0
-		if hasLeft {
-			avail -= arrowWidth
-		}
-
-		used := 0
-		activeVisible := false
-		for i := t.scrollIdx; i < len(t.items); i++ {
-			need := widths[i]
-			if i > t.scrollIdx {
-				need += tabGap
-			}
-			// Reserve space for right arrow if there are more tabs after
-			remaining := avail - used - need
-			hasRight := i < len(t.items)-1 && remaining < 0
-			if hasRight && i > t.scrollIdx {
-				break
-			}
-			if used+need > avail && i > t.scrollIdx {
-				break
-			}
-			used += need
-			if i == t.activeIdx {
-				activeVisible = true
-			}
-		}
-		if activeVisible {
-			break
-		}
-		t.scrollIdx++
-		if t.scrollIdx >= len(t.items) {
-			t.scrollIdx = len(t.items) - 1
-			break
-		}
-	}
-}
-
-func (t TabsModel) View() string {
-	if len(t.items) == 0 {
-		return ""
-	}
-
-	widths := tabWidths(t.items, t.activeIdx)
-
-	avail := t.width
-	if avail <= 0 {
-		// No width constraint — render all tabs
-		var tabs []string
-		for i, item := range t.items {
-			if i == t.activeIdx {
-				tabs = append(tabs, ui.ActiveTabStyle.Render(item.Title))
-			} else {
-				tabs = append(tabs, ui.InactiveTabStyle.Render(item.Title))
-			}
-		}
-		row := strings.Join(tabs, " ")
-		return strings.TrimRight(lipgloss.NewStyle().Padding(0, 2, 0, 2).Render(row), "\n")
-	}
-
-	budget := avail - tabBarPadLeft*2
-	hasLeft := t.scrollIdx > 0
-	if hasLeft {
-		budget -= arrowWidth
-	}
-
-	// Determine which tabs fit
-	var visible []int
-	used := 0
-	for i := t.scrollIdx; i < len(t.items); i++ {
-		need := widths[i]
-		if len(visible) > 0 {
-			need += tabGap
-		}
-		// Check if we need a right arrow
-		if used+need > budget {
-			break
-		}
-		// If adding this tab leaves no room for right arrow and there are more tabs
-		if i < len(t.items)-1 && used+need+arrowWidth > budget {
-			break
-		}
-		visible = append(visible, i)
-		used += need
-	}
-	hasRight := len(visible) > 0 && visible[len(visible)-1] < len(t.items)-1
-
-	// Build the row
-	var parts []string
-	if hasLeft {
-		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(arrowLeft))
-	}
-	for j, idx := range visible {
-		item := t.items[idx]
-		if idx == t.activeIdx {
-			parts = append(parts, ui.ActiveTabStyle.Render(item.Title))
-		} else {
-			parts = append(parts, ui.InactiveTabStyle.Render(item.Title))
-		}
-		if j < len(visible)-1 {
-			parts = append(parts, " ")
-		}
-	}
-	if hasRight {
-		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(arrowRight))
-	}
-
-	row := strings.Join(parts, "")
-	padded := lipgloss.NewStyle().Padding(0, tabBarPadLeft, 0, tabBarPadLeft).MaxWidth(avail).Render(row)
-	return strings.TrimRight(padded, "\n")
 }

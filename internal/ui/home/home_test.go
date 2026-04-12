@@ -54,7 +54,15 @@ func loadedModel(t *testing.T) (Model, *db.Host) {
 	if err := gdb.Create(&h).Error; err != nil {
 		t.Fatalf("create host: %v", err)
 	}
-	m := New(gdb, nil)
+	m := New(gdb, nil, HomeKeyConfig{
+		KmCfg:        keymatch.DefaultConfig(),
+		Keys:         defaultListKeyMap(),
+		QuickConnect: []string{"q"},
+		ImportSSH:    []string{"I"},
+		ExportConfig: []string{"E"},
+		ShowHidden:   []string{"H"},
+		HideHost:     []string{"h"},
+	})
 	m.SetSize(80, 24)
 	out, cmd := m.Update(hostsLoadedMsg{hosts: []db.Host{h}})
 	m = out.(Model)
@@ -147,7 +155,8 @@ func TestHomeShortcut_FilteringEnterNotSSH(t *testing.T) {
 func TestDualPath_EnterMatchesKeyOrKeymatch(t *testing.T) {
 	m, _ := loadedModel(t)
 	msg := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
-	if !keymatch.MatchConnect(msg) && !key.Matches(msg, m.keys.SSHConnect) {
+	kmCfg := keymatch.DefaultConfig()
+	if !kmCfg.MatchConnect(msg) && !key.Matches(msg, m.keys.SSHConnect) {
 		t.Fatal("expected KeyEnter to match via keymatch or key.Matches(SSHConnect)")
 	}
 }

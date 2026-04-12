@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -25,7 +26,17 @@ func main() {
 	dbPathFlag := flag.String("c", "", "path to SQLite database file (default: ~/.config/eterm/eterm.db)")
 	portFlag := flag.Int("p", 0, "SSH port (used with direct connect: eterm [user@]host [-p port])")
 	versionFlag := flag.Bool("v", false, "print version and exit")
+	versionJSONFlag := flag.Bool("version-json", false, "print version and commit as JSON and exit")
+	noUpdateCheckFlag := flag.Bool("no-update-check", false, "disable GitHub release check on unlock")
 	flag.Parse()
+
+	if *versionJSONFlag {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{
+			"version": version.Version,
+			"commit":  version.Commit,
+		})
+		os.Exit(0)
+	}
 
 	if *versionFlag {
 		fmt.Println("eTerm " + version.Version + " (" + version.Commit + ")")
@@ -95,15 +106,17 @@ func main() {
 		}
 	}
 
+	noUpdateCheck := *noUpdateCheckFlag || os.Getenv("ETERM_NO_UPDATE_CHECK") != ""
+
 	var a app.App
 	if noPassword {
 		masterKey.UnlockNoPassword()
 		a = app.NewApp(database, masterKey).SetInitCmd(func() tea.Msg {
 			return types.MasterKeyUnlockedMsg{NoPassword: true}
-		})
+		}).SetNoUpdateCheck(noUpdateCheck)
 	} else {
 		loginModel := login.New(masterKey, isSetup)
-		a = app.NewApp(database, masterKey).SetLoginModel(loginModel)
+		a = app.NewApp(database, masterKey).SetLoginModel(loginModel).SetNoUpdateCheck(noUpdateCheck)
 	}
 
 	// CLI direct connect: eterm [user@]host[:port] [-p port]

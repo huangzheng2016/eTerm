@@ -8,6 +8,9 @@ import (
 
 type Host struct {
 	gorm.Model
+	SyncID          string     `gorm:"uniqueIndex;size:36"`
+	SyncRev         int64      `gorm:"default:0"`
+	SyncDel         bool       `gorm:"default:false"`
 	Alias           string     `gorm:"index"`
 	Hostname        string     `gorm:"not null"`
 	Port            int        `gorm:"default:22"`
@@ -40,6 +43,9 @@ type Host struct {
 
 type SSHKey struct {
 	gorm.Model
+	SyncID         string `gorm:"uniqueIndex;size:36"`
+	SyncRev        int64  `gorm:"default:0"`
+	SyncDel        bool   `gorm:"default:false"`
 	Name           string `gorm:"uniqueIndex;not null"`
 	Type           string `gorm:"not null"`
 	PrivateKeyData string
@@ -73,11 +79,16 @@ type ConnectionHistory struct {
 	Host           Host       `gorm:"foreignKey:HostID"`
 	ConnectedAt    time.Time
 	DisconnectedAt *time.Time
-	Status         string     `gorm:"default:'success'"`
+	Status         string `gorm:"default:'success'"`
+	// Transcript is optional plain-text session capture (scrollback + screen), truncated at save time.
+	Transcript string `gorm:"type:text"`
 }
 
 type Snippet struct {
 	gorm.Model
+	SyncID  string `gorm:"uniqueIndex;size:36"`
+	SyncRev int64  `gorm:"default:0"`
+	SyncDel bool   `gorm:"default:false"`
 	Name    string `gorm:"uniqueIndex;not null"`
 	Command string `gorm:"not null"`
 	Tags    string
@@ -85,6 +96,9 @@ type Snippet struct {
 
 type PortForward struct {
 	gorm.Model
+	SyncID     string `gorm:"uniqueIndex;size:36"`
+	SyncRev    int64  `gorm:"default:0"`
+	SyncDel    bool   `gorm:"default:false"`
 	HostID     uint   `gorm:"index"`
 	Host       Host   `gorm:"foreignKey:HostID"`
 	LocalPort  int    `gorm:"not null"`

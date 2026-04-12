@@ -55,3 +55,28 @@ func defaultListKeyMap() listKeyMap {
 		),
 	}
 }
+
+func helpLabel(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	if len(keys) == 1 {
+		return keys[0]
+	}
+	return keys[0] + "/" + keys[1]
+}
+
+// BuildListKeyMap constructs a listKeyMap from configurable key slices.
+func BuildListKeyMap(sshConnect, sftpOpen, newHost, editHost, deleteHost, copySSH, cloneHost, search, toggleView []string) listKeyMap {
+	return listKeyMap{
+		SSHConnect: key.NewBinding(key.WithKeys(sshConnect...), key.WithHelp(helpLabel(sshConnect), "connect")),
+		SFTPOpen:   key.NewBinding(key.WithKeys(sftpOpen...), key.WithHelp(helpLabel(sftpOpen), "sftp")),
+		NewHost:    key.NewBinding(key.WithKeys(newHost...), key.WithHelp(helpLabel(newHost), "new")),
+		EditHost:   key.NewBinding(key.WithKeys(editHost...), key.WithHelp(helpLabel(editHost), "edit")),
+		DeleteHost: key.NewBinding(key.WithKeys(deleteHost...), key.WithHelp(helpLabel(deleteHost), "delete")),
+		CopySSH:    key.NewBinding(key.WithKeys(copySSH...), key.WithHelp(helpLabel(copySSH), "copy ssh")),
+		CloneHost:  key.NewBinding(key.WithKeys(cloneHost...), key.WithHelp(helpLabel(cloneHost), "clone")),
+		Search:     key.NewBinding(key.WithKeys(search...), key.WithHelp(helpLabel(search), "search")),
+		ToggleView: key.NewBinding(key.WithKeys(toggleView...), key.WithHelp(helpLabel(toggleView), "group/tag")),
+	}
+}

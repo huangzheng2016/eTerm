@@ -1,10 +1,7 @@
 package version
 
 import (
-	"encoding/json"
-	"net/http"
 	"strings"
-	"time"
 )
 
 type githubRelease struct {
@@ -12,34 +9,11 @@ type githubRelease struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// CheckLatestRelease queries GitHub for the latest release of eTerm.
+// CheckLatestRelease queries GitHub for the latest release of eTerm (no DB throttle).
 // Returns the tag and URL if a newer version is available, or empty strings if up-to-date.
-// Errors are returned but callers should treat them as non-fatal.
 func CheckLatestRelease() (tag, url string, err error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/huangzheng2016/eTerm/releases/latest")
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", nil // no release yet or rate-limited
-	}
-
-	var rel githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return "", "", err
-	}
-
-	if rel.TagName == "" {
-		return "", "", nil
-	}
-
-	if isNewer(rel.TagName, Version) {
-		return rel.TagName, rel.HTMLURL, nil
-	}
-	return "", "", nil
+	t, u, _, err := fetchLatestRelease()
+	return t, u, err
 }
 
 // isNewer reports whether remote version is newer than local.

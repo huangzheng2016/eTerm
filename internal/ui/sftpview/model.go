@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/eterm/eterm/internal/sftp"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 type panelSide int
@@ -46,9 +47,14 @@ type Model struct {
 	// Confirmation state for delete/rename
 	confirmMsg    string       // non-empty = waiting for y/n
 	pendingAction func() tea.Cmd // action to run on 'y'
+
+	// Configurable keybindings
+	vk viewkeys.SFTPKeys
 }
 
-func New(client *sftp.Client, hostAlias string) Model {
+func (m *Model) SetViewKeys(vk viewkeys.SFTPKeys) { m.vk = vk }
+
+func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 	localDelegate := newFileDelegate()
 	localList := list.New([]list.Item{}, localDelegate, 0, 0)
 	localList.Title = "Local"
@@ -79,6 +85,7 @@ func New(client *sftp.Client, hostAlias string) Model {
 		focusedPanel: leftPanel,
 		hostAlias:    hostAlias,
 		progressCh:   make(chan sftp.TransferProgress, 64),
+		vk:           vk,
 	}
 }
 

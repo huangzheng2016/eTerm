@@ -45,9 +45,29 @@ func statusDot(s HostStatus) string {
 	}
 }
 
+func statusWord(s HostStatus) string {
+	switch s {
+	case StatusOnline:
+		return "ON"
+	case StatusOffline:
+		return "OFF"
+	default:
+		return "?"
+	}
+}
+
 // cardTitle returns the first line of a host card.
-func cardTitle(h db.Host, status HostStatus) string {
-	prefix := statusDot(status) + " [" + displayGroupName(h.Group) + "] "
+func cardTitle(h db.Host, status HostStatus, selected bool, showStatusWords bool) string {
+	selMark := " "
+	if selected {
+		selMark = "*"
+	}
+	var prefix string
+	if showStatusWords {
+		prefix = selMark + statusDot(status) + lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(" "+statusWord(status)+" ") + "[" + displayGroupName(h.Group) + "] "
+	} else {
+		prefix = selMark + statusDot(status) + " [" + displayGroupName(h.Group) + "] "
+	}
 	name := h.Alias
 	if name == "" {
 		name = h.Hostname
@@ -61,7 +81,7 @@ func cardDesc(h db.Host) string {
 }
 
 // renderGrid renders the grid of host cards for the current page.
-func renderGrid(hosts []db.Host, cursor int, gl gridLayout, width int, hostStatus map[uint]HostStatus) string {
+func renderGrid(hosts []db.Host, cursor int, gl gridLayout, width int, hostStatus map[uint]HostStatus, selected map[uint]struct{}, showStatusWords bool) string {
 	total := len(hosts)
 	if total == 0 {
 		return ""
@@ -74,7 +94,11 @@ func renderGrid(hosts []db.Host, cursor int, gl gridLayout, width int, hostStatu
 				status = s
 			}
 		}
-		cards[i] = components.RenderCard(cardTitle(h, status), cardDesc(h), i == cursor, gl.CardW)
+		sel := false
+		if selected != nil {
+			_, sel = selected[h.ID]
+		}
+		cards[i] = components.RenderCard(cardTitle(h, status, sel, showStatusWords), cardDesc(h), i == cursor, gl.CardW)
 	}
 	return components.RenderGridRows(cards, total, cursor, gl)
 }

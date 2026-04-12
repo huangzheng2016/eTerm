@@ -67,7 +67,7 @@ func (m Model) View() tea.View {
 			gridH = cardOuterH
 		}
 		gl := computeGrid(m.width, gridH)
-		return tea.NewView(header + "\n" + renderGrid(hosts, m.gridCursor, gl, m.width, m.hostStatus))
+		return tea.NewView(header + "\n" + renderGrid(hosts, m.gridCursor, gl, m.width, m.hostStatus, m.selectedHosts, m.gridStatusWords))
 	}
 
 	// Group view (default)
@@ -84,7 +84,7 @@ func (m Model) View() tea.View {
 		return tea.NewView(m.list.View())
 	}
 
-	return tea.NewView(renderGrid(hosts, m.gridCursor, m.gridLayout, m.width, m.hostStatus))
+	return tea.NewView(renderGrid(hosts, m.gridCursor, m.gridLayout, m.width, m.hostStatus, m.selectedHosts, m.gridStatusWords))
 }
 
 // centeredEmptyHint adds an optional muted shortcut line under the primary text, then centers the block.

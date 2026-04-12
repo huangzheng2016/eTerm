@@ -12,6 +12,7 @@ import (
 	"github.com/eterm/eterm/internal/keys"
 	"github.com/eterm/eterm/internal/security"
 	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 type inputMode int
@@ -53,9 +54,12 @@ type Model struct {
 	sshKeys     []db.SSHKey
 	gridCursor  int
 	gridLayout  components.GridLayout
+	vk          viewkeys.KeyViewKeys
 }
 
-func New(database *gorm.DB, masterKey *security.MasterKeyManager) Model {
+func (m *Model) SetViewKeys(vk viewkeys.KeyViewKeys) { m.vk = vk }
+
+func New(database *gorm.DB, masterKey *security.MasterKeyManager, vk viewkeys.KeyViewKeys) Model {
 	ni := textinput.New()
 	ni.Placeholder = "Key name"
 
@@ -72,6 +76,7 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager) Model {
 		typeIdx:     0,
 		step:        0,
 		mode:        modeNone,
+		vk:          vk,
 	}
 }
 

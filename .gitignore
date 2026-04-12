@@ -1,5 +1,7 @@
 # Binaries
 /eterm
+/etermsyncd
+/gendemo
 *.exe
 *.exe~
 *.dll
@@ -44,3 +46,6 @@ Thumbs.db
 # Debug / temp
 *.log
 /tmp/
+
+# Local planning notes (not committed)
+.plan/

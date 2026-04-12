@@ -8,6 +8,7 @@ import (
 
 	"github.com/eterm/eterm/internal/db"
 	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 type Model struct {
@@ -19,12 +20,16 @@ type Model struct {
 	running    map[uint]bool
 	gridCursor int
 	gridLayout components.GridLayout
+	vk         viewkeys.FwdKeys
 }
 
-func New(database *gorm.DB) Model {
+func (m *Model) SetViewKeys(vk viewkeys.FwdKeys) { m.vk = vk }
+
+func New(database *gorm.DB, vk viewkeys.FwdKeys) Model {
 	return Model{
 		db:      database,
 		running: make(map[uint]bool),
+		vk:      vk,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/eterm/eterm/internal/types"
 	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 func (m Model) Init() tea.Cmd {
@@ -61,39 +62,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "esc":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
-		case "enter":
-			if r := m.SelectedRule(); r != nil && r.ID != 0 {
-				id := r.ID
-				return m, func() tea.Msg { return types.ForwardRuleStartMsg{RuleID: id} }
-			}
-			return m, nil
-		case "x":
-			if r := m.SelectedRule(); r != nil && r.ID != 0 {
-				id := r.ID
-				return m, func() tea.Msg { return types.ForwardRuleStopMsg{RuleID: id} }
-			}
-			return m, nil
-		case "n":
-			return m, func() tea.Msg {
-				return types.NewTabMsg{Type: "fwd-editor", Title: "New Forward"}
-			}
-		case "e":
-			if r := m.SelectedRule(); r != nil && r.ID != 0 {
-				id := r.ID
-				return m, func() tea.Msg {
-					return types.NewTabMsg{Type: "fwd-editor", Title: "Edit Forward", Data: id}
+		default:
+			s := msg.String()
+			switch {
+			case viewkeys.MatchAny(s, m.vk.Start):
+				if r := m.SelectedRule(); r != nil && r.ID != 0 {
+					id := r.ID
+					return m, func() tea.Msg { return types.ForwardRuleStartMsg{RuleID: id} }
 				}
-			}
-			return m, nil
-		case "d":
-			if r := m.SelectedRule(); r != nil && r.ID != 0 {
-				id := r.ID
-				desc := ruleCardTitle(*r)
-				return m, func() tea.Msg {
-					return types.ForwardRuleDeleteRequestMsg{ID: id, Desc: desc}
+				return m, nil
+			case viewkeys.MatchAny(s, m.vk.Stop):
+				if r := m.SelectedRule(); r != nil && r.ID != 0 {
+					id := r.ID
+					return m, func() tea.Msg { return types.ForwardRuleStopMsg{RuleID: id} }
 				}
+				return m, nil
+			case viewkeys.MatchAny(s, m.vk.New):
+				return m, func() tea.Msg {
+					return types.NewTabMsg{Type: "fwd-editor", Title: "New Forward"}
+				}
+			case viewkeys.MatchAny(s, m.vk.Edit):
+				if r := m.SelectedRule(); r != nil && r.ID != 0 {
+					id := r.ID
+					return m, func() tea.Msg {
+						return types.NewTabMsg{Type: "fwd-editor", Title: "Edit Forward", Data: id}
+					}
+				}
+				return m, nil
+			case viewkeys.MatchAny(s, m.vk.Delete):
+				if r := m.SelectedRule(); r != nil && r.ID != 0 {
+					id := r.ID
+					desc := ruleCardTitle(*r)
+					return m, func() tea.Msg {
+						return types.ForwardRuleDeleteRequestMsg{ID: id, Desc: desc}
+					}
+				}
+				return m, nil
 			}
-			return m, nil
 		}
 
 	case tea.MouseClickMsg:

@@ -17,6 +17,7 @@ import (
 
 	internalssh "github.com/eterm/eterm/internal/ssh"
 	"github.com/eterm/eterm/internal/types"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 var streamIDGen atomic.Uint64
@@ -55,10 +56,15 @@ type Model struct {
 	// Scrollback view: scrollOffset > 0 means viewing history.
 	// 0 = live view (bottom of scrollback), N = N lines scrolled up.
 	scrollOffset int
+
+	// Configurable keybindings
+	vk viewkeys.SSHKeys
 }
 
+func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
+
 // New creates a model; call SetSize or rely on WindowSizeMsg. hostID is used to reconnect after a network drop.
-func New(is *internalssh.InteractiveSession, alias string, hostID uint) *Model {
+func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
 	emu := vt.NewEmulator(80, 24)
 	// Drain the emulator's input pipe so internal writes (e.g. in-band resize
 	// responses) never block emu.Write(). Without this, vi/less freeze the app.
@@ -78,6 +84,7 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint) *Model {
 		alias:    alias,
 		hostID:   hostID,
 		ch:       make(chan []byte, 128),
+		vk:       vk,
 	}
 }
 
@@ -243,7 +250,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.disconnected {
-			if msg.String() == "r" && m.hostID != 0 {
+			if viewkeys.MatchAny(msg.String(), m.vk.Reconnect) && m.hostID != 0 {
 				hid := m.hostID
 				sid := m.streamID
 				return m, func() tea.Msg {
@@ -252,8 +259,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Ctrl+Shift+S opens snippet picker
-		if msg.String() == "ctrl+shift+s" || msg.String() == "ctrl+S" {
+		// Snippet picker
+		if viewkeys.MatchAny(msg.String(), m.vk.SnippetPicker) {
 			return m, func() tea.Msg { return types.SnippetPickerRequestMsg{} }
 		}
 		// Any keypress snaps back to live view

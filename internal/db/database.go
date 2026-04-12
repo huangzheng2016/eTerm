@@ -29,6 +29,8 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	backfillSyncIDs(db)
+
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, err
@@ -36,6 +38,13 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	sqlDB.SetMaxOpenConns(1)
 
 	return db, nil
+}
+
+func backfillSyncIDs(db *gorm.DB) {
+	uuidExpr := `lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',abs(random())%4+1,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6)))`
+	for _, t := range []string{"hosts", "ssh_keys", "snippets", "port_forwards"} {
+		db.Exec("UPDATE "+t+" SET sync_id = "+uuidExpr+" WHERE sync_id = '' OR sync_id IS NULL")
+	}
 }
 
 func GetSetting(db *gorm.DB, key string) (string, error) {

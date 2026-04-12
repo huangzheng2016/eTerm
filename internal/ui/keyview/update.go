@@ -4,38 +4,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
 	"github.com/eterm/eterm/internal/keys"
 	"github.com/eterm/eterm/internal/types"
 	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
-
-type keysLoadedMsg struct {
-	keys []db.SSHKey
-	err  error
-}
-
-type keyCreatedMsg struct {
-	key *db.SSHKey
-	err error
-}
-
-type keyDeletedMsg struct {
-	err error
-}
-
-type keyImportedMsg struct {
-	key *db.SSHKey
-	err error
-}
-
-func isCtrlEnter(msg tea.KeyPressMsg) bool {
-	if msg.String() == "ctrl+enter" {
-		return true
-	}
-	k := msg.Key()
-	return k.Code == tea.KeyEnter && k.Mod.Contains(tea.ModCtrl)
-}
 
 func (m Model) Init() tea.Cmd {
 	return m.loadKeys()
@@ -100,43 +73,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "esc":
 				return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
-			case "n":
-				m.mode = modeGenerate
-				m.step = 0
-				m.nameInput.SetValue("")
-				cmd := m.nameInput.Focus()
-				return m, tea.Batch(cmd, textinput.Blink)
-			case "i":
-				m.mode = modeImport
-				m.step = 0
-				m.nameInput.SetValue("")
-				cmd := m.nameInput.Focus()
-				return m, tea.Batch(cmd, textinput.Blink)
-			case "e":
-				if k := m.SelectedKey(); k != nil {
-					database := m.db
-					mk := m.masterKey
-					keyID := k.ID
-					return m, func() tea.Msg {
-						err := keys.ExportKey(database, mk, keyID, "exported_key.pem")
-						if err != nil {
-							return types.ErrorMsg{Err: err}
+			default:
+				s := msg.String()
+				switch {
+				case viewkeys.MatchAny(s, m.vk.New):
+					m.mode = modeGenerate
+					m.step = 0
+					m.nameInput.SetValue("")
+					cmd := m.nameInput.Focus()
+					return m, tea.Batch(cmd, textinput.Blink)
+				case viewkeys.MatchAny(s, m.vk.Import):
+					m.mode = modeImport
+					m.step = 0
+					m.nameInput.SetValue("")
+					cmd := m.nameInput.Focus()
+					return m, tea.Batch(cmd, textinput.Blink)
+				case viewkeys.MatchAny(s, m.vk.Export):
+					if k := m.SelectedKey(); k != nil {
+						database := m.db
+						mk := m.masterKey
+						keyID := k.ID
+						return m, func() tea.Msg {
+							err := keys.ExportKey(database, mk, keyID, "exported_key.pem")
+							if err != nil {
+								return types.ErrorMsg{Err: err}
+							}
+							return types.SuccessMsg{Message: "Key exported to exported_key.pem"}
 						}
-						return types.SuccessMsg{Message: "Key exported to exported_key.pem"}
 					}
-				}
-			case "d":
-				if k := m.SelectedKey(); k != nil {
-					database := m.db
-					id := k.ID
-					return m, func() tea.Msg {
-						err := keys.DeleteKey(database, id)
-						return keyDeletedMsg{err: err}
+				case viewkeys.MatchAny(s, m.vk.Delete):
+					if k := m.SelectedKey(); k != nil {
+						database := m.db
+						id := k.ID
+						return m, func() tea.Msg {
+							err := keys.DeleteKey(database, id)
+							return keyDeletedMsg{err: err}
+						}
 					}
-				}
-			case "c":
-				if k := m.SelectedKey(); k != nil {
-					return m, tea.SetClipboard(k.PublicKeyData)
+				case viewkeys.MatchAny(s, m.vk.Copy):
+					if k := m.SelectedKey(); k != nil {
+						return m, tea.SetClipboard(k.PublicKeyData)
+					}
 				}
 			}
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/eterm/eterm/internal/types"
 	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 func (m *Model) Init() tea.Cmd {
@@ -44,27 +45,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "esc":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
-		case "n":
-			return m, func() tea.Msg {
-				return types.NewTabMsg{Type: "snippet-editor", Title: "New Snippet"}
-			}
-		case "e":
-			if s := m.SelectedSnippet(); s != nil && s.ID != 0 {
-				id := s.ID
+		default:
+			s := msg.String()
+			switch {
+			case viewkeys.MatchAny(s, m.vk.New):
 				return m, func() tea.Msg {
-					return types.NewTabMsg{Type: "snippet-editor", Title: "Edit Snippet", Data: id}
+					return types.NewTabMsg{Type: "snippet-editor", Title: "New Snippet"}
 				}
-			}
-			return m, nil
-		case "d":
-			if s := m.SelectedSnippet(); s != nil && s.ID != 0 {
-				id := s.ID
-				name := s.Name
-				return m, func() tea.Msg {
-					return types.SnippetDeleteRequestMsg{ID: id, Name: name}
+			case viewkeys.MatchAny(s, m.vk.Edit):
+				if sn := m.SelectedSnippet(); sn != nil && sn.ID != 0 {
+					id := sn.ID
+					return m, func() tea.Msg {
+						return types.NewTabMsg{Type: "snippet-editor", Title: "Edit Snippet", Data: id}
+					}
 				}
+				return m, nil
+			case viewkeys.MatchAny(s, m.vk.Delete):
+				if sn := m.SelectedSnippet(); sn != nil && sn.ID != 0 {
+					id := sn.ID
+					name := sn.Name
+					return m, func() tea.Msg {
+						return types.SnippetDeleteRequestMsg{ID: id, Name: name}
+					}
+				}
+				return m, nil
 			}
-			return m, nil
 		}
 
 	case tea.MouseClickMsg:

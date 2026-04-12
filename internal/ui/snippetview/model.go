@@ -6,6 +6,7 @@ import (
 
 	"github.com/eterm/eterm/internal/db"
 	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/eterm/eterm/internal/viewkeys"
 )
 
 type Model struct {
@@ -16,10 +17,13 @@ type Model struct {
 	snippets   []db.Snippet
 	gridCursor int
 	gridLayout components.GridLayout
+	vk         viewkeys.SnippetKeys
 }
 
-func New(database *gorm.DB) *Model {
-	return &Model{db: database}
+func (m *Model) SetViewKeys(vk viewkeys.SnippetKeys) { m.vk = vk }
+
+func New(database *gorm.DB, vk viewkeys.SnippetKeys) *Model {
+	return &Model{db: database, vk: vk}
 }
 
 func (m *Model) SetSize(w, h int) {

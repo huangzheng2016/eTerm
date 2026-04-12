@@ -6,53 +6,134 @@ import (
 	"strings"
 
 	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
 	"github.com/eterm/eterm/internal/sshconfig"
 	"github.com/eterm/eterm/internal/types"
 	"gorm.io/gorm"
 )
 
-func importSSHConfig(database *gorm.DB, mk *security.MasterKeyManager) types.ImportSSHConfigResultMsg {
+func sshConfigPath() string {
 	home, _ := os.UserHomeDir()
-	configPath := filepath.Join(home, ".ssh", "config")
+	return filepath.Join(home, ".ssh", "config")
+}
 
-	parsed, err := sshconfig.ParseSSHConfig(configPath)
+// CountImportConflicts returns how many parsed host blocks match an existing DB row.
+func CountImportConflicts(database *gorm.DB) (int, error) {
+	parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
+	if err != nil {
+		return 0, err
+	}
+	if len(parsed) == 0 {
+		return 0, nil
+	}
+
+	// Batch: collect all aliases for a single IN query
+	aliases := make([]string, len(parsed))
+	for i, ph := range parsed {
+		aliases[i] = ph.Alias
+	}
+	var matchedAliases []string
+	database.Model(&db.Host{}).Where("alias IN ?", aliases).Pluck("alias", &matchedAliases)
+	aliasSet := make(map[string]bool, len(matchedAliases))
+	for _, a := range matchedAliases {
+		aliasSet[a] = true
+	}
+
+	n := 0
+	for _, ph := range parsed {
+		if aliasSet[ph.Alias] {
+			n++
+			continue
+		}
+		// Fallback: check by endpoint (less common, still per-row but only for non-alias matches)
+		var count int64
+		database.Model(&db.Host{}).Where("hostname = ? AND port = ? AND username = ?",
+			ph.Hostname, ph.Port, ph.Username).Count(&count)
+		if count > 0 {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// findHostByParsed loads an existing host matching the SSH config block (alias or same endpoint).
+func findHostByParsed(database *gorm.DB, ph sshconfig.ParsedHost) (db.Host, bool) {
+	var h db.Host
+	if err := database.Where("alias = ?", ph.Alias).First(&h).Error; err == nil {
+		return h, true
+	}
+	if err := database.Where("hostname = ? AND port = ? AND username = ?", ph.Hostname, ph.Port, ph.Username).First(&h).Error; err == nil {
+		return h, true
+	}
+	return h, false
+}
+
+func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
+	host := db.Host{
+		Alias:        ph.Alias,
+		Hostname:     ph.Hostname,
+		Port:         ph.Port,
+		Username:     ph.Username,
+		AuthMethod:   "agent",
+		ProxyCommand: ph.ProxyCommand,
+	}
+	if ph.Username == "" {
+		host.Username = "root"
+	}
+	if ph.IdentFile != "" {
+		var key db.SSHKey
+		if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
+			host.AuthMethod = "key"
+			host.KeyID = &key.ID
+		}
+	}
+	return host
+}
+
+func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigResultMsg {
+	parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
 	if err != nil {
 		return types.ImportSSHConfigResultMsg{Err: err}
 	}
 
 	created := make(map[string]uint)
-
 	imported := 0
 	skipped := 0
+	overwritten := 0
+
 	for _, ph := range parsed {
-		// Skip if alias already exists
 		var count int64
 		database.Model(&db.Host{}).Where("alias = ? OR (hostname = ? AND port = ? AND username = ?)",
 			ph.Alias, ph.Hostname, ph.Port, ph.Username).Count(&count)
 		if count > 0 {
+			if strategy == "overwrite" {
+				h, ok := findHostByParsed(database, ph)
+				if !ok {
+					skipped++
+					continue
+				}
+				nh := hostFromParsed(database, ph)
+				updates := map[string]interface{}{
+					"alias":         nh.Alias,
+					"hostname":      nh.Hostname,
+					"port":          nh.Port,
+					"username":      nh.Username,
+					"auth_method":   nh.AuthMethod,
+					"proxy_command": nh.ProxyCommand,
+					"key_id":        nh.KeyID,
+				}
+				if err := database.Model(&db.Host{}).Where("id = ?", h.ID).Updates(updates).Error; err != nil {
+					skipped++
+					continue
+				}
+				overwritten++
+				created[ph.Alias] = h.ID
+				continue
+			}
 			skipped++
 			continue
 		}
 
-		host := db.Host{
-			Alias:        ph.Alias,
-			Hostname:     ph.Hostname,
-			Port:         ph.Port,
-			Username:     ph.Username,
-			AuthMethod:   "agent", // default for imported hosts
-			ProxyCommand: ph.ProxyCommand,
-		}
-
-		// If identity file specified, try to match existing key
-		if ph.IdentFile != "" {
-			var key db.SSHKey
-			if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
-				host.AuthMethod = "key"
-				host.KeyID = &key.ID
-			}
-		}
-
+		host := hostFromParsed(database, ph)
 		if err := database.Create(&host).Error; err != nil {
 			continue
 		}
@@ -65,18 +146,16 @@ func importSSHConfig(database *gorm.DB, mk *security.MasterKeyManager) types.Imp
 		if strings.TrimSpace(ph.ProxyJump) == "" {
 			continue
 		}
-		// Resolve for newly created hosts and existing hosts without a jump host.
 		var hostID uint
 		if id, ok := created[ph.Alias]; ok {
 			hostID = id
 		} else {
-			// Existing host — check if it already has a jump host set.
-			var existing db.Host
-			if err := database.Where("alias = ?", ph.Alias).First(&existing).Error; err != nil {
+			existing, ok := findHostByParsed(database, ph)
+			if !ok {
 				continue
 			}
 			if existing.JumpHostID != nil {
-				continue // already configured, don't overwrite
+				continue
 			}
 			hostID = existing.ID
 		}
@@ -101,6 +180,7 @@ func importSSHConfig(database *gorm.DB, mk *security.MasterKeyManager) types.Imp
 	return types.ImportSSHConfigResultMsg{
 		Imported:             imported,
 		Skipped:              skipped,
+		Overwritten:          overwritten,
 		UnresolvedProxyJumps: unresolved,
 	}
 }

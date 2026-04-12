@@ -5,9 +5,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	internalssh "github.com/eterm/eterm/internal/ssh"
 	"github.com/eterm/eterm/internal/db"
 	"github.com/eterm/eterm/internal/security"
+	internalssh "github.com/eterm/eterm/internal/ssh"
 	"github.com/eterm/eterm/internal/types"
 	"github.com/eterm/eterm/internal/ui/fwdview"
 	"golang.org/x/crypto/ssh"

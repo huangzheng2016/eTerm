@@ -77,6 +77,13 @@ type MasterKeyUnlockedMsg struct {
 
 type MasterKeyLockedMsg struct{}
 
+// MasterPasswordChangeMsg requests rotating the master password and re-encrypting stored secrets.
+// Current is ignored when the app is in no-password mode.
+type MasterPasswordChangeMsg struct {
+	Current string
+	New     string
+}
+
 type ErrorMsg struct {
 	Err error
 }
@@ -145,15 +152,36 @@ type QuickConnectMsg struct {
 	Username string
 }
 
-// ImportSSHConfigMsg triggers SSH config import.
-type ImportSSHConfigMsg struct{}
+// ImportSSHConfigPreviewMsg starts the import flow (conflict prompt when needed).
+type ImportSSHConfigPreviewMsg struct{}
+
+// ImportSSHConflictCountMsg reports how many ~/.ssh/config hosts already exist in DB.
+type ImportSSHConflictCountMsg struct {
+	Count int
+}
+
+// ImportSSHConfigRunMsg runs import with strategy: skip | overwrite | merge_jumps.
+type ImportSSHConfigRunMsg struct {
+	Strategy string
+}
 
 // ImportSSHConfigResultMsg reports import results.
 type ImportSSHConfigResultMsg struct {
 	Imported             int
 	Skipped              int
+	Overwritten          int
 	UnresolvedProxyJumps int
 	Err                  error
+}
+
+// OpenSessionHistoryMsg opens saved SSH session transcripts for a host.
+type OpenSessionHistoryMsg struct {
+	HostID uint
+}
+
+// BatchTagRequestMsg opens batch tag entry for the given hosts (multi-select).
+type BatchTagRequestMsg struct {
+	HostIDs []uint
 }
 
 // ExportConfigMsg triggers config export.
@@ -203,4 +231,36 @@ type CLIConnectMsg struct {
 type UpdateAvailableMsg struct {
 	Version string
 	URL     string
+}
+
+// EscMenuRequestMsg triggers the ESC menu overlay (QUIT / SETTINGS) on the home view.
+type EscMenuRequestMsg struct{}
+
+// OpenSettingsMsg requests opening the settings tab.
+type OpenSettingsMsg struct{}
+
+// KeyBindingsChangedMsg notifies that keybindings have been updated and should be reloaded.
+type KeyBindingsChangedMsg struct{}
+
+// OpenSyncMsg requests opening the sync settings tab.
+type OpenSyncMsg struct{}
+
+// SyncStartMsg triggers a manual sync operation.
+type SyncStartMsg struct{}
+
+// SyncTickMsg fires periodically to trigger auto-sync.
+type SyncTickMsg struct{}
+
+// SyncResultMsg reports the outcome of a sync operation.
+type SyncResultMsg struct {
+	Pulled int
+	Pushed int
+	Failed int
+	Err    error
+}
+
+// SyncTestResultMsg reports the outcome of a sync connection test.
+type SyncTestResultMsg struct {
+	OK  bool
+	Err error
 }

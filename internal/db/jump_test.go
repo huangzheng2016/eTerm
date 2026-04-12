@@ -16,8 +16,8 @@ func TestJumpChainPointsBackToHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := Host{Alias: "a", Hostname: "a", Port: 22, Username: "u", AuthMethod: "agent"}
-	b := Host{Alias: "b", Hostname: "b", Port: 22, Username: "u", AuthMethod: "agent"}
+	a := Host{SyncID: "test-jump-a", Alias: "a", Hostname: "a", Port: 22, Username: "u", AuthMethod: "agent"}
+	b := Host{SyncID: "test-jump-b", Alias: "b", Hostname: "b", Port: 22, Username: "u", AuthMethod: "agent"}
 	if err := d.Create(&a).Error; err != nil {
 		t.Fatal(err)
 	}

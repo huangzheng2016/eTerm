@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/eterm/eterm/internal/db"
+	"github.com/eterm/eterm/internal/keymatch"
 	"github.com/eterm/eterm/internal/security"
 	"gorm.io/gorm"
 )
@@ -69,7 +70,7 @@ type tagItem struct {
 
 func (t tagItem) FilterValue() string { return t.name }
 func (t tagItem) Title() string       { return t.name }
-func (t tagItem) Description() string  { return fmt.Sprintf("%d hosts", t.count) }
+func (t tagItem) Description() string { return fmt.Sprintf("%d hosts", t.count) }
 
 type Model struct {
 	list         list.Model
@@ -98,9 +99,42 @@ type Model struct {
 
 	// Host online status (from TCP probe)
 	hostStatus map[uint]HostStatus
+
+	// Configurable keymatch config
+	kmCfg keymatch.Config
+
+	// Configurable home-specific keys
+	quickConnectKeys   []string
+	importSSHKeys      []string
+	exportConfigKeys   []string
+	showHiddenKeys     []string
+	hideHostKeys       []string
+	sessionHistoryKeys []string
+	toggleSelectKeys   []string
+	batchTagKeys       []string
+
+	// Multi-select (grid) for batch tag
+	selectedHosts map[uint]struct{}
+
+	// Grid status line: ON/OFF/? text next to probe dot (opt-in via app_settings grid_status_words).
+	gridStatusWords bool
 }
 
-func New(database *gorm.DB, masterKey *security.MasterKeyManager) Model {
+// HomeKeyConfig holds all configurable keys for the home view.
+type HomeKeyConfig struct {
+	KmCfg          keymatch.Config
+	Keys           listKeyMap
+	QuickConnect   []string
+	ImportSSH      []string
+	ExportConfig   []string
+	ShowHidden     []string
+	HideHost       []string
+	SessionHistory []string
+	ToggleSelect   []string
+	BatchTag       []string
+}
+
+func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyConfig) Model {
 	delegate := list.NewDefaultDelegate()
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.SetShowTitle(false)
@@ -114,13 +148,38 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager) Model {
 	l.KeyMap.NextPage = key.NewBinding(key.WithKeys("pgdown"))
 	l.KeyMap.PrevPage = key.NewBinding(key.WithKeys("pgup"))
 	return Model{
-		list:         l,
-		keys:         defaultListKeyMap(),
-		db:           database,
-		masterKey:    masterKey,
-		lastClickIdx: -1,
-		tagList:      newTagList(),
+		list:               l,
+		keys:               hkc.Keys,
+		db:                 database,
+		masterKey:          masterKey,
+		lastClickIdx:       -1,
+		tagList:            newTagList(),
+		kmCfg:              hkc.KmCfg,
+		quickConnectKeys:   hkc.QuickConnect,
+		importSSHKeys:      hkc.ImportSSH,
+		exportConfigKeys:   hkc.ExportConfig,
+		showHiddenKeys:     hkc.ShowHidden,
+		hideHostKeys:       hkc.HideHost,
+		sessionHistoryKeys: hkc.SessionHistory,
+		toggleSelectKeys:   hkc.ToggleSelect,
+		batchTagKeys:       hkc.BatchTag,
+		selectedHosts:      make(map[uint]struct{}),
 	}
+}
+
+// WithUpdatedKeys returns a copy of the model with updated keybinding configuration.
+func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
+	m.keys = hkc.Keys
+	m.kmCfg = hkc.KmCfg
+	m.quickConnectKeys = hkc.QuickConnect
+	m.importSSHKeys = hkc.ImportSSH
+	m.exportConfigKeys = hkc.ExportConfig
+	m.showHiddenKeys = hkc.ShowHidden
+	m.hideHostKeys = hkc.HideHost
+	m.sessionHistoryKeys = hkc.SessionHistory
+	m.toggleSelectKeys = hkc.ToggleSelect
+	m.batchTagKeys = hkc.BatchTag
+	return m
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -163,6 +222,29 @@ func (m Model) SelectedHost() *db.Host {
 		idx = 0
 	}
 	return &hosts[idx]
+}
+
+func readGridStatusWords(database *gorm.DB) bool {
+	s, err := db.GetSetting(database, "grid_status_words")
+	if err != nil {
+		return false
+	}
+	return s == "true"
+}
+
+func (m Model) batchHostIDs() []uint {
+	if len(m.selectedHosts) > 0 {
+		out := make([]uint, 0, len(m.selectedHosts))
+		for id := range m.selectedHosts {
+			out = append(out, id)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+		return out
+	}
+	if h := m.SelectedHost(); h != nil {
+		return []uint{h.ID}
+	}
+	return nil
 }
 
 func (m Model) loadHosts() tea.Cmd {
