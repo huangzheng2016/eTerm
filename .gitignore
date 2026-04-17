@@ -47,5 +47,8 @@ Thumbs.db
 *.log
 /tmp/
 
+# Go build cache (e.g. GOCACHE=$PWD/.gocache)
+.gocache/
+
 # Local planning notes (not committed)
 .plan/

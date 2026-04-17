@@ -68,25 +68,60 @@ func findHostByParsed(database *gorm.DB, ph sshconfig.ParsedHost) (db.Host, bool
 }
 
 func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
+	var keyID *uint
+	if ph.IdentFile != "" {
+		var key db.SSHKey
+		if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
+			id := key.ID
+			keyID = &id
+		}
+	}
+
+	authMethod, gssapiSource := importedAuthFromParsed(ph, keyID != nil)
+	if authMethod != "key" {
+		keyID = nil
+	}
+
 	host := db.Host{
 		Alias:        ph.Alias,
 		Hostname:     ph.Hostname,
 		Port:         ph.Port,
 		Username:     ph.Username,
-		AuthMethod:   "agent",
+		AuthMethod:   authMethod,
+		KeyID:        keyID,
 		ProxyCommand: ph.ProxyCommand,
+		GSSAPISource: gssapiSource,
+		GSSAPIKeytab: "",
+		KrbPrincipal: "",
 	}
 	if ph.Username == "" {
 		host.Username = "root"
 	}
-	if ph.IdentFile != "" {
-		var key db.SSHKey
-		if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
-			host.AuthMethod = "key"
-			host.KeyID = &key.ID
+	return host
+}
+
+func importedAuthFromParsed(ph sshconfig.ParsedHost, hasKey bool) (string, string) {
+	for _, pref := range ph.PreferredAuthentications {
+		switch strings.ToLower(strings.TrimSpace(pref)) {
+		case "gssapi-with-mic":
+			return "gssapi", "ccache"
+		case "publickey":
+			if hasKey {
+				return "key", ""
+			}
+		case "keyboard-interactive":
+			return "interactive", ""
+		case "password":
+			return "password", ""
 		}
 	}
-	return host
+	if ph.GSSAPIAuthentication {
+		return "gssapi", "ccache"
+	}
+	if hasKey {
+		return "key", ""
+	}
+	return "agent", ""
 }
 
 func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigResultMsg {
@@ -120,6 +155,9 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 					"auth_method":   nh.AuthMethod,
 					"proxy_command": nh.ProxyCommand,
 					"key_id":        nh.KeyID,
+					"gssapi_source": nh.GSSAPISource,
+					"gssapi_keytab": nh.GSSAPIKeytab,
+					"krb_principal": nh.KrbPrincipal,
 				}
 				if err := database.Model(&db.Host{}).Where("id = ?", h.ID).Updates(updates).Error; err != nil {
 					skipped++

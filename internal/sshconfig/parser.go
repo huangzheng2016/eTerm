@@ -10,13 +10,15 @@ import (
 
 // ParsedHost represents a single Host block from ~/.ssh/config.
 type ParsedHost struct {
-	Alias        string
-	Hostname     string
-	Port         int
-	Username     string
-	IdentFile    string
-	ProxyJump    string
-	ProxyCommand string
+	Alias                    string
+	Hostname                 string
+	Port                     int
+	Username                 string
+	IdentFile                string
+	ProxyJump                string
+	ProxyCommand             string
+	GSSAPIAuthentication     bool
+	PreferredAuthentications []string
 }
 
 // ParseSSHConfig reads and parses an SSH config file.
@@ -84,6 +86,10 @@ func ParseSSHConfig(path string) ([]ParsedHost, error) {
 			current.ProxyJump = val
 		case "proxycommand":
 			current.ProxyCommand = val
+		case "gssapiauthentication":
+			current.GSSAPIAuthentication = parseSSHBool(val)
+		case "preferredauthentications":
+			current.PreferredAuthentications = splitCSV(val)
 		}
 	}
 
@@ -103,4 +109,25 @@ func expandPath(p string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
+}
+
+func parseSSHBool(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "yes", "true", "on", "1":
+		return true
+	default:
+		return false
+	}
+}
+
+func splitCSV(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
