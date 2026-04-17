@@ -8,6 +8,7 @@ type SFTPKeys struct {
 	Delete     []string
 	Mkdir      []string
 	Rename     []string
+	Chmod      []string
 	SwitchLeft []string
 	SwitchRight []string
 }

@@ -61,6 +61,9 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 			GSSAPIKeytab:  dto.GSSAPIKeytab,
 			KrbPrincipal:  dto.KrbPrincipal,
 			ProxyCommand:  dto.ProxyCommand,
+			ForwardAgent:  dto.ForwardAgent,
+			RemoteCommand: dto.RemoteCommand,
+			ExtraSSHOptions: dto.ExtraSSHOptions,
 			KeyID:         resolveLocalID(database, "ssh_keys", dto.KeySyncID),
 		}
 		if ea.err != nil {

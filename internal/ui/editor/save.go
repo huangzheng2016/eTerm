@@ -8,6 +8,7 @@ import (
 
 	"github.com/eterm/eterm/internal/db"
 	"github.com/eterm/eterm/internal/security"
+	"github.com/eterm/eterm/internal/sshconfig"
 	"github.com/eterm/eterm/internal/types"
 )
 
@@ -124,28 +125,38 @@ func (m Model) save() tea.Cmd {
 	if m.proxyTypeIdx == 0 {
 		proxyCommand = strings.TrimSpace(m.inputs[inputIndexForField(proxyCommandField)].Value())
 	}
+	forwardAgent := boolOptions[m.forwardAgentIdx]
+	remoteCommand := strings.TrimSpace(m.remoteCommand.Value())
+	extraSSHOptions := strings.TrimSpace(m.extraOptions.Value())
+	if err := sshconfig.ValidateExtraOptions(extraSSHOptions); err != nil {
+		m.err = err.Error()
+		return nil
+	}
 
 	host := db.Host{
-		Alias:         m.inputs[inputIndexForField(aliasField)].Value(),
-		Hostname:      hostname,
-		Port:          port,
-		Username:      m.inputs[inputIndexForField(usernameField)].Value(),
-		AuthMethod:    authMethod,
-		Password:      encryptedPassword,
-		KeyID:         keyID,
-		Group:         m.inputs[inputIndexForField(groupField)].Value(),
-		Tags:          m.inputs[inputIndexForField(tagsField)].Value(),
-		Description:   m.inputs[inputIndexForField(descriptionField)].Value(),
-		JumpHostID:    jumpHostID,
-		ProxyType:     proxyType,
-		ProxyHost:     proxyHost,
-		ProxyPort:     proxyPort,
-		ProxyUser:     proxyUser,
-		ProxyPassword: proxyPassEnc,
-		ProxyCommand:  proxyCommand,
-		GSSAPISource:  gssapiSource,
-		GSSAPIKeytab:  gssapiKeytab,
-		KrbPrincipal:  krbPrincipal,
+		Alias:           m.inputs[inputIndexForField(aliasField)].Value(),
+		Hostname:        hostname,
+		Port:            port,
+		Username:        m.inputs[inputIndexForField(usernameField)].Value(),
+		AuthMethod:      authMethod,
+		Password:        encryptedPassword,
+		KeyID:           keyID,
+		Group:           m.inputs[inputIndexForField(groupField)].Value(),
+		Tags:            m.inputs[inputIndexForField(tagsField)].Value(),
+		Description:     m.inputs[inputIndexForField(descriptionField)].Value(),
+		JumpHostID:      jumpHostID,
+		ProxyType:       proxyType,
+		ProxyHost:       proxyHost,
+		ProxyPort:       proxyPort,
+		ProxyUser:       proxyUser,
+		ProxyPassword:   proxyPassEnc,
+		ProxyCommand:    proxyCommand,
+		GSSAPISource:    gssapiSource,
+		GSSAPIKeytab:    gssapiKeytab,
+		KrbPrincipal:    krbPrincipal,
+		ForwardAgent:    forwardAgent,
+		RemoteCommand:   remoteCommand,
+		ExtraSSHOptions: extraSSHOptions,
 	}
 
 	database := m.db

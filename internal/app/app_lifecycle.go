@@ -292,9 +292,25 @@ func (a *App) processConfirmResult() tea.Cmd {
 				}
 			}
 		}
+		if fp.ConnType == "quick" {
+			a.pendingQuickConnect = nil
+		}
 		return func() tea.Msg {
 			return types.SuccessMsg{Message: "Connection cancelled"}
 		}
+	}
+
+	if len(a.pendingBatchOpenHosts) > 0 {
+		hosts := append([]uint(nil), a.pendingBatchOpenHosts...)
+		a.pendingBatchOpenHosts = nil
+		if confirmed {
+			cmds := make([]tea.Cmd, 0, len(hosts))
+			for _, hostID := range hosts {
+				cmds = append(cmds, a.batchConnectHostCmd(hostID, ""))
+			}
+			return tea.Batch(cmds...)
+		}
+		return nil
 	}
 
 	return nil

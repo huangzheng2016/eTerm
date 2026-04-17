@@ -32,10 +32,13 @@ func keyCardTitle(name string) string {
 	return name
 }
 
-func keyCardDesc(keyType, fingerprint string) string {
+func keyCardDesc(keyType, fingerprint, certificatePath string) string {
 	fp := fingerprint
 	if len(fp) > 20 {
 		fp = fp[:20] + "…"
+	}
+	if certificatePath != "" {
+		return fmt.Sprintf("%s cert %s", keyType, fp)
 	}
 	return fmt.Sprintf("%s %s", keyType, fp)
 }
@@ -64,7 +67,7 @@ func (m Model) View() tea.View {
 
 	cards := make([]string, len(m.sshKeys))
 	for i, k := range m.sshKeys {
-		cards[i] = components.RenderCard(keyCardTitle(k.Name), keyCardDesc(k.Type, k.Fingerprint), i == m.gridCursor, m.gridLayout.CardW)
+		cards[i] = components.RenderCard(keyCardTitle(k.Name), keyCardDesc(k.Type, k.Fingerprint, k.CertificatePath), i == m.gridCursor, m.gridLayout.CardW)
 	}
 	grid := components.RenderGridRows(cards, len(m.sshKeys), m.gridCursor, m.gridLayout)
 	return tea.NewView(m.maybeOverlay(grid))
@@ -128,6 +131,16 @@ func (m Model) renderImportOverlay() string {
 			title,
 			"Name:",
 			m.nameInput.View(),
+			overlayHintStyle.Render("Enter: next  Esc: cancel"),
+		)
+		return overlayBoxStyle.Width(boxW).Render(content)
+	}
+
+	if m.step == 1 {
+		content := lipgloss.JoinVertical(lipgloss.Left,
+			title,
+			"Certificate path (optional):",
+			m.certPathInput.View(),
 			overlayHintStyle.Render("Enter: next  Esc: cancel"),
 		)
 		return overlayBoxStyle.Width(boxW).Render(content)

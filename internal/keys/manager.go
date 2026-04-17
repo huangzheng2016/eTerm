@@ -114,13 +114,13 @@ func ImportKey(database *gorm.DB, masterKey *security.MasterKeyManager, name, pr
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key: %w", err)
 	}
-	return importPrivateKeyRecord(database, masterKey, name, pemData, storageMode, privatePath)
+	return importPrivateKeyRecord(database, masterKey, name, pemData, storageMode, privatePath, detectCertificatePath(privatePath, ""))
 }
 
 // importPrivateKeyRecord persists an imported key. When storageMode is "file" and
 // sourcePathWhenFile is non-empty, that path is stored as the key location (existing file).
 // When sourcePathWhenFile is empty with "file" mode, PEM is written under ~/.ssh (same as generate).
-func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyManager, name string, pemData []byte, storageMode, sourcePathWhenFile string) (*db.SSHKey, error) {
+func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyManager, name string, pemData []byte, storageMode, sourcePathWhenFile, certificatePath string) (*db.SSHKey, error) {
 	signer, err := ssh.ParsePrivateKey(pemData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
@@ -137,6 +137,7 @@ func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyMana
 		PublicKeyData: publicKeyStr,
 		Fingerprint:   fingerprint,
 		StorageMode:   storageMode,
+		CertificatePath: certificatePath,
 	}
 
 	switch storageMode {
@@ -183,6 +184,20 @@ func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyMana
 	}
 
 	return &sshKey, nil
+}
+
+func detectCertificatePath(privatePath, explicit string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return strings.TrimSpace(explicit)
+	}
+	if strings.TrimSpace(privatePath) == "" {
+		return ""
+	}
+	candidate := privatePath + "-cert.pub"
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
 }
 
 func ExportKey(database *gorm.DB, masterKey *security.MasterKeyManager, keyID uint, outputPath string) error {

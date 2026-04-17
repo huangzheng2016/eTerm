@@ -8,6 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+const formContentOffsetY = 2
+
 var (
 	labelStyle = lipgloss.NewStyle().
 			Width(14).
@@ -35,112 +37,160 @@ var (
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF0000")).
-			Bold(true).
-			MarginTop(1)
+			Bold(true)
 
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7D56F4")).
-			MarginBottom(1)
+			Foreground(lipgloss.Color("#7D56F4"))
 
 	footerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#999")).
-			MarginTop(1)
+			Foreground(lipgloss.Color("#999"))
+
+	actionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#111")).
+			Background(lipgloss.Color("#7D56F4")).
+			Bold(true).
+			Padding(0, 1)
+
+	actionAltStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#ddd")).
+			Background(lipgloss.Color("#444")).
+			Bold(true).
+			Padding(0, 1)
 
 	formStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#7D56F4")).
 			Padding(1, 3).
 			Width(60)
+
+	overlayStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7D56F4")).
+			Padding(1, 3).
+			Width(72)
 )
 
 func (m Model) View() tea.View {
-	var title string
-	if m.host != nil && m.host.ID > 0 {
-		title = titleStyle.Render("Edit Host")
+	var box string
+	if m.advancedActive {
+		box, _, _ = m.renderAdvancedOverlay()
 	} else {
-		title = titleStyle.Render("New Host")
+		box, _, _ = m.renderMainForm()
 	}
-
-	vf := m.visibleFields()
-	rows := make([]string, 0, len(vf)+4)
-	rows = append(rows, title)
-	rows = append(rows, "")
-
-	for vi, field := range vf {
-		focused := vi == m.focused
-		lbl := fieldLabels[field]
-		ls := labelStyle
-		if focused {
-			ls = focusedLabelStyle
-		}
-		label := ls.Render(lbl)
-
-		var value string
-		switch field {
-		case authMethodField:
-			value = m.renderSelector(authOptions[m.authIdx], focused)
-		case proxyTypeField:
-			value = m.renderSelector(proxyDisplay[m.proxyTypeIdx], focused)
-		case gssapiSourceField:
-			value = m.renderSelector(gssapiSourceDisplay[m.gssapiSourceIdx], focused)
-		case keyIDField:
-			name := "(none)"
-			hint := ""
-			if m.keyIdx >= 0 && m.keyIdx < len(m.keyOptions) {
-				k := m.keyOptions[m.keyIdx]
-				name = k.Name
-				if len(name) > 28 {
-					name = name[:27] + "…"
-				}
-				fp := k.Fingerprint
-				if len(fp) > 44 {
-					fp = fp[:43] + "…"
-				}
-				hint = k.Type + " " + fp
-			}
-			value = m.renderSelector(name, focused)
-			if hint != "" {
-				rows = append(rows, fmt.Sprintf("%s %s", label, value))
-				hintStyled := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(hint)
-				rows = append(rows, hintStyled)
-				continue
-			}
-		case jumpHostField:
-			name := "(none)"
-			if m.jumpIdx >= 0 && m.jumpIdx < len(m.jumpHostOptions) {
-				jh := m.jumpHostOptions[m.jumpIdx]
-				label := strings.TrimSpace(jh.Alias)
-				if label == "" {
-					label = jh.Hostname
-				}
-				name = label
-			}
-			value = m.renderSelector(name, focused)
-		default:
-			idx := inputIndexForField(field)
-			if idx >= 0 {
-				value = m.inputs[idx].View()
-			}
-		}
-
-		rows = append(rows, fmt.Sprintf("%s %s", label, value))
-	}
-
-	if m.err != "" {
-		rows = append(rows, errorStyle.Render(fmt.Sprintf("\u26a0 %s", m.err)))
-	}
-
-	rows = append(rows, footerStyle.Render("Tab/\u2193:next | Shift+Tab/\u2191:prev | \u2190\u2192:select | Ctrl+S:save | Esc:cancel"))
-
-	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	box := formStyle.Render(content)
-
 	if m.width > 0 && m.height > 0 {
 		box = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 	}
-
 	return tea.NewView(box)
+}
+
+func (m Model) renderMainForm() (string, []fieldSpan, int) {
+	title := "New Host"
+	if m.host != nil && m.host.ID > 0 {
+		title = "Edit Host"
+	}
+	contentRows := []string{titleStyle.Render(title), ""}
+	fieldRows, spans := m.renderFields(m.mainVisibleFields(), m.focused, len(contentRows))
+	contentRows = append(contentRows, fieldRows...)
+	contentRows = append(contentRows, "")
+	actionY := len(contentRows) + formContentOffsetY
+	contentRows = append(contentRows, m.renderActionRow("Save", "Cancel"))
+	if m.err != "" {
+		contentRows = append(contentRows, errorStyle.Render("! "+m.err))
+	}
+	contentRows = append(contentRows, footerStyle.Render("Tab next | A advanced | Ctrl+S save | Esc cancel | click fields/buttons"))
+	return formStyle.Render(lipgloss.JoinVertical(lipgloss.Left, contentRows...)), spans, actionY
+}
+
+func (m Model) renderAdvancedOverlay() (string, []fieldSpan, int) {
+	contentRows := []string{
+		titleStyle.Render("Advanced SSH"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("Proxy, agent forwarding, remote command, raw options"),
+		"",
+	}
+	fieldRows, spans := m.renderFields(m.advancedVisibleFields(), m.advancedFocused, len(contentRows))
+	contentRows = append(contentRows, fieldRows...)
+	contentRows = append(contentRows, "")
+	actionY := len(contentRows) + formContentOffsetY
+	contentRows = append(contentRows, m.renderActionRow("Back", "Save"))
+	if m.err != "" {
+		contentRows = append(contentRows, errorStyle.Render("! "+m.err))
+	}
+	contentRows = append(contentRows, footerStyle.Render("Tab next | Ctrl+S save | Esc back | click outside closes"))
+	return overlayStyle.Render(lipgloss.JoinVertical(lipgloss.Left, contentRows...)), spans, actionY
+}
+
+func (m Model) renderFields(fields []int, focusedIndex, startRow int) ([]string, []fieldSpan) {
+	rows := make([]string, 0, len(fields)+4)
+	spans := make([]fieldSpan, 0, len(fields))
+	currentRow := startRow
+	for i, field := range fields {
+		lines := m.renderFieldLines(field, i == focusedIndex)
+		rows = append(rows, lines...)
+		spans = append(spans, fieldSpan{
+			field:  field,
+			startY: currentRow + formContentOffsetY,
+			endY:   currentRow + len(lines) - 1 + formContentOffsetY,
+		})
+		currentRow += len(lines)
+	}
+	return rows, spans
+}
+
+func (m Model) renderFieldLines(field int, focused bool) []string {
+	ls := labelStyle
+	if focused {
+		ls = focusedLabelStyle
+	}
+	label := ls.Render(fieldLabels[field])
+
+	switch field {
+	case authMethodField:
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector(authOptions[m.authIdx], focused))}
+	case proxyTypeField:
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector(proxyDisplay[m.proxyTypeIdx], focused))}
+	case gssapiSourceField:
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector(gssapiSourceDisplay[m.gssapiSourceIdx], focused))}
+	case forwardAgentField:
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector(boolDisplay[m.forwardAgentIdx], focused))}
+	case keyIDField:
+		name := "(none)"
+		if m.keyIdx >= 0 && m.keyIdx < len(m.keyOptions) {
+			name = m.keyOptions[m.keyIdx].Name
+		}
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector(name, focused))}
+	case jumpHostField:
+		name := "(none)"
+		if m.jumpIdx >= 0 && m.jumpIdx < len(m.jumpHostOptions) {
+			h := m.jumpHostOptions[m.jumpIdx]
+			name = strings.TrimSpace(h.Alias)
+			if name == "" {
+				name = h.Hostname
+			}
+		}
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector(name, focused))}
+	case advancedField:
+		return []string{fmt.Sprintf("%s %s", label, m.renderSelector("Edit ("+m.advancedSummary()+")", focused))}
+	case remoteCommandField:
+		return append([]string{label}, strings.Split(strings.TrimRight(m.remoteCommand.View(), "\n"), "\n")...)
+	case extraOptionsField:
+		return append([]string{label}, strings.Split(strings.TrimRight(m.extraOptions.View(), "\n"), "\n")...)
+	default:
+		idx := inputIndexForField(field)
+		if idx >= 0 {
+			return []string{fmt.Sprintf("%s %s", label, m.inputs[idx].View())}
+		}
+		return []string{label}
+	}
+}
+
+func (m Model) renderActionRow(left, right string) string {
+	return lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		actionStyle.Render(left),
+		"  ",
+		actionAltStyle.Render(right),
+	)
 }
 
 func (m Model) renderSelector(text string, focused bool) string {

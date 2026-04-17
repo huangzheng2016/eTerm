@@ -124,12 +124,14 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Home", "Session Log", "session_history"},
 		{"Home", "Toggle Select", "toggle_select"},
 		{"Home", "Batch Tag", "batch_tag"},
+		{"Home", "Batch Actions", "batch_actions"},
 		// SFTP
 		{"SFTP", "Upload", "sftp_upload"},
 		{"SFTP", "Download", "sftp_download"},
 		{"SFTP", "Delete", "sftp_delete"},
 		{"SFTP", "Mkdir", "sftp_mkdir"},
 		{"SFTP", "Rename", "sftp_rename"},
+		{"SFTP", "Chmod", "sftp_chmod"},
 		{"SFTP", "Switch Left", "sftp_switch_left"},
 		{"SFTP", "Switch Right", "sftp_switch_right"},
 		// Keys

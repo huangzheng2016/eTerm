@@ -1,8 +1,6 @@
 package app
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/eterm/eterm/internal/db"
@@ -12,8 +10,7 @@ import (
 )
 
 func sshConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".ssh", "config")
+	return sshconfig.MainConfigPath()
 }
 
 // CountImportConflicts returns how many parsed host blocks match an existing DB row.
@@ -69,7 +66,14 @@ func findHostByParsed(database *gorm.DB, ph sshconfig.ParsedHost) (db.Host, bool
 
 func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
 	var keyID *uint
-	if ph.IdentFile != "" {
+	if ph.KeyName != "" {
+		var key db.SSHKey
+		if err := database.Where("name = ?", ph.KeyName).First(&key).Error; err == nil {
+			id := key.ID
+			keyID = &id
+		}
+	}
+	if keyID == nil && ph.IdentFile != "" {
 		var key db.SSHKey
 		if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
 			id := key.ID
@@ -83,16 +87,26 @@ func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
 	}
 
 	host := db.Host{
-		Alias:        ph.Alias,
-		Hostname:     ph.Hostname,
-		Port:         ph.Port,
-		Username:     ph.Username,
-		AuthMethod:   authMethod,
-		KeyID:        keyID,
-		ProxyCommand: ph.ProxyCommand,
-		GSSAPISource: gssapiSource,
-		GSSAPIKeytab: "",
-		KrbPrincipal: "",
+		Alias:           ph.Alias,
+		Hostname:        ph.Hostname,
+		Port:            ph.Port,
+		Username:        ph.Username,
+		AuthMethod:      authMethod,
+		KeyID:           keyID,
+		Group:           ph.Group,
+		Tags:            ph.Tags,
+		Description:     ph.Description,
+		ProxyType:       ph.ProxyType,
+		ProxyHost:       ph.ProxyHost,
+		ProxyPort:       ph.ProxyPort,
+		ProxyUser:       ph.ProxyUser,
+		ProxyCommand:    ph.ProxyCommand,
+		GSSAPISource:    gssapiSource,
+		GSSAPIKeytab:    ph.GSSAPIKeytab,
+		KrbPrincipal:    ph.KrbPrincipal,
+		ForwardAgent:    ph.ForwardAgent,
+		RemoteCommand:   ph.RemoteCommand,
+		ExtraSSHOptions: ph.ExtraSSHOptions,
 	}
 	if ph.Username == "" {
 		host.Username = "root"
@@ -101,6 +115,22 @@ func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
 }
 
 func importedAuthFromParsed(ph sshconfig.ParsedHost, hasKey bool) (string, string) {
+	if ph.AuthMethod != "" {
+		switch ph.AuthMethod {
+		case "gssapi":
+			src := ph.GSSAPISource
+			if src == "" {
+				src = "ccache"
+			}
+			return "gssapi", src
+		case "key":
+			if hasKey {
+				return "key", ""
+			}
+		case "password", "interactive", "agent":
+			return ph.AuthMethod, ""
+		}
+	}
 	for _, pref := range ph.PreferredAuthentications {
 		switch strings.ToLower(strings.TrimSpace(pref)) {
 		case "gssapi-with-mic":
@@ -148,16 +178,26 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 				}
 				nh := hostFromParsed(database, ph)
 				updates := map[string]interface{}{
-					"alias":         nh.Alias,
-					"hostname":      nh.Hostname,
-					"port":          nh.Port,
-					"username":      nh.Username,
-					"auth_method":   nh.AuthMethod,
-					"proxy_command": nh.ProxyCommand,
-					"key_id":        nh.KeyID,
-					"gssapi_source": nh.GSSAPISource,
-					"gssapi_keytab": nh.GSSAPIKeytab,
-					"krb_principal": nh.KrbPrincipal,
+					"alias":             nh.Alias,
+					"hostname":          nh.Hostname,
+					"port":              nh.Port,
+					"username":          nh.Username,
+					"auth_method":       nh.AuthMethod,
+					"key_id":            nh.KeyID,
+					"group":             nh.Group,
+					"tags":              nh.Tags,
+					"description":       nh.Description,
+					"proxy_type":        nh.ProxyType,
+					"proxy_host":        nh.ProxyHost,
+					"proxy_port":        nh.ProxyPort,
+					"proxy_user":        nh.ProxyUser,
+					"proxy_command":     nh.ProxyCommand,
+					"gssapi_source":     nh.GSSAPISource,
+					"gssapi_keytab":     nh.GSSAPIKeytab,
+					"krb_principal":     nh.KrbPrincipal,
+					"forward_agent":     nh.ForwardAgent,
+					"remote_command":    nh.RemoteCommand,
+					"extra_ssh_options": nh.ExtraSSHOptions,
 				}
 				if err := database.Model(&db.Host{}).Where("id = ?", h.ID).Updates(updates).Error; err != nil {
 					skipped++

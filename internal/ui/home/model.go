@@ -112,6 +112,7 @@ type Model struct {
 	sessionHistoryKeys []string
 	toggleSelectKeys   []string
 	batchTagKeys       []string
+	batchActionKeys    []string
 
 	// Multi-select (grid) for batch tag
 	selectedHosts map[uint]struct{}
@@ -132,6 +133,7 @@ type HomeKeyConfig struct {
 	SessionHistory []string
 	ToggleSelect   []string
 	BatchTag       []string
+	BatchActions   []string
 }
 
 func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyConfig) Model {
@@ -163,6 +165,7 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 		sessionHistoryKeys: hkc.SessionHistory,
 		toggleSelectKeys:   hkc.ToggleSelect,
 		batchTagKeys:       hkc.BatchTag,
+		batchActionKeys:    hkc.BatchActions,
 		selectedHosts:      make(map[uint]struct{}),
 	}
 }
@@ -179,6 +182,7 @@ func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
 	m.sessionHistoryKeys = hkc.SessionHistory
 	m.toggleSelectKeys = hkc.ToggleSelect
 	m.batchTagKeys = hkc.BatchTag
+	m.batchActionKeys = hkc.BatchActions
 	return m
 }
 
@@ -245,6 +249,40 @@ func (m Model) batchHostIDs() []uint {
 		return []uint{h.ID}
 	}
 	return nil
+}
+
+func (m Model) batchActionHostIDs() []uint {
+	if len(m.selectedHosts) > 0 {
+		return m.batchHostIDs()
+	}
+	if m.mode == tagView && m.selectedTag != "" {
+		hosts := m.gridHosts()
+		out := make([]uint, 0, len(hosts))
+		for _, h := range hosts {
+			out = append(out, h.ID)
+		}
+		return out
+	}
+	h := m.SelectedHost()
+	if h == nil {
+		return nil
+	}
+	group := strings.TrimSpace(h.Group)
+	if group == "" {
+		return []uint{h.ID}
+	}
+	all := m.filterHidden(m.allHosts)
+	var out []uint
+	for _, cand := range all {
+		if strings.TrimSpace(cand.Group) == group {
+			out = append(out, cand.ID)
+		}
+	}
+	if len(out) == 0 {
+		return []uint{h.ID}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 func (m Model) loadHosts() tea.Cmd {

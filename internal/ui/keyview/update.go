@@ -86,6 +86,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = modeImport
 					m.step = 0
 					m.nameInput.SetValue("")
+					m.certPathInput.SetValue("")
 					cmd := m.nameInput.Focus()
 					return m, tea.Batch(cmd, textinput.Blink)
 				case viewkeys.MatchAny(s, m.vk.Export):
@@ -180,9 +181,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.step = 1
 					m.nameInput.Blur()
-					m.keyPaste.SetValue("")
-					m.syncKeyPasteSize()
-					cmd := m.keyPaste.Focus()
+					m.certPathInput.SetValue("")
+					cmd := m.certPathInput.Focus()
 					return m, cmd
 				}
 				var cmd tea.Cmd
@@ -190,16 +190,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			if m.step == 1 {
+				switch msg.String() {
+				case "enter":
+					m.step = 2
+					m.certPathInput.Blur()
+					m.keyPaste.SetValue("")
+					m.syncKeyPasteSize()
+					cmd := m.keyPaste.Focus()
+					return m, cmd
+				}
+				var cmd tea.Cmd
+				m.certPathInput, cmd = m.certPathInput.Update(msg)
+				return m, cmd
+			}
+			if m.step == 2 {
 				if isCtrlEnter(msg) {
 					raw := m.keyPaste.Value()
 					if raw == "" {
 						return m, nil
 					}
 					name := m.nameInput.Value()
+					certPath := m.certPathInput.Value()
 					database := m.db
 					masterKey := m.masterKey
 					return m, func() tea.Msg {
-						key, err := keys.ImportKeyFromUserInput(database, masterKey, name, raw, "database")
+						key, err := keys.ImportKeyFromUserInput(database, masterKey, name, raw, certPath, "database")
 						return keyImportedMsg{key: key, err: err}
 					}
 				}

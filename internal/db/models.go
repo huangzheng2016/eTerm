@@ -38,6 +38,9 @@ type Host struct {
 	// ProxyCommand: if set, takes priority over ProxyType/JumpHost.
 	// Tokens: %h = hostname, %p = port, %% = literal %.
 	ProxyCommand    string
+	ForwardAgent    bool       `gorm:"default:false"`
+	RemoteCommand   string     `gorm:"type:text"`
+	ExtraSSHOptions string     `gorm:"type:text"`
 	LastConnectedAt *time.Time
 }
 
@@ -56,6 +59,7 @@ type SSHKey struct {
 	Bits           int
 	Passphrase     string
 	StorageMode    string `gorm:"default:'database'"`
+	CertificatePath string
 }
 
 type HostFingerprint struct {

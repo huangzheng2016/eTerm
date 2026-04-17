@@ -30,6 +30,7 @@ const (
 	SnippetTab        TabType = "snippets"
 	SnippetEditorTab  TabType = "snippet-editor"
 	SSHTab            TabType = "ssh"
+	BatchResultTab    TabType = "batch-result"
 	SettingsTab       TabType = "settings"
 	SyncTab           TabType = "sync"
 	SessionHistoryTab TabType = "session-hist"
@@ -91,9 +92,14 @@ type App struct {
 
 	syncing bool // true while runSync() is in flight
 
-	batchTag *batchTagModel
+	batchTag     *batchTagModel
+	batchActions *batchActionsModel
 
 	importStratMenu *importStratMenuModel
+
+	pendingBatchSnippetHostIDs []uint
+	pendingBatchOpenHosts      []uint
+	pendingQuickConnect        *types.QuickConnectMsg
 }
 
 func NewApp(database *gorm.DB, masterKey *security.MasterKeyManager) App {

@@ -21,6 +21,11 @@ type quickConnectModel struct {
 	input textinput.Model
 }
 
+type quickConnectFingerprintMsg struct {
+	info        types.QuickConnectMsg
+	confirmInfo types.FingerprintConfirmMsg
+}
+
 func newQuickConnectModel() *quickConnectModel {
 	ti := textinput.New()
 	ti.Placeholder = "user@host:port"
@@ -44,7 +49,7 @@ func (q *quickConnectModel) syncInputWidth(termW int) {
 
 func (q *quickConnectModel) View() string {
 	title := ui.TitleStyle.Render("Quick Connect")
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("Format: [user@]host[:port]  |  Enter: connect  |  Esc: cancel")
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("Format: [user@]host[:port]  |  Enter: connect  |  Esc: cancel  |  click left connect / right cancel")
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", q.input.View(), "", hint)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -115,14 +120,16 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 			if err != nil {
 				return types.ErrorMsg{Err: fmt.Errorf("failed to probe host key: %w", err)}
 			}
-			// For quick connect, auto-save fingerprint (no DB host to reconnect to)
-			database.Create(&db.HostFingerprint{
-				Hostname:    host.Hostname,
-				Port:        host.Port,
-				Algorithm:   algo,
-				Fingerprint: fp,
-				TrustedAt:   time.Now(),
-			})
+			return quickConnectFingerprintMsg{
+				info: msg,
+				confirmInfo: types.FingerprintConfirmMsg{
+					Hostname:    host.Hostname,
+					Port:        host.Port,
+					Algorithm:   algo,
+					Fingerprint: fp,
+					ConnType:    "quick",
+				},
+			}
 		}
 
 		client, err := internalssh.Connect(internalssh.ConnectConfig{
@@ -137,7 +144,7 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 			return types.ErrorMsg{Err: fmt.Errorf("quick connect failed: %w", err)}
 		}
 
-		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols)
+		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, false)
 		if err != nil {
 			client.Client.Close()
 			for _, c := range client.Closers {

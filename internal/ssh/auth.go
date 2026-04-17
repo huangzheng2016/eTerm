@@ -118,6 +118,7 @@ func LoadPrivateKey(key *db.SSHKey, masterKey *security.MasterKeyManager) (ssh.S
 
 	defer security.ClearBytes(keyData)
 
+	var signer ssh.Signer
 	if key.Passphrase != "" {
 		secKey := masterKey.GetKey()
 		if secKey == nil {
@@ -131,18 +132,37 @@ func LoadPrivateKey(key *db.SSHKey, masterKey *security.MasterKeyManager) (ssh.S
 		}
 		defer security.ClearBytes(passphraseBytes)
 
-		signer, err := ssh.ParsePrivateKeyWithPassphrase(keyData, passphraseBytes)
+		signer, err = ssh.ParsePrivateKeyWithPassphrase(keyData, passphraseBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse private key with passphrase: %w", err)
 		}
+	} else {
+		var err error
+		signer, err = ssh.ParsePrivateKey(keyData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
+		}
+	}
+	if key.CertificatePath == "" {
 		return signer, nil
 	}
-
-	signer, err := ssh.ParsePrivateKey(keyData)
+	certData, err := os.ReadFile(key.CertificatePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+		return nil, fmt.Errorf("failed to read certificate: %w", err)
 	}
-	return signer, nil
+	pub, _, _, _, err := ssh.ParseAuthorizedKey(certData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+	cert, ok := pub.(*ssh.Certificate)
+	if !ok {
+		return nil, fmt.Errorf("certificate is not an SSH certificate")
+	}
+	certSigner, err := ssh.NewCertSigner(cert, signer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build certificate signer: %w", err)
+	}
+	return certSigner, nil
 }
 
 // buildGSSAPIClient creates a gssAPIClient based on the host's GSSAPISource setting.
@@ -159,4 +179,21 @@ func buildGSSAPIClient(host *db.Host) (*gssAPIClient, error) {
 	default: // "ccache" or ""
 		return NewGSSAPIFromCCache("", "")
 	}
+}
+
+func EnableAgentForwarding(client *ssh.Client, sess *ssh.Session) error {
+	if client == nil || sess == nil {
+		return fmt.Errorf("agent forwarding requires an SSH client and session")
+	}
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return fmt.Errorf("SSH_AUTH_SOCK not set")
+	}
+	if err := agent.ForwardToRemote(client, sock); err != nil {
+		return fmt.Errorf("failed to forward local ssh-agent: %w", err)
+	}
+	if err := agent.RequestAgentForwarding(sess); err != nil {
+		return fmt.Errorf("failed to request agent forwarding: %w", err)
+	}
+	return nil
 }

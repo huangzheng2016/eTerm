@@ -58,7 +58,7 @@ func (i *InteractiveSession) Close() error {
 
 // NewInteractiveSession opens a PTY shell without blocking on Wait().
 // rows/cols are PTY dimensions (height x width in cells).
-func NewInteractiveSession(client *ssh.Client, rows, cols int) (*InteractiveSession, error) {
+func NewInteractiveSession(client *ssh.Client, rows, cols int, forwardAgent bool) (*InteractiveSession, error) {
 	if cols < 40 {
 		cols = 80
 	}
@@ -87,6 +87,13 @@ func NewInteractiveSession(client *ssh.Client, rows, cols int) (*InteractiveSess
 		return nil, err
 	}
 	go func() { _, _ = io.Copy(io.Discard, stderr) }()
+
+	if forwardAgent {
+		if err := EnableAgentForwarding(client, sess); err != nil {
+			_ = sess.Close()
+			return nil, err
+		}
+	}
 
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,

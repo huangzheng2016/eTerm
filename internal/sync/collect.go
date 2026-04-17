@@ -108,6 +108,7 @@ func buildKeyRecord(k db.SSHKey, mk *security.MasterKeyManager, passphrase, devi
 		Fingerprint: k.Fingerprint,
 		Bits:        k.Bits,
 		Passphrase:  decryptField(k.Passphrase, mk),
+		CertificatePath: k.CertificatePath,
 	}
 	payload, err := encryptPayload(dto, passphrase)
 	if err != nil {
@@ -163,6 +164,9 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 		GSSAPIKeytab:  h.GSSAPIKeytab,
 		KrbPrincipal:  h.KrbPrincipal,
 		ProxyCommand:  h.ProxyCommand,
+		ForwardAgent:  h.ForwardAgent,
+		RemoteCommand: h.RemoteCommand,
+		ExtraSSHOptions: h.ExtraSSHOptions,
 	}
 	payload, err := encryptPayload(dto, passphrase)
 	if err != nil {
@@ -228,4 +232,3 @@ func buildSnippetRecord(s db.Snippet, passphrase, deviceID string) (SyncRecord, 
 		UpdatedAt: s.UpdatedAt,
 	}, nil
 }
-

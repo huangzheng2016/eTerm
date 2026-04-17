@@ -49,6 +49,7 @@ type KeyBindingConfig struct {
 	SessionHistory []string `json:"session_history"`
 	ToggleSelect   []string `json:"toggle_select"`
 	BatchTag       []string `json:"batch_tag"`
+	BatchActions   []string `json:"batch_actions"`
 
 	// SFTP
 	SFTPUpload      []string `json:"sftp_upload"`
@@ -56,6 +57,7 @@ type KeyBindingConfig struct {
 	SFTPDelete      []string `json:"sftp_delete"`
 	SFTPMkdir       []string `json:"sftp_mkdir"`
 	SFTPRename      []string `json:"sftp_rename"`
+	SFTPChmod       []string `json:"sftp_chmod"`
 	SFTPSwitchLeft  []string `json:"sftp_switch_left"`
 	SFTPSwitchRight []string `json:"sftp_switch_right"`
 
@@ -118,6 +120,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		SessionHistory: []string{"ctrl+shift+h"},
 		ToggleSelect:   []string{"ctrl+space"},
 		BatchTag:       []string{"ctrl+shift+g"},
+		BatchActions:   []string{"ctrl+shift+m"},
 
 		// SFTP
 		SFTPUpload:      []string{"u"},
@@ -125,6 +128,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		SFTPDelete:      []string{"delete", "x"},
 		SFTPMkdir:       []string{"m"},
 		SFTPRename:      []string{"r"},
+		SFTPChmod:       []string{"p"},
 		SFTPSwitchLeft:  []string{"left", "h"},
 		SFTPSwitchRight: []string{"right", "l"},
 
@@ -307,6 +311,7 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 		SessionHistory: cfg.SessionHistory,
 		ToggleSelect:   cfg.ToggleSelect,
 		BatchTag:       cfg.BatchTag,
+		BatchActions:   cfg.BatchActions,
 	}
 }
 
@@ -317,6 +322,7 @@ func BuildSFTPKeys(cfg KeyBindingConfig) viewkeys.SFTPKeys {
 		Delete:      cfg.SFTPDelete,
 		Mkdir:       cfg.SFTPMkdir,
 		Rename:      cfg.SFTPRename,
+		Chmod:       cfg.SFTPChmod,
 		SwitchLeft:  cfg.SFTPSwitchLeft,
 		SwitchRight: cfg.SFTPSwitchRight,
 	}

@@ -10,6 +10,7 @@ type openSSHUITabMsg struct {
 	alias        string
 	hostID       uint
 	historyID    uint
+	initialCommands []string
 	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
 }
 

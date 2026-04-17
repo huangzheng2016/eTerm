@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -47,6 +48,9 @@ type Model struct {
 	// Confirmation state for delete/rename
 	confirmMsg    string       // non-empty = waiting for y/n
 	pendingAction func() tea.Cmd // action to run on 'y'
+	chmodInput    textinput.Model
+	chmodPath     string
+	chmodActive   bool
 
 	// Configurable keybindings
 	vk viewkeys.SFTPKeys
@@ -76,6 +80,10 @@ func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 		home = "/"
 	}
 
+	chmodInput := textinput.New()
+	chmodInput.Placeholder = "0644"
+	chmodInput.CharLimit = 4
+
 	return Model{
 		localList:    localList,
 		remoteList:   remoteList,
@@ -85,6 +93,7 @@ func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 		focusedPanel: leftPanel,
 		hostAlias:    hostAlias,
 		progressCh:   make(chan sftp.TransferProgress, 64),
+		chmodInput:   chmodInput,
 		vk:           vk,
 	}
 }
@@ -112,6 +121,14 @@ func (m *Model) SetSize(w, h int) {
 	m.listInnerH = innerH
 	m.localList.SetSize(innerW, innerH)
 	m.remoteList.SetSize(innerW, innerH)
+	cw := w - 16
+	if cw < 12 {
+		cw = 12
+	}
+	if cw > 24 {
+		cw = 24
+	}
+	m.chmodInput.SetWidth(cw)
 }
 
 func formatSize(bytes int64) string {

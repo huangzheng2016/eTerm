@@ -88,6 +88,9 @@ func (a App) View() tea.View {
 		} else if a.snippetPicker != nil {
 			overlay := a.snippetPicker.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.batchActions != nil {
+			overlay := a.batchActions.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.batchTag != nil {
 			overlay := a.batchTag.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)

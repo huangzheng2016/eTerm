@@ -44,6 +44,9 @@ type HostDTO struct {
 	GSSAPIKeytab  string `json:"gssapi_keytab"`
 	KrbPrincipal  string `json:"krb_principal"`
 	ProxyCommand  string `json:"proxy_command"`
+	ForwardAgent  bool   `json:"forward_agent"`
+	RemoteCommand string `json:"remote_command"`
+	ExtraSSHOptions string `json:"extra_ssh_options"`
 }
 
 type SSHKeyDTO struct {
@@ -55,6 +58,7 @@ type SSHKeyDTO struct {
 	Fingerprint string `json:"fingerprint"`
 	Bits        int    `json:"bits"`
 	Passphrase  string `json:"passphrase"`
+	CertificatePath string `json:"certificate_path"`
 }
 
 type SnippetDTO struct {

@@ -66,6 +66,10 @@ func (c *Client) Rename(oldPath, newPath string) error {
 	return c.sftpClient.Rename(oldPath, newPath)
 }
 
+func (c *Client) Chmod(path string, mode os.FileMode) error {
+	return c.sftpClient.Chmod(path, mode)
+}
+
 func (c *Client) Stat(path string) (*FileInfo, error) {
 	info, err := c.sftpClient.Stat(path)
 	if err != nil {

@@ -47,6 +47,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
 		return m, cmd
+
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		rendered, actionY := m.renderForm()
+		ox, oy, ow, oh := m.centeredBounds(rendered)
+		lx := msg.X - ox
+		ly := msg.Y - oy
+		if lx < 0 || ly < 0 || lx >= ow || ly >= oh {
+			return m, nil
+		}
+		switch ly {
+		case 4:
+			m.inputs[m.focused].Blur()
+			m.focused = 0
+			return m, m.inputs[0].Focus()
+		case 5:
+			m.inputs[m.focused].Blur()
+			m.focused = 1
+			return m, m.inputs[1].Focus()
+		case actionY:
+			if lx < ow/2 {
+				return m, m.save()
+			}
+			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
+		}
 	}
 	return m, nil
 }

@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"gorm.io/gorm"
 
@@ -12,15 +13,15 @@ import (
 )
 
 const (
-	aliasField           = 0
-	hostnameField        = 1
-	portField            = 2
-	usernameField        = 3
-	authMethodField      = 4
-	passwordField        = 5
-	keyIDField           = 6
-	groupField           = 7
-	tagsField            = 8
+	aliasField         = 0
+	hostnameField      = 1
+	portField          = 2
+	usernameField      = 3
+	authMethodField    = 4
+	passwordField      = 5
+	keyIDField         = 6
+	groupField         = 7
+	tagsField          = 8
 	descriptionField   = 9
 	jumpHostField      = 10
 	proxyTypeField     = 11
@@ -32,6 +33,10 @@ const (
 	krbPrincipalField  = 17
 	gssapiKeytabField  = 18
 	proxyCommandField  = 19
+	forwardAgentField  = 20
+	remoteCommandField = 21
+	extraOptionsField  = 22
+	advancedField      = 23
 )
 
 // inputCount is the number of textinput.Model instances in the inputs array.
@@ -49,6 +54,8 @@ var proxyDisplay = []string{"None", "HTTP", "SOCKS5"}
 
 var gssapiSourceOptions = []string{"ccache", "keytab"}
 var gssapiSourceDisplay = []string{"Ticket cache (kinit)", "Keytab file"}
+var boolOptions = []bool{false, true}
+var boolDisplay = []string{"No", "Yes"}
 
 var fieldLabels = map[int]string{
 	aliasField:         "Alias",
@@ -71,25 +78,34 @@ var fieldLabels = map[int]string{
 	krbPrincipalField:  "Principal",
 	gssapiKeytabField:  "Keytab path",
 	proxyCommandField:  "ProxyCommand",
+	forwardAgentField:  "ForwardAgent",
+	remoteCommandField: "RemoteCommand",
+	extraOptionsField:  "Extra SSH Options",
+	advancedField:      "Advanced SSH",
 }
 
 type Model struct {
-	inputs       [inputCount]textinput.Model
-	focused      int
-	host         *db.Host
-	db           *gorm.DB
-	masterKey    *security.MasterKeyManager
-	width        int
-	height       int
-	err          string
-	saving       bool
-	authIdx      int
-	keyOptions   []db.SSHKey
-	keyIdx           int
-	jumpHostOptions  []db.Host
-	jumpIdx          int // -1 = none
-	proxyTypeIdx     int
-	gssapiSourceIdx  int
+	inputs          [inputCount]textinput.Model
+	remoteCommand   textarea.Model
+	extraOptions    textarea.Model
+	focused         int
+	advancedFocused int
+	advancedActive  bool
+	host            *db.Host
+	db              *gorm.DB
+	masterKey       *security.MasterKeyManager
+	width           int
+	height          int
+	err             string
+	saving          bool
+	authIdx         int
+	keyOptions      []db.SSHKey
+	keyIdx          int
+	jumpHostOptions []db.Host
+	jumpIdx         int // -1 = none
+	proxyTypeIdx    int
+	gssapiSourceIdx int
+	forwardAgentIdx int
 }
 
 func inputIndexForField(field int) int {
@@ -128,6 +144,19 @@ func inputIndexForField(field int) int {
 	return -1
 }
 
+func fieldUsesTextarea(field int) bool {
+	return field == remoteCommandField || field == extraOptionsField
+}
+
+func fieldUsesSelector(field int) bool {
+	switch field {
+	case authMethodField, keyIDField, jumpHostField, proxyTypeField, gssapiSourceField, forwardAgentField:
+		return true
+	default:
+		return false
+	}
+}
+
 // syncInputWidths sets bubbles textinput width. If Width stays 0, placeholderView only renders the first rune of Placeholder (looks like stray default characters).
 func (m *Model) syncInputWidths() {
 	w := editorInputInnerWidth
@@ -137,6 +166,10 @@ func (m *Model) syncInputWidths() {
 	for i := range m.inputs {
 		m.inputs[i].SetWidth(w)
 	}
+	m.remoteCommand.SetWidth(w)
+	m.remoteCommand.SetHeight(3)
+	m.extraOptions.SetWidth(w)
+	m.extraOptions.SetHeight(4)
 }
 
 func proxyTypeFromDB(s string) int {
@@ -163,7 +196,14 @@ func gssapiSourceFromDB(s string) int {
 	return 0
 }
 
-func (m Model) visibleFields() []int {
+func boolIndex(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func (m Model) mainVisibleFields() []int {
 	fields := []int{aliasField, hostnameField, portField, usernameField, authMethodField}
 	method := authOptions[m.authIdx]
 	switch method {
@@ -177,13 +217,49 @@ func (m Model) visibleFields() []int {
 			fields = append(fields, krbPrincipalField, gssapiKeytabField)
 		}
 	}
-	fields = append(fields, groupField, tagsField, descriptionField, jumpHostField, proxyTypeField)
+	fields = append(fields, groupField, tagsField, descriptionField, jumpHostField, advancedField)
+	return fields
+}
+
+func (m Model) advancedVisibleFields() []int {
+	fields := []int{forwardAgentField, proxyTypeField}
 	if m.proxyTypeIdx > 0 {
 		fields = append(fields, proxyHostField, proxyPortField, proxyUserField, proxyPasswordField)
 	} else {
 		fields = append(fields, proxyCommandField)
 	}
+	fields = append(fields, remoteCommandField, extraOptionsField)
 	return fields
+}
+
+func (m Model) activeFields() []int {
+	if m.advancedActive {
+		return m.advancedVisibleFields()
+	}
+	return m.mainVisibleFields()
+}
+
+func (m Model) advancedSummary() string {
+	var parts []string
+	if boolOptions[m.forwardAgentIdx] {
+		parts = append(parts, "agent")
+	}
+	if m.proxyTypeIdx > 0 || strings.TrimSpace(m.inputs[inputIndexForField(proxyCommandField)].Value()) != "" {
+		parts = append(parts, "proxy")
+	}
+	if strings.TrimSpace(m.remoteCommand.Value()) != "" {
+		parts = append(parts, "remote cmd")
+	}
+	if strings.TrimSpace(m.extraOptions.Value()) != "" {
+		parts = append(parts, "extra opts")
+	}
+	if len(parts) == 0 {
+		return "not set"
+	}
+	if len(parts) <= 2 {
+		return strings.Join(parts, ", ")
+	}
+	return strings.Join(parts[:2], ", ") + " +" + strconv.Itoa(len(parts)-2)
 }
 
 func New(database *gorm.DB, masterKey *security.MasterKeyManager, host *db.Host) Model {
@@ -212,10 +288,18 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, host *db.Host)
 	inputs[13].Placeholder = "/etc/krb5.keytab"
 	inputs[14].Placeholder = "ssh -W %h:%p bastion"
 
+	rc := textarea.New()
+	rc.ShowLineNumbers = false
+	rc.Placeholder = "Optional command to send after login"
+	xo := textarea.New()
+	xo.ShowLineNumbers = false
+	xo.Placeholder = "One SSH option per line"
+
 	authIdx := 0
 	keyIdx := -1
 	proxyTypeIdx := 0
 	gssapiSourceIdx := 0
+	forwardAgentIdx := 0
 
 	if host != nil {
 		inputs[0].SetValue(host.Alias)
@@ -265,22 +349,28 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, host *db.Host)
 		inputs[12].SetValue(host.KrbPrincipal)
 		inputs[13].SetValue(host.GSSAPIKeytab)
 		inputs[14].SetValue(host.ProxyCommand)
+		forwardAgentIdx = boolIndex(host.ForwardAgent)
+		rc.SetValue(host.RemoteCommand)
+		xo.SetValue(host.ExtraSSHOptions)
 	}
 
 	inputs[0].Focus()
 
 	out := Model{
-		inputs:           inputs,
-		focused:          0,
-		host:             host,
-		db:               database,
-		masterKey:        masterKey,
-		authIdx:          authIdx,
-		keyIdx:           keyIdx,
-		jumpIdx:          -1,
-		jumpHostOptions:  nil,
-		proxyTypeIdx:     proxyTypeIdx,
-		gssapiSourceIdx:  gssapiSourceIdx,
+		inputs:          inputs,
+		remoteCommand:   rc,
+		extraOptions:    xo,
+		focused:         0,
+		host:            host,
+		db:              database,
+		masterKey:       masterKey,
+		authIdx:         authIdx,
+		keyIdx:          keyIdx,
+		jumpIdx:         -1,
+		jumpHostOptions: nil,
+		proxyTypeIdx:    proxyTypeIdx,
+		gssapiSourceIdx: gssapiSourceIdx,
+		forwardAgentIdx: forwardAgentIdx,
 	}
 	out.syncInputWidths()
 	return out

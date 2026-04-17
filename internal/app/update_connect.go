@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/eterm/eterm/internal/db"
@@ -85,7 +86,7 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 		}
 		database.Create(&history)
 
-		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols)
+		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, host.ForwardAgent)
 		if err != nil {
 			client.Client.Close()
 			for _, c := range client.Closers {
@@ -99,7 +100,8 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 		startPortForwards(database, client.Client, hostID, is)
 
 		alias := hostDisplayName(host)
-		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: -1}
+		initialCommands := initialSSHCommandsForHost(&host, "")
+		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: -1, initialCommands: initialCommands}
 	}
 	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
 }
@@ -189,7 +191,7 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 		}
 		database.Create(&history)
 
-		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols)
+		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, host.ForwardAgent)
 		if err != nil {
 			client.Client.Close()
 			for _, c := range client.Closers {
@@ -203,7 +205,8 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 		startPortForwards(database, client.Client, hostID, is)
 
 		alias := hostDisplayName(host)
-		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx}
+		initialCommands := initialSSHCommandsForHost(&host, "")
+		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx, initialCommands: initialCommands}
 	}
 	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
 }
@@ -229,6 +232,13 @@ func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {
 		a.activeTab = len(a.tabs) - 1
 	}
 	a.syncTabBar()
+	for _, cmd := range msg.initialCommands {
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
+		sv.PasteCommand(cmd + "\n")
+	}
 	return a, tea.Batch(sv.Init(), reflowWindow(a))
 }
 
@@ -365,4 +375,15 @@ func (a App) applySftpOpened(msg sftpOpenedMsg) (App, tea.Cmd) {
 	a.activeTab = len(a.tabs) - 1
 	a.syncTabBar()
 	return a, tea.Batch(sv.Init(), reflowWindow(a))
+}
+
+func initialSSHCommandsForHost(host *db.Host, extra string) []string {
+	var cmds []string
+	if host != nil && strings.TrimSpace(host.RemoteCommand) != "" {
+		cmds = append(cmds, host.RemoteCommand)
+	}
+	if strings.TrimSpace(extra) != "" {
+		cmds = append(cmds, extra)
+	}
+	return cmds
 }

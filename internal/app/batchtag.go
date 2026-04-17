@@ -40,7 +40,7 @@ func (b *batchTagModel) syncWidth(termW int) {
 func (b *batchTagModel) View() string {
 	title := ui.TitleStyle.Render("Batch tag")
 	sub := ui.DimStyle.Render(fmt.Sprintf("%d host(s) selected", len(b.ids)))
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("Enter apply · Esc cancel")
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("Enter apply · Esc cancel · click left apply / right cancel")
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", sub, "", b.input.View(), "", hint)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

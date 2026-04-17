@@ -47,6 +47,7 @@ type Model struct {
 	loaded      bool
 	mode        inputMode
 	nameInput   textinput.Model
+	certPathInput textinput.Model
 	keyPaste    textarea.Model
 	typeOptions []string
 	typeIdx     int
@@ -67,10 +68,14 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, vk viewkeys.Ke
 	kp.ShowLineNumbers = false
 	kp.Placeholder = "Paste private key (PEM), or one line: /path or ~/path"
 
+	cp := textinput.New()
+	cp.Placeholder = "Optional SSH certificate path (/path/to/key-cert.pub)"
+
 	return Model{
 		db:          database,
 		masterKey:   masterKey,
 		nameInput:   ni,
+		certPathInput: cp,
 		keyPaste:    kp,
 		typeOptions: []string{"ed25519", "rsa"},
 		typeIdx:     0,
@@ -95,6 +100,7 @@ func (m *Model) syncKeyPasteSize() {
 	tw := m.overlayFieldWidth()
 	m.keyPaste.SetWidth(tw)
 	m.keyPaste.SetHeight(8)
+	m.certPathInput.SetWidth(tw)
 }
 
 func (m *Model) overlayFieldWidth() int {
@@ -128,6 +134,8 @@ func (m *Model) resetMode() {
 	m.typeIdx = 0
 	m.nameInput.SetValue("")
 	m.nameInput.Blur()
+	m.certPathInput.SetValue("")
+	m.certPathInput.Blur()
 	m.keyPaste.SetValue("")
 	m.keyPaste.Blur()
 }

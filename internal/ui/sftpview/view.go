@@ -98,7 +98,7 @@ func (m Model) composeFooter() string {
 }
 
 func (m Model) composeHelpLine() string {
-	return helpStyle.Render("h/l:panel | enter:open | bksp:back | u:upload | d:download | x:delete | m:mkdir | r:rename")
+	return helpStyle.Render("h/l:panel | enter:open | bksp:back | u:upload | d:download | x:delete | m:mkdir | r:rename | p:chmod")
 }
 
 func (m Model) View() tea.View {
@@ -132,13 +132,16 @@ func (m Model) View() tea.View {
 	parts = append(parts, pageInfo)
 	parts = append(parts, footer)
 	parts = append(parts, helpLine)
-
-	return tea.NewView(strings.Join(parts, "\n"))
+	main := strings.Join(parts, "\n")
+	if m.chmodActive {
+		main = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderChmodOverlay())
+	}
+	return tea.NewView(main)
 }
 
 var (
-	pageNumStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
-	pageIndicatorDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
+	pageNumStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
+	pageIndicatorDim = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
 )
 
 func (m Model) composePaginationLine(panelWidth int) string {
@@ -169,4 +172,16 @@ func (m Model) composePaginationLine(panelWidth int) string {
 	leftPad := lipgloss.NewStyle().Width(pw).Align(lipgloss.Center).Render(leftPage)
 	rightPad := lipgloss.NewStyle().Width(pw).Align(lipgloss.Center).Render(rightPage)
 	return leftPad + rightPad
+}
+
+func (m Model) renderChmodOverlay() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4")).Render("Change Permissions")
+	path := helpStyle.Render(m.chmodPath)
+	hint := helpStyle.Render("Enter apply | Esc cancel | click left apply / right cancel | octal only")
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", path, "", m.chmodInput.View(), "", hint)
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7D56F4")).
+		Padding(1, 2).
+		Render(content)
 }

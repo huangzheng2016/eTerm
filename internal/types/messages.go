@@ -184,6 +184,24 @@ type BatchTagRequestMsg struct {
 	HostIDs []uint
 }
 
+// BatchActionsRequestMsg opens the batch actions overlay for the given hosts.
+type BatchActionsRequestMsg struct {
+	HostIDs []uint
+}
+
+// BatchActionSelectedMsg chooses the batch action to run for the given hosts.
+type BatchActionSelectedMsg struct {
+	HostIDs []uint
+	Action  string
+}
+
+// BatchCommandSubmitMsg starts a read-only batch command.
+type BatchCommandSubmitMsg struct {
+	HostIDs  []uint
+	Command  string
+	ReadOnly bool
+}
+
 // ExportConfigMsg triggers config export.
 type ExportConfigMsg struct{}
 

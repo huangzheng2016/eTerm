@@ -44,6 +44,7 @@ func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 			Bits:           dto.Bits,
 			Passphrase:     ea.enc(dto.Passphrase),
 			StorageMode:    "database",
+			CertificatePath: dto.CertificatePath,
 		}
 		if ea.err != nil {
 			res.Failed++

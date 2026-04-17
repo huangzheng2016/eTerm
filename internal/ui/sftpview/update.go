@@ -3,6 +3,8 @@ package sftpview
 import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"strings"
 
 	"github.com/eterm/eterm/internal/sftp"
 	"github.com/eterm/eterm/internal/types"
@@ -76,6 +78,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.loadLocalFiles(), m.loadRemoteFiles())
 
 	case tea.KeyPressMsg:
+		if m.chmodActive {
+			switch msg.String() {
+			case "esc":
+				m.chmodActive = false
+				m.chmodPath = ""
+				return m, nil
+			case "enter":
+				return m, m.chmodCmd()
+			}
+			var cmd tea.Cmd
+			m.chmodInput, cmd = m.chmodInput.Update(msg)
+			return m, cmd
+		}
+
 		// Handle confirmation prompt
 		if m.confirmMsg != "" {
 			switch msg.String() {
@@ -130,11 +146,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewkeys.MatchAny(msg.String(), m.vk.Rename):
 			return m, m.confirmRename()
 
+		case viewkeys.MatchAny(msg.String(), m.vk.Chmod):
+			return m, m.openChmod()
+
 		case msg.String() == "esc":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 		}
 
 	case tea.MouseClickMsg:
+		if m.chmodActive {
+			if m2, cmd, done := m.handleChmodMouse(msg); done {
+				return m2, cmd
+			}
+		}
 		if m.localList.FilterState() == list.Filtering {
 			break
 		}
@@ -177,6 +201,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
+	case tea.MouseWheelMsg:
+		if m.chmodActive {
+			return m, nil
+		}
 	}
 
 	if m.focusedPanel == leftPanel {
@@ -190,4 +219,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleChmodMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	ox, oy, ow, oh := m.chmodOverlayBounds()
+	lx := msg.X - ox
+	ly := msg.Y - oy
+	if lx < 0 || ly < 0 || lx >= ow || ly >= oh {
+		m.chmodActive = false
+		m.chmodPath = ""
+		return m, nil, true
+	}
+	if msg.Button != tea.MouseLeft {
+		return m, nil, true
+	}
+	if ly == 6 {
+		return m, m.chmodInput.Focus(), true
+	}
+	if ly >= 8 {
+		if lx < ow/2 {
+			return m, m.chmodCmd(), true
+		}
+		m.chmodActive = false
+		m.chmodPath = ""
+		return m, nil, true
+	}
+	return m, nil, true
+}
+
+func (m Model) chmodOverlayBounds() (ox, oy, ow, oh int) {
+	rendered := m.renderChmodOverlay()
+	lines := strings.Split(rendered, "\n")
+	oh = len(lines)
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > ow {
+			ow = w
+		}
+	}
+	layoutW := m.width
+	if layoutW <= 0 {
+		layoutW = 80
+	}
+	layoutH := m.height
+	if layoutH <= 0 {
+		layoutH = 24
+	}
+	ox = (layoutW - ow) / 2
+	oy = (layoutH - oh) / 2
+	return
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sort"
 
 	"charm.land/bubbles/v2/list"
@@ -254,6 +255,45 @@ func (m Model) renameCmd() tea.Cmd {
 	return func() tea.Msg {
 		err := client.Rename(oldPath, newPath)
 		return transferCompleteMsg{err: err}
+	}
+}
+
+func (m *Model) openChmod() tea.Cmd {
+	if m.focusedPanel != rightPanel {
+		return nil
+	}
+	item := m.remoteList.SelectedItem()
+	if item == nil {
+		return nil
+	}
+	fi := item.(fileItem)
+	m.chmodPath = remoteJoin(m.remotePath, fi.info.Name)
+	m.chmodInput.SetValue(fmt.Sprintf("%04o", fi.info.Mode.Perm()))
+	m.chmodActive = true
+	return m.chmodInput.Focus()
+}
+
+func (m *Model) chmodCmd() tea.Cmd {
+	modeStr := m.chmodInput.Value()
+	if len(modeStr) != 4 {
+		m.err = "Mode must be 4 octal digits"
+		return nil
+	}
+	perm, err := strconv.ParseUint(modeStr, 8, 32)
+	if err != nil || perm > 0o777 {
+		m.err = "Invalid octal mode"
+		return nil
+	}
+	path := m.chmodPath
+	client := m.sftpClient
+	m.chmodActive = false
+	m.chmodPath = ""
+	return func() tea.Msg {
+		err := client.Chmod(path, os.FileMode(perm))
+		if err != nil {
+			return transferCompleteMsg{err: err}
+		}
+		return transferCompleteMsg{}
 	}
 }
 

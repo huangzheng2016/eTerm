@@ -9,6 +9,7 @@ import (
 	"github.com/eterm/eterm/internal/db"
 	"github.com/eterm/eterm/internal/security"
 	"github.com/eterm/eterm/internal/types"
+	"github.com/eterm/eterm/internal/ui/batchresultview"
 	"github.com/eterm/eterm/internal/ui/components"
 	"github.com/eterm/eterm/internal/ui/fwdview"
 	"github.com/eterm/eterm/internal/ui/home"
@@ -37,6 +38,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.batchTag != nil {
 			a.batchTag.syncWidth(a.width)
+		}
+		if a.batchActions != nil {
+			a.batchActions.syncWidth(a.width)
 		}
 		var layoutCmd tea.Cmd
 		a, layoutCmd = layoutTabModels(a)
@@ -68,6 +72,43 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case batchresultview.HostStartMsg, batchresultview.HostOutputMsg, batchresultview.HostDoneMsg, batchresultview.AllDoneMsg:
+		for i := range a.tabs {
+			m, ok := a.tabs[i].Model.(*batchresultview.Model)
+			if !ok {
+				continue
+			}
+			var jobID uint64
+			switch v := msg.(type) {
+			case batchresultview.HostStartMsg:
+				jobID = v.JobID
+			case batchresultview.HostOutputMsg:
+				jobID = v.JobID
+			case batchresultview.HostDoneMsg:
+				jobID = v.JobID
+			case batchresultview.AllDoneMsg:
+				jobID = v.JobID
+			}
+			if m.JobID() != jobID {
+				continue
+			}
+			updated, cmd := m.Update(msg)
+			a.tabs[i].Model = updated
+			return a, cmd
+		}
+		return a, nil
+
+	case quickConnectFingerprintMsg:
+		a.pendingQuickConnect = &msg.info
+		a.pendingFingerprint = &msg.confirmInfo
+		title := "Unknown Host Key"
+		message := fmt.Sprintf(
+			"Host: %s:%d\nAlgorithm: %s\nFingerprint:\n  %s\n\nTrust this host?",
+			msg.confirmInfo.Hostname, msg.confirmInfo.Port, msg.confirmInfo.Algorithm, msg.confirmInfo.Fingerprint,
+		)
+		a.confirm = components.NewConfirm(title, message).Show()
+		return a, nil
+
 	case tea.KeyPressMsg:
 		// Quick connect overlay intercepts all keys when active
 		if a.quickConnect != nil {
@@ -76,6 +117,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if a.batchTag != nil {
 			return a.handleBatchTagKey(msg)
+		}
+
+		if a.batchActions != nil {
+			return a.handleBatchActionsKey(msg)
 		}
 
 		if a.importStratMenu != nil {
@@ -245,10 +290,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			if a.quickConnect != nil {
-				return a.handleOverlayMouse(msg, a.quickConnect.View(), nil)
+				return a.handleOverlayMouse(msg, a.quickConnect.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a.quickConnectMouse(lx, ly)
+				})
 			}
 			if a.batchTag != nil {
-				return a.handleOverlayMouse(msg, a.batchTag.View(), nil)
+				return a.handleOverlayMouse(msg, a.batchTag.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a.batchTagMouse(lx, ly)
+				})
+			}
+			if a.batchActions != nil {
+				return a.handleOverlayMouse(msg, a.batchActions.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a.batchActionsMouse(lx, ly)
+				})
 			}
 			if a.importStratMenu != nil {
 				return a.handleOverlayMouse(msg, a.importStratMenu.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
@@ -449,27 +503,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			clone := db.Host{
-				Alias:         alias,
-				Hostname:      src.Hostname,
-				Port:          src.Port,
-				Username:      src.Username,
-				AuthMethod:    src.AuthMethod,
-				Password:      src.Password,
-				KeyID:         src.KeyID,
-				Passphrase:    src.Passphrase,
-				JumpHostID:    src.JumpHostID,
-				Tags:          src.Tags,
-				Description:   src.Description,
-				Group:         src.Group,
-				ProxyType:     src.ProxyType,
-				ProxyHost:     src.ProxyHost,
-				ProxyPort:     src.ProxyPort,
-				ProxyUser:     src.ProxyUser,
-				ProxyPassword: src.ProxyPassword,
-				ProxyCommand:  src.ProxyCommand,
-				GSSAPISource:  src.GSSAPISource,
-				GSSAPIKeytab:  src.GSSAPIKeytab,
-				KrbPrincipal:  src.KrbPrincipal,
+				Alias:           alias,
+				Hostname:        src.Hostname,
+				Port:            src.Port,
+				Username:        src.Username,
+				AuthMethod:      src.AuthMethod,
+				Password:        src.Password,
+				KeyID:           src.KeyID,
+				Passphrase:      src.Passphrase,
+				JumpHostID:      src.JumpHostID,
+				Tags:            src.Tags,
+				Description:     src.Description,
+				Group:           src.Group,
+				ProxyType:       src.ProxyType,
+				ProxyHost:       src.ProxyHost,
+				ProxyPort:       src.ProxyPort,
+				ProxyUser:       src.ProxyUser,
+				ProxyPassword:   src.ProxyPassword,
+				ProxyCommand:    src.ProxyCommand,
+				GSSAPISource:    src.GSSAPISource,
+				GSSAPIKeytab:    src.GSSAPIKeytab,
+				KrbPrincipal:    src.KrbPrincipal,
+				ForwardAgent:    src.ForwardAgent,
+				RemoteCommand:   src.RemoteCommand,
+				ExtraSSHOptions: src.ExtraSSHOptions,
 			}
 			if err := database.Create(&clone).Error; err != nil {
 				return types.ErrorMsg{Err: fmt.Errorf("clone: %w", err)}
@@ -743,6 +800,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, func() tea.Msg { return types.SFTPOpenMsg{HostID: msg.HostID} }
 		case "reconnect":
 			return a, func() tea.Msg { return types.SSHReconnectMsg{HostID: msg.HostID, StreamID: msg.StreamID} }
+		case "quick":
+			if a.pendingQuickConnect != nil {
+				next := *a.pendingQuickConnect
+				a.pendingQuickConnect = nil
+				return a.handleQuickConnect(next)
+			}
+			return a, nil
 		case "forward":
 			if msg.ForwardRuleID != 0 {
 				rid := msg.ForwardRuleID
@@ -820,6 +884,35 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.batchTag.input.Focus()
 
+	case types.BatchActionsRequestMsg:
+		if len(msg.HostIDs) == 0 {
+			return a, nil
+		}
+		a.batchActions = newBatchActionsModel(msg.HostIDs)
+		if a.width > 0 {
+			a.batchActions.syncWidth(a.width)
+		}
+		return a, nil
+
+	case types.BatchActionSelectedMsg:
+		switch msg.Action {
+		case "open":
+			if len(msg.HostIDs) > 8 {
+				a.pendingBatchOpenHosts = append([]uint(nil), msg.HostIDs...)
+				a.confirm = components.NewConfirm("Open Many Sessions", fmt.Sprintf("Open %d SSH tabs?", len(msg.HostIDs))).Show()
+				return a, nil
+			}
+			return a.runBatchOpenSessions(msg.HostIDs)
+		case "snippet":
+			a.pendingBatchSnippetHostIDs = append([]uint(nil), msg.HostIDs...)
+			a.snippetPicker = newSnippetPickerModel(a.db)
+			return a, nil
+		}
+		return a, nil
+
+	case types.BatchCommandSubmitMsg:
+		return a.openBatchResultTab(msg.HostIDs, msg.Command)
+
 	case types.ExportConfigMsg:
 		database := a.db
 		return a, func() tea.Msg {
@@ -843,6 +936,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.SnippetSelectedMsg:
 		a.snippetPicker = nil
+		if len(a.pendingBatchSnippetHostIDs) > 0 {
+			hostIDs := append([]uint(nil), a.pendingBatchSnippetHostIDs...)
+			a.pendingBatchSnippetHostIDs = nil
+			return a.applyBatchSnippet(hostIDs, msg.Command)
+		}
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
 			if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok {
 				m.PasteCommand(msg.Command)

@@ -39,14 +39,14 @@ func expandUserPath(p string) string {
 
 // ImportKeyFromUserInput imports from pasted PEM text, or from a single-line path to a key file.
 // Material is normalized with [NormalizePEMInput] before parsing.
-func ImportKeyFromUserInput(database *gorm.DB, masterKey *security.MasterKeyManager, name, raw string, storageMode string) (*db.SSHKey, error) {
+func ImportKeyFromUserInput(database *gorm.DB, masterKey *security.MasterKeyManager, name, raw, certificatePath string, storageMode string) (*db.SSHKey, error) {
 	clean := NormalizePEMInput(raw)
 	if clean == "" {
 		return nil, fmt.Errorf("empty key material")
 	}
 
 	if strings.Contains(clean, "BEGIN") {
-		return importPrivateKeyRecord(database, masterKey, name, []byte(clean), storageMode, "")
+		return importPrivateKeyRecord(database, masterKey, name, []byte(clean), storageMode, "", detectCertificatePath("", expandUserPath(certificatePath)))
 	}
 
 	// Single-line file path (no PEM header): read from disk; reference path only in "file" storage mode.
@@ -60,9 +60,9 @@ func ImportKeyFromUserInput(database *gorm.DB, masterKey *security.MasterKeyMana
 		if storageMode == "file" {
 			refPath = path
 		}
-		return importPrivateKeyRecord(database, masterKey, name, pemData, storageMode, refPath)
+		return importPrivateKeyRecord(database, masterKey, name, pemData, storageMode, refPath, detectCertificatePath(path, expandUserPath(certificatePath)))
 	}
 
 	// Bare PEM without BEGIN line is rare; try parsing normalized bytes once.
-	return importPrivateKeyRecord(database, masterKey, name, []byte(clean), storageMode, "")
+	return importPrivateKeyRecord(database, masterKey, name, []byte(clean), storageMode, "", detectCertificatePath("", expandUserPath(certificatePath)))
 }

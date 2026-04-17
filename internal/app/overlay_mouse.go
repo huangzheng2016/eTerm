@@ -41,6 +41,7 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.escMenu = nil
 		a.quickConnect = nil
 		a.snippetPicker = nil
+		a.batchActions = nil
 		a.batchTag = nil
 		a.importStratMenu = nil
 		a.helpOverlay = false
@@ -100,6 +101,110 @@ func (a App) snippetPickerMouse(lx, ly int) (tea.Model, tea.Cmd) {
 		cmd := sp.snippets[sp.cursor].Command
 		a.snippetPicker = nil
 		return a, func() tea.Msg { return types.SnippetSelectedMsg{Command: cmd} }
+	}
+	return a, nil
+}
+
+// quickConnectMouse handles clicks inside the quick connect overlay.
+// Input row is ly=4; hint row is ly=6 where left half connects and right half cancels.
+func (a App) quickConnectMouse(lx, ly int) (tea.Model, tea.Cmd) {
+	if a.quickConnect == nil {
+		return a, nil
+	}
+	if ly == 4 {
+		return a, a.quickConnect.input.Focus()
+	}
+	if ly >= 6 {
+		w := lipgloss.Width(a.quickConnect.View())
+		if lx < w/2 {
+			raw := strings.TrimSpace(a.quickConnect.input.Value())
+			a.quickConnect = nil
+			if raw == "" {
+				return a, nil
+			}
+			hostname, port, username := parseQuickConnect(raw)
+			return a, func() tea.Msg {
+				return types.QuickConnectMsg{Hostname: hostname, Port: port, Username: username}
+			}
+		}
+		a.quickConnect = nil
+		return a, nil
+	}
+	return a, nil
+}
+
+// batchActionsMouse handles clicks inside the batch actions overlay.
+// Step 0 rows are at ly=6..8, step 1 input row is ly=7.
+func (a App) batchActionsMouse(lx, ly int) (tea.Model, tea.Cmd) {
+	if a.batchActions == nil {
+		return a, nil
+	}
+	if a.batchActions.step == 1 {
+		if ly == 7 {
+			return a, a.batchActions.command.Focus()
+		}
+		if ly >= 9 {
+			w := lipgloss.Width(a.batchActions.View())
+			if lx < w/2 {
+				command := strings.TrimSpace(a.batchActions.command.Value())
+				if command == "" {
+					return a, nil
+				}
+				hostIDs := append([]uint(nil), a.batchActions.hostIDs...)
+				a.batchActions = nil
+				return a, func() tea.Msg {
+					return types.BatchCommandSubmitMsg{HostIDs: hostIDs, Command: command, ReadOnly: true}
+				}
+			}
+			a.batchActions.step = 0
+			return a, nil
+		}
+		return a, nil
+	}
+	itemY := ly - 6
+	if itemY < 0 || itemY > 2 {
+		return a, nil
+	}
+	a.batchActions.cursor = batchActionItem(itemY)
+	hostIDs := append([]uint(nil), a.batchActions.hostIDs...)
+	switch a.batchActions.cursor {
+	case batchActionOpen:
+		a.batchActions = nil
+		return a, func() tea.Msg { return types.BatchActionSelectedMsg{HostIDs: hostIDs, Action: "open"} }
+	case batchActionSnippet:
+		a.batchActions = nil
+		return a, func() tea.Msg { return types.BatchActionSelectedMsg{HostIDs: hostIDs, Action: "snippet"} }
+	case batchActionReadOnly:
+		a.batchActions.step = 1
+		return a, a.batchActions.command.Focus()
+	}
+	return a, nil
+}
+
+// batchTagMouse handles clicks inside the batch tag overlay.
+// Input row is ly=6; hint row is ly=8 where left half applies and right half cancels.
+func (a App) batchTagMouse(lx, ly int) (tea.Model, tea.Cmd) {
+	if a.batchTag == nil {
+		return a, nil
+	}
+	if ly == 6 {
+		return a, a.batchTag.input.Focus()
+	}
+	if ly >= 8 {
+		w := lipgloss.Width(a.batchTag.View())
+		if lx < w/2 {
+			raw := strings.TrimSpace(a.batchTag.input.Value())
+			ids := append([]uint(nil), a.batchTag.ids...)
+			a.batchTag = nil
+			if raw == "" || len(ids) == 0 {
+				return a, nil
+			}
+			return a, func() tea.Msg {
+				return batchTagApplyMsg{HostIDs: ids, RawTags: raw}
+			}
+		}
+		a.batchTag = nil
+		return a, nil
 	}
 	return a, nil
 }

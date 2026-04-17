@@ -226,7 +226,11 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	case m.kmCfg.MatchCopy(msg) || key.Matches(msg, m.keys.CopySSH):
 		logKeyDispatch("CopySSHCmd")
 		if h := m.SelectedHost(); h != nil {
-			cmd := fmt.Sprintf("ssh %s@%s -p %d", h.Username, h.Hostname, h.Port)
+			cmd := "ssh "
+			if h.ForwardAgent {
+				cmd += "-A "
+			}
+			cmd += fmt.Sprintf("%s@%s -p %d", h.Username, h.Hostname, h.Port)
 			return m, tea.SetClipboard(cmd), true
 		}
 		return m, nil, true
@@ -305,6 +309,13 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		return m, func() tea.Msg { return types.BatchTagRequestMsg{HostIDs: ids} }, true
+
+	case viewkeys.MatchAny(msg.String(), m.batchActionKeys):
+		ids := m.batchActionHostIDs()
+		if len(ids) == 0 {
+			return m, nil, true
+		}
+		return m, func() tea.Msg { return types.BatchActionsRequestMsg{HostIDs: ids} }, true
 
 	case viewkeys.MatchAny(msg.String(), m.exportConfigKeys):
 		logKeyDispatch("ExportConfig")

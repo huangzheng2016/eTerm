@@ -60,6 +60,7 @@ func (h homeAppHelpMap) FullHelp() [][]key.Binding {
 		{dynamicBinding(h.cfg.CopySSH, "copy"), dynamicBinding(h.cfg.CloneHost, "clone"), dynamicBinding(h.cfg.QuickConnect, "quick"), dynamicBinding(h.cfg.ImportSSH, "import .ssh")},
 		{dynamicBinding(h.cfg.ExportConfig, "export"), dynamicBinding(h.cfg.HideHost, "hide/unhide"), dynamicBinding(h.cfg.ShowHidden, "show hidden")},
 		{dynamicBinding(h.cfg.SessionHistory, "session log"), dynamicBinding(h.cfg.ToggleSelect, "toggle select"), dynamicBinding(h.cfg.BatchTag, "batch tag")},
+		{dynamicBinding(h.cfg.BatchActions, "batch actions")},
 	}
 }
 
@@ -76,7 +77,8 @@ func (h sftpAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.NextTab, h.km.PrevTab},
 		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 		{dynamicBinding(h.cfg.SFTPUpload, "upload"), dynamicBinding(h.cfg.SFTPDownload, "download"), dynamicBinding(h.cfg.SFTPDelete, "delete")},
-		{dynamicBinding(h.cfg.SFTPMkdir, "mkdir"), dynamicBinding(h.cfg.SFTPRename, "rename"), dynamicBinding(h.cfg.SFTPSwitchLeft, "left panel")},
+		{dynamicBinding(h.cfg.SFTPMkdir, "mkdir"), dynamicBinding(h.cfg.SFTPRename, "rename"), dynamicBinding(h.cfg.SFTPChmod, "chmod")},
+		{dynamicBinding(h.cfg.SFTPSwitchLeft, "left panel")},
 	}
 }
 
@@ -185,6 +187,8 @@ func (a App) contextualHelpKeyMap() bubbleshelp.KeyMap {
 	case SyncTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case SessionHistoryTab:
+		return editorAppHelpMap{a.keyMap, a.kbConfig}
+	case BatchResultTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	default:
 		return emptyHelpMap{}

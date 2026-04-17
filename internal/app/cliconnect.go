@@ -112,7 +112,7 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 		}
 		database.Create(&history)
 
-		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols)
+		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, host.ForwardAgent)
 		if err != nil {
 			client.Client.Close()
 			for _, c := range client.Closers {
@@ -125,7 +125,7 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 		startPortForwards(database, client.Client, host.ID, is)
 
 		alias := hostDisplayName(host)
-		return openSSHUITabMsg{is: is, alias: alias, hostID: host.ID, historyID: history.ID, replaceTabAt: -1}
+		return openSSHUITabMsg{is: is, alias: alias, hostID: host.ID, historyID: history.ID, replaceTabAt: -1, initialCommands: initialSSHCommandsForHost(&host, "")}
 	}
 	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
 }

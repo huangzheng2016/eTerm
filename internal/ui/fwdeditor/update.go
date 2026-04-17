@@ -136,6 +136,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[idx], cmd = m.inputs[idx].Update(msg)
 			return m, cmd
 		}
+
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		rendered, fieldYs, actionY := m.renderForm()
+		ox, oy, ow, oh := m.centeredBounds(rendered)
+		lx := msg.X - ox
+		ly := msg.Y - oy
+		if lx < 0 || ly < 0 || lx >= ow || ly >= oh {
+			return m, nil
+		}
+		if ly == actionY {
+			if lx < ow/2 {
+				return m, m.save()
+			}
+			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
+		}
+		vf := m.visibleFields()
+		for i, y := range fieldYs {
+			if ly != y || i >= len(vf) {
+				continue
+			}
+			m.focused = i
+			field := vf[i]
+			if field == hostField || field == directionField {
+				dir := 1
+				if lx < ow/2 {
+					dir = -1
+				}
+				if field == hostField && len(m.hostOptions) > 0 {
+					m.hostIdx = (m.hostIdx + dir + len(m.hostOptions)) % len(m.hostOptions)
+					return m, nil
+				}
+				if field == directionField {
+					m.directionIdx = (m.directionIdx + dir + len(directionOptions)) % len(directionOptions)
+					m.clampFocus()
+					return m, nil
+				}
+			}
+			return m, m.focusCurrent()
+		}
 	}
 	return m, nil
 }
