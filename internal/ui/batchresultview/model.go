@@ -6,14 +6,15 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 var jobIDGen atomic.Uint64
@@ -153,6 +154,18 @@ func (m *Model) runHost(hostID uint) {
 	}
 	if internalssh.NeedsFingerprint(m.db, host.Hostname, host.Port) {
 		err := fmt.Errorf("host key not trusted yet")
+		m.emit(HostOutputMsg{JobID: m.jobID, HostID: hostID, Data: err.Error() + "\n"})
+		m.emit(HostDoneMsg{JobID: m.jobID, HostID: hostID, Err: err})
+		return
+	}
+	changed, _, _, _, err := internalssh.LiveHostKeyDiffersFromStored(m.db, host.Hostname, host.Port, 10*time.Second)
+	if err != nil {
+		m.emit(HostOutputMsg{JobID: m.jobID, HostID: hostID, Data: err.Error() + "\n"})
+		m.emit(HostDoneMsg{JobID: m.jobID, HostID: hostID, Err: err})
+		return
+	}
+	if changed {
+		err := fmt.Errorf("host key changed; connect once from List to accept new fingerprint")
 		m.emit(HostOutputMsg{JobID: m.jobID, HostID: hostID, Data: err.Error() + "\n"})
 		m.emit(HostDoneMsg{JobID: m.jobID, HostID: hostID, Err: err})
 		return

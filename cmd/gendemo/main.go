@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/keys"
-	"github.com/eterm/eterm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/keys"
+	"github.com/huangzheng2016/eTerm/internal/security"
 )
 
 func main() {

@@ -8,9 +8,9 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 // handleGridMouse returns done=true when Update should return immediately.

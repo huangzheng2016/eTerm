@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/eterm/eterm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/security"
 )
 
 func decryptPayload(payload, passphrase string) ([]byte, error) {

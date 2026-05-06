@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
 
-	"github.com/eterm/eterm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/db"
 )
 
 type editState int

@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
@@ -50,6 +50,27 @@ func NeedsFingerprint(database *gorm.DB, hostname string, port int) bool {
 	var existing db.HostFingerprint
 	result := database.Where("hostname = ? AND port = ?", hostname, port).First(&existing)
 	return result.Error == gorm.ErrRecordNotFound
+}
+
+// LiveHostKeyDiffersFromStored reports whether the live server key differs from the DB record.
+// When no row exists, returns (false, "", "", zero, nil) so callers still use NeedsFingerprint first.
+func LiveHostKeyDiffersFromStored(database *gorm.DB, hostname string, port int, timeout time.Duration) (differs bool, newAlgo, newFP string, stored db.HostFingerprint, err error) {
+	var existing db.HostFingerprint
+	result := database.Where("hostname = ? AND port = ?", hostname, port).First(&existing)
+	if result.Error == gorm.ErrRecordNotFound {
+		return false, "", "", existing, nil
+	}
+	if result.Error != nil {
+		return false, "", "", existing, fmt.Errorf("query host fingerprint: %w", result.Error)
+	}
+	newAlgo, newFP, err = ProbeHostKey(hostname, port, timeout)
+	if err != nil {
+		return false, "", "", existing, err
+	}
+	if newFP != existing.Fingerprint {
+		return true, newAlgo, newFP, existing, nil
+	}
+	return false, newAlgo, newFP, existing, nil
 }
 
 func VerifyHostKey(database *gorm.DB, hostname string, port int, remote net.Addr, key ssh.PublicKey, callback FingerprintCallback) error {

@@ -36,7 +36,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME:-dev}"
           COMMIT="${GITHUB_SHA::8}"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w -X github.com/eterm/eterm/internal/version.Version=${VERSION} -X github.com/eterm/eterm/internal/version.Commit=${COMMIT}" \
+            -ldflags="-s -w -X github.com/huangzheng2016/eTerm/internal/version.Version=${VERSION} -X github.com/huangzheng2016/eTerm/internal/version.Commit=${COMMIT}" \
             -o eterm_linux_amd64 .
       - name: Create archive
         run: tar -czf eterm_linux_amd64.tar.gz eterm_linux_amd64
@@ -63,7 +63,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME:-dev}"
           COMMIT="${GITHUB_SHA::8}"
           CGO_ENABLED=0 GOARCH=${{ matrix.goarch }} go build \
-            -ldflags="-s -w -X github.com/eterm/eterm/internal/version.Version=${VERSION} -X github.com/eterm/eterm/internal/version.Commit=${COMMIT}" \
+            -ldflags="-s -w -X github.com/huangzheng2016/eTerm/internal/version.Version=${VERSION} -X github.com/huangzheng2016/eTerm/internal/version.Commit=${COMMIT}" \
             -o eterm_darwin_${{ matrix.goarch }} .
       - name: Create archive
         run: tar -czf eterm_darwin_${{ matrix.goarch }}.tar.gz eterm_darwin_${{ matrix.goarch }}
@@ -86,7 +86,7 @@ jobs:
           $env:CGO_ENABLED = "0"
           $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
           $commit = $env:GITHUB_SHA.Substring(0, 8)
-          go build -ldflags="-s -w -X github.com/eterm/eterm/internal/version.Version=$version -X github.com/eterm/eterm/internal/version.Commit=$commit" -o eterm_windows_amd64.exe .
+          go build -ldflags="-s -w -X github.com/huangzheng2016/eTerm/internal/version.Version=$version -X github.com/huangzheng2016/eTerm/internal/version.Commit=$commit" -o eterm_windows_amd64.exe .
       - name: Create archive
         shell: pwsh
         run: Compress-Archive -Path "eterm_windows_amd64.exe" -DestinationPath "eterm_windows_amd64.zip"
@@ -105,6 +105,7 @@ jobs:
         run: |
           mkdir -p release
           find . -path ./release -prune -o \( -name "*.tar.gz" -o -name "*.zip" \) -type f -print | while read f; do cp "$f" release/; done
+          (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
           ls -la release/
       - name: Get version
         id: version
@@ -124,6 +125,7 @@ jobs:
             - **macOS AMD64**: `eterm_darwin_amd64.tar.gz`
             - **macOS ARM64**: `eterm_darwin_arm64.tar.gz`
             - **Windows AMD64**: `eterm_windows_amd64.zip`
+            - **SHA256SUMS**: hashes for the archives above (client verifies when present)
 
             解压后将可执行文件放到 `PATH` 中即可。首次运行会在 `~/.config/eterm/` 创建配置与数据库。
 

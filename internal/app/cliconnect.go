@@ -6,10 +6,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 )
 
 // CLIConnectInfo holds parsed CLI direct-connect arguments.
@@ -54,15 +54,8 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 		}
 
 		// Fingerprint pre-check
-		if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-			algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, 10*time.Second)
-			if err != nil {
-				return types.ErrorMsg{Err: fmt.Errorf("failed to probe host key: %w", err)}
-			}
-			return types.FingerprintConfirmMsg{
-				HostID: host.ID, Hostname: host.Hostname, Port: host.Port,
-				Algorithm: algo, Fingerprint: fp, ConnType: "ssh",
-			}
+		if bm := hostFingerprintDialBlock(database, host.ID, host.Hostname, host.Port, "ssh", 0, 0); bm != nil {
+			return bm
 		}
 
 		// Load key if needed

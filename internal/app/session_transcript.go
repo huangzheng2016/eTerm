@@ -3,8 +3,8 @@ package app
 import (
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"gorm.io/gorm"
 )
 

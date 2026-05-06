@@ -3,12 +3,12 @@ package app
 import (
 	"encoding/json"
 
-	"github.com/eterm/eterm/internal/ui/fwdview"
-	"github.com/eterm/eterm/internal/ui/keyview"
-	"github.com/eterm/eterm/internal/ui/sessionhistview"
-	"github.com/eterm/eterm/internal/ui/settingsview"
-	"github.com/eterm/eterm/internal/ui/snippetview"
-	"github.com/eterm/eterm/internal/ui/syncview"
+	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
+	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sessionhistview"
+	"github.com/huangzheng2016/eTerm/internal/ui/settingsview"
+	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
+	"github.com/huangzheng2016/eTerm/internal/ui/syncview"
 
 	tea "charm.land/bubbletea/v2"
 )

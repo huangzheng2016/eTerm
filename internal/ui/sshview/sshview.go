@@ -15,9 +15,9 @@ import (
 	"github.com/charmbracelet/x/vt"
 	tea "charm.land/bubbletea/v2"
 
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/viewkeys"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 var streamIDGen atomic.Uint64

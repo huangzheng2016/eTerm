@@ -5,8 +5,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 )
 
 // Re-export constants for local use.

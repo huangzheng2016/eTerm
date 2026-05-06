@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/eterm/eterm/internal/security"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 
 	bubbleshelp "charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
@@ -96,6 +96,8 @@ type App struct {
 	batchActions *batchActionsModel
 
 	importStratMenu *importStratMenuModel
+
+	upgradePrompt *upgradePromptModel
 
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint

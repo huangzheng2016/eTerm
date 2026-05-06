@@ -3,9 +3,9 @@ package app
 import (
 	"strings"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/sshconfig"
-	"github.com/eterm/eterm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/sshconfig"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"gorm.io/gorm"
 )
 

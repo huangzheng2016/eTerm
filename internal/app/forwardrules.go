@@ -2,14 +2,13 @@ package app
 
 import (
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/fwdview"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
@@ -61,20 +60,14 @@ func forwardDial(database *gorm.DB, mk *security.MasterKeyManager, ruleID uint) 
 	}
 	host := rule.Host
 
-	if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-		algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, 10*time.Second)
-		if err != nil {
-			return types.ForwardRuleResultMsg{RuleID: ruleID, Err: fmt.Errorf("probe host key: %w", err)}
+	if bm := hostFingerprintDialBlock(database, host.ID, host.Hostname, host.Port, "forward", 0, ruleID); bm != nil {
+		switch m := bm.(type) {
+		case types.FingerprintConfirmMsg:
+			return m
+		case types.ErrorMsg:
+			return types.ForwardRuleResultMsg{RuleID: ruleID, Err: m.Err}
 		}
-		return types.FingerprintConfirmMsg{
-			HostID:        host.ID,
-			Hostname:      host.Hostname,
-			Port:          host.Port,
-			Algorithm:     algo,
-			Fingerprint:   fp,
-			ConnType:      "forward",
-			ForwardRuleID: ruleID,
-		}
+		return types.ForwardRuleResultMsg{RuleID: ruleID, Err: fmt.Errorf("fingerprint check failed")}
 	}
 
 	var jumpHost *db.Host

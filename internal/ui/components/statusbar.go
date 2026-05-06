@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"charm.land/lipgloss/v2"
-	"github.com/eterm/eterm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui"
 )
 
 type StatusBar struct {

@@ -6,19 +6,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/batchresultview"
-	"github.com/eterm/eterm/internal/ui/components"
-	"github.com/eterm/eterm/internal/ui/fwdview"
-	"github.com/eterm/eterm/internal/ui/home"
-	"github.com/eterm/eterm/internal/ui/keyview"
-	"github.com/eterm/eterm/internal/ui/settingsview"
-	"github.com/eterm/eterm/internal/ui/sftpview"
-	"github.com/eterm/eterm/internal/ui/snippetview"
-	"github.com/eterm/eterm/internal/ui/sshview"
-	"github.com/eterm/eterm/internal/version"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/batchresultview"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
+	"github.com/huangzheng2016/eTerm/internal/ui/home"
+	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
+	"github.com/huangzheng2016/eTerm/internal/ui/settingsview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sftpview"
+	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/version"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -72,6 +72,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case components.ToastTimeoutMsg:
+		a.toast, _ = a.toast.Update(msg)
+		if a.viewState != MainView || len(a.tabs) == 0 {
+			return a, nil
+		}
+		var layoutCmd tea.Cmd
+		a, layoutCmd = layoutTabModels(a)
+		return a, tea.Batch(layoutCmd, reflowWindow(a))
+
 	case batchresultview.HostStartMsg, batchresultview.HostOutputMsg, batchresultview.HostDoneMsg, batchresultview.AllDoneMsg:
 		for i := range a.tabs {
 			m, ok := a.tabs[i].Model.(*batchresultview.Model)
@@ -101,12 +110,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case quickConnectFingerprintMsg:
 		a.pendingQuickConnect = &msg.info
 		a.pendingFingerprint = &msg.confirmInfo
-		title := "Unknown Host Key"
-		message := fmt.Sprintf(
-			"Host: %s:%d\nAlgorithm: %s\nFingerprint:\n  %s\n\nTrust this host?",
-			msg.confirmInfo.Hostname, msg.confirmInfo.Port, msg.confirmInfo.Algorithm, msg.confirmInfo.Fingerprint,
-		)
-		a.confirm = components.NewConfirm(title, message).Show()
+		fp := msg.confirmInfo
+		a.confirm = components.NewConfirm(fingerprintConfirmTitle(fp), fingerprintConfirmBody(fp)).Show()
 		return a, nil
 
 	case tea.KeyPressMsg:
@@ -134,6 +139,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Snippet picker overlay intercepts all keys when active
 		if a.snippetPicker != nil {
 			return a.handleSnippetPickerKey(msg)
+		}
+
+		if a.upgradePrompt != nil {
+			next, uc := a.handleUpgradePromptKey(msg)
+			return next, uc
 		}
 
 		// ESC menu overlay intercepts all keys when active
@@ -312,6 +322,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.snippetPicker != nil {
 				return a.handleOverlayMouse(msg, a.snippetPicker.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
 					return a.snippetPickerMouse(lx, ly)
+				})
+			}
+			if a.upgradePrompt != nil && !a.upgradePrompt.Busy {
+				return a.handleOverlayMouse(msg, upgradePromptView(a.upgradePrompt), func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a.upgradePromptMouse(lx, ly)
 				})
 			}
 			if a.escMenu != nil {
@@ -689,10 +704,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case types.UpdateAvailableMsg:
-		var tc tea.Cmd
-		line := fmt.Sprintf("eTerm %s available  %s", msg.Version, msg.URL)
-		a.toast, tc = a.toast.Show(line, components.ToastInfo, 10*time.Second)
-		return a, tc
+		dismissed, _ := db.GetSetting(a.db, version.SettingUpgradeDismissedTag)
+		if dismissed == msg.Version {
+			return a, nil
+		}
+		a.upgradePrompt = NewUpgradePrompt(msg.Version, msg.URL)
+		return a, nil
+
+	case types.UpgradeDownloadDoneMsg:
+		return a.handleUpgradeDownloadDone(msg)
 
 	case batchTagApplyMsg:
 		return a, func() tea.Msg {
@@ -784,12 +804,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.FingerprintConfirmMsg:
 		a.pendingFingerprint = &msg
-		title := "Unknown Host Key"
-		message := fmt.Sprintf(
-			"Host: %s:%d\nAlgorithm: %s\nFingerprint:\n  %s\n\nTrust this host?",
-			msg.Hostname, msg.Port, msg.Algorithm, msg.Fingerprint,
-		)
-		a.confirm = components.NewConfirm(title, message).Show()
+		a.confirm = components.NewConfirm(fingerprintConfirmTitle(msg), fingerprintConfirmBody(msg)).Show()
 		return a, nil
 
 	case types.FingerprintAcceptedMsg:

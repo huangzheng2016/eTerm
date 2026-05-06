@@ -7,8 +7,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 type hostsLoadedMsg struct {

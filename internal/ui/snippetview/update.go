@@ -3,9 +3,9 @@ package snippetview
 import (
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/components"
-	"github.com/eterm/eterm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func (m *Model) Init() tea.Cmd {

@@ -6,10 +6,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
-	"github.com/eterm/eterm/internal/sshconfig"
-	"github.com/eterm/eterm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/sshconfig"
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func (m Model) save() tea.Cmd {

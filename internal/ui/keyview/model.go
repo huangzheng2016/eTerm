@@ -8,11 +8,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/keys"
-	"github.com/eterm/eterm/internal/security"
-	"github.com/eterm/eterm/internal/ui/components"
-	"github.com/eterm/eterm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/keys"
+	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 type inputMode int

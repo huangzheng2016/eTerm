@@ -128,8 +128,11 @@ type FingerprintConfirmMsg struct {
 	Port        int
 	Algorithm   string
 	Fingerprint string
-	ConnType    string // "ssh", "sftp", "reconnect", "forward"
-	StreamID    uint64 // for reconnect
+	// PreviousFingerprint is set when the server key changed vs the DB (user may update trust).
+	PreviousFingerprint string
+	PreviousAlgorithm   string
+	ConnType            string // "ssh", "sftp", "reconnect", "forward"
+	StreamID            uint64 // for reconnect
 	// ForwardRuleID is set when ConnType is "forward" (port-forward tab dial).
 	ForwardRuleID uint
 }
@@ -249,6 +252,15 @@ type CLIConnectMsg struct {
 type UpdateAvailableMsg struct {
 	Version string
 	URL     string
+}
+
+// UpgradeDownloadDoneMsg completes an async download/extract from GitHub Releases.
+type UpgradeDownloadDoneMsg struct {
+	Err           error
+	Tag           string
+	BinaryPath    string
+	InstallQuit   bool
+	ChecksumsUsed bool // false when SHA256SUMS was absent for this release
 }
 
 // EscMenuRequestMsg triggers the ESC menu overlay (QUIT / SETTINGS) on the home view.

@@ -1,7 +1,7 @@
 package sync
 
 import (
-	"github.com/eterm/eterm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/security"
 	"gorm.io/gorm"
 )
 

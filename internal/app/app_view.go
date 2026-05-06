@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	"github.com/eterm/eterm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -96,6 +96,9 @@ func (a App) View() tea.View {
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.importStratMenu != nil {
 			overlay := a.importStratMenu.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.upgradePrompt != nil {
+			overlay := upgradePromptView(a.upgradePrompt)
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.escMenu != nil {
 			overlay := a.escMenu.View()

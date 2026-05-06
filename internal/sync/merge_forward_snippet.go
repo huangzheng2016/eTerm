@@ -3,7 +3,7 @@ package sync
 import (
 	"encoding/json"
 
-	"github.com/eterm/eterm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"gorm.io/gorm"
 )
 

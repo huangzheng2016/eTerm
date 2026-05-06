@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -1,14 +1,16 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/ui/batchresultview"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/batchresultview"
 )
 
 func (a App) runBatchOpenSessions(hostIDs []uint) (App, tea.Cmd) {
@@ -40,8 +42,11 @@ func (a App) batchConnectHostCmd(hostID uint, extraCommand string) tea.Cmd {
 		if err := database.Preload("Key").First(&host, hostID).Error; err != nil {
 			return nil
 		}
-		if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-			return nil
+		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "ssh", 0, 0); bm != nil {
+			if em, ok := bm.(types.ErrorMsg); ok {
+				return em
+			}
+			return types.ErrorMsg{Err: fmt.Errorf("host fingerprint must be confirmed — connect once from List: %s", hostDisplayName(host))}
 		}
 
 		var jumpHost *db.Host

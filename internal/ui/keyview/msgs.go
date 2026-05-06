@@ -3,7 +3,7 @@ package keyview
 import (
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/db"
 )
 
 type keysLoadedMsg struct {

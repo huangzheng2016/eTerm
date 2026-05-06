@@ -10,7 +10,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/sftp"
+	"github.com/huangzheng2016/eTerm/internal/sftp"
 )
 
 func (m Model) loadLocalFiles() tea.Cmd {

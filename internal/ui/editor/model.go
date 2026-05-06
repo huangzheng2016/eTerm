@@ -8,8 +8,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"gorm.io/gorm"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
 )
 
 const (

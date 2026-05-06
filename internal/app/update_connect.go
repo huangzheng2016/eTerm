@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/sftp"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/components"
-	"github.com/eterm/eterm/internal/ui/sftpview"
-	"github.com/eterm/eterm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/sftp"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/sftpview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -31,15 +31,8 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 			return types.ErrorMsg{Err: fmt.Errorf("host not found: %w", err)}
 		}
 
-		if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-			algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, 10*time.Second)
-			if err != nil {
-				return types.ErrorMsg{Err: fmt.Errorf("failed to probe host key: %w", err)}
-			}
-			return types.FingerprintConfirmMsg{
-				HostID: hostID, Hostname: host.Hostname, Port: host.Port,
-				Algorithm: algo, Fingerprint: fp, ConnType: "ssh",
-			}
+		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "ssh", 0, 0); bm != nil {
+			return bm
 		}
 
 		var jumpHost *db.Host
@@ -137,15 +130,8 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 			return types.ErrorMsg{Err: fmt.Errorf("host not found: %w", err)}
 		}
 
-		if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-			algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, 10*time.Second)
-			if err != nil {
-				return types.ErrorMsg{Err: fmt.Errorf("failed to probe host key: %w", err)}
-			}
-			return types.FingerprintConfirmMsg{
-				HostID: hostID, Hostname: host.Hostname, Port: host.Port,
-				Algorithm: algo, Fingerprint: fp, ConnType: "reconnect", StreamID: msg.StreamID,
-			}
+		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "reconnect", msg.StreamID, 0); bm != nil {
+			return bm
 		}
 
 		var jumpHost *db.Host
@@ -302,15 +288,8 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 			return types.ErrorMsg{Err: fmt.Errorf("host not found: %w", err)}
 		}
 
-		if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-			algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, 10*time.Second)
-			if err != nil {
-				return types.ErrorMsg{Err: fmt.Errorf("failed to probe host key: %w", err)}
-			}
-			return types.FingerprintConfirmMsg{
-				HostID: hostID, Hostname: host.Hostname, Port: host.Port,
-				Algorithm: algo, Fingerprint: fp, ConnType: "sftp",
-			}
+		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "sftp", 0, 0); bm != nil {
+			return bm
 		}
 
 		var hostKey *db.SSHKey

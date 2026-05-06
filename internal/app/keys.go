@@ -2,7 +2,7 @@ package app
 
 import (
 	"charm.land/bubbles/v2/key"
-	"github.com/eterm/eterm/internal/keylabels"
+	"github.com/huangzheng2016/eTerm/internal/keylabels"
 )
 
 type KeyMap struct {

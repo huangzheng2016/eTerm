@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/eterm/eterm/internal/db"
-	internalssh "github.com/eterm/eterm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )

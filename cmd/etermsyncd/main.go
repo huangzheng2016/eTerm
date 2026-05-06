@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/eterm/eterm/internal/syncd"
+	"github.com/huangzheng2016/eTerm/internal/syncd"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"

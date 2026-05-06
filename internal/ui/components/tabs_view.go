@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/eterm/eterm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui"
 )
 
 func (t TabsModel) View() string {

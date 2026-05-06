@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/eterm/eterm/internal/sftp"
-	"github.com/eterm/eterm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/sftp"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 type panelSide int

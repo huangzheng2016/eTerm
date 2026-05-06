@@ -8,9 +8,9 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/keymatch"
-	"github.com/eterm/eterm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/keymatch"
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func firstMsg(cmd tea.Cmd) tea.Msg {

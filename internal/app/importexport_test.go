@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/sshconfig"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/sshconfig"
 )
 
 func TestHostFromParsedImportsGSSAPIAuthentication(t *testing.T) {

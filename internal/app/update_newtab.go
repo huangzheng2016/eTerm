@@ -1,14 +1,14 @@
 package app
 
 import (
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/editor"
-	"github.com/eterm/eterm/internal/ui/fwdeditor"
-	"github.com/eterm/eterm/internal/ui/fwdview"
-	"github.com/eterm/eterm/internal/ui/keyview"
-	"github.com/eterm/eterm/internal/ui/snippeteditor"
-	"github.com/eterm/eterm/internal/ui/snippetview"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/editor"
+	"github.com/huangzheng2016/eTerm/internal/ui/fwdeditor"
+	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
+	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
+	"github.com/huangzheng2016/eTerm/internal/ui/snippeteditor"
+	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
 
 	tea "charm.land/bubbletea/v2"
 )

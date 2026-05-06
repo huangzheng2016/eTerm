@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/eterm/eterm/internal/sftp"
-	internalssh "github.com/eterm/eterm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/sftp"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 )
 
 type openSSHUITabMsg struct {

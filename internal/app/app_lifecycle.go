@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	esync "github.com/eterm/eterm/internal/sync"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui/components"
-	"github.com/eterm/eterm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
@@ -275,15 +275,25 @@ func (a *App) processConfirmResult() tea.Cmd {
 		a.pendingFingerprint = nil
 		if confirmed {
 			database := a.db
-			record := db.HostFingerprint{
-				Hostname:    fp.Hostname,
-				Port:        fp.Port,
-				Algorithm:   fp.Algorithm,
-				Fingerprint: fp.Fingerprint,
-				TrustedAt:   time.Now(),
-			}
 			return func() tea.Msg {
-				_ = database.Create(&record).Error
+				rec := db.HostFingerprint{
+					Hostname:    fp.Hostname,
+					Port:        fp.Port,
+					Algorithm:   fp.Algorithm,
+					Fingerprint: fp.Fingerprint,
+					TrustedAt:   time.Now(),
+				}
+				if fp.PreviousFingerprint != "" {
+					_ = database.Model(&db.HostFingerprint{}).
+						Where("hostname = ? AND port = ?", fp.Hostname, fp.Port).
+						Updates(map[string]interface{}{
+							"algorithm":   rec.Algorithm,
+							"fingerprint": rec.Fingerprint,
+							"trusted_at":  rec.TrustedAt,
+						}).Error
+				} else {
+					_ = database.Create(&rec).Error
+				}
 				return types.FingerprintAcceptedMsg{
 					HostID:        fp.HostID,
 					ConnType:      fp.ConnType,

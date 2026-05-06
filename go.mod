@@ -1,4 +1,4 @@
-module github.com/eterm/eterm
+module github.com/huangzheng2016/eTerm
 
 go 1.25.6
 

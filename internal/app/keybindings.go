@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 
 	"charm.land/bubbles/v2/key"
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/keylabels"
-	"github.com/eterm/eterm/internal/keymatch"
-	"github.com/eterm/eterm/internal/ui/home"
-	"github.com/eterm/eterm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/keylabels"
+	"github.com/huangzheng2016/eTerm/internal/keymatch"
+	"github.com/huangzheng2016/eTerm/internal/ui/home"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 	"gorm.io/gorm"
 )
 

@@ -6,9 +6,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"strings"
 
-	"github.com/eterm/eterm/internal/sftp"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/sftp"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 type localFilesMsg struct {

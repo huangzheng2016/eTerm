@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/eterm/eterm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/db"
 )
 
 // HostStatus represents the online status of a host.

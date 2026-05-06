@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/eterm/eterm/internal/db"
-	"github.com/eterm/eterm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
 	"gorm.io/gorm"
 )
 

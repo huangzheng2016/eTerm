@@ -10,11 +10,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/eterm/eterm/internal/db"
-	internalssh "github.com/eterm/eterm/internal/ssh"
-	"github.com/eterm/eterm/internal/types"
-	"github.com/eterm/eterm/internal/ui"
-	"github.com/eterm/eterm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/db"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 )
 
 type quickConnectModel struct {
@@ -114,22 +114,11 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 	}
 
 	dial := func() tea.Msg {
-		// Fingerprint pre-check
-		if internalssh.NeedsFingerprint(database, host.Hostname, host.Port) {
-			algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, 10*time.Second)
-			if err != nil {
-				return types.ErrorMsg{Err: fmt.Errorf("failed to probe host key: %w", err)}
+		if bm := hostFingerprintDialBlock(database, 0, host.Hostname, host.Port, "quick", 0, 0); bm != nil {
+			if fp, ok := bm.(types.FingerprintConfirmMsg); ok {
+				return quickConnectFingerprintMsg{info: msg, confirmInfo: fp}
 			}
-			return quickConnectFingerprintMsg{
-				info: msg,
-				confirmInfo: types.FingerprintConfirmMsg{
-					Hostname:    host.Hostname,
-					Port:        host.Port,
-					Algorithm:   algo,
-					Fingerprint: fp,
-					ConnType:    "quick",
-				},
-			}
+			return bm
 		}
 
 		client, err := internalssh.Connect(internalssh.ConnectConfig{
