@@ -38,7 +38,7 @@
 **Linux / macOS / Windows (Git Bash)**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/huangzheng2016/eTerm/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/huangzheng2016/eTerm/master/scripts/install.sh | sh
 ```
 
 默认安装到 `~/.local/bin/eterm`（Windows 为 `~/bin/eterm.exe`）。可设置环境变量 `INSTALL_DIR` 指定目录。
@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/huangzheng2016/eTerm/main/scripts/i
 **Windows (PowerShell)**
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/huangzheng2016/eTerm/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/huangzheng2016/eTerm/master/scripts/install.ps1 | iex
 ```
 
 **从源码构建**
