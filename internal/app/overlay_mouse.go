@@ -44,6 +44,9 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.batchActions = nil
 		a.batchTag = nil
 		a.importStratMenu = nil
+		a.importKeyList = nil
+		a.importHostList = nil
+		a.importSourceMenu = nil
 		a.commandPalette = nil
 		a.helpOverlay = false
 		a.upgradePrompt = nil

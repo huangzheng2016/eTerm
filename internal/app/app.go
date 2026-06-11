@@ -95,7 +95,10 @@ type App struct {
 	batchTag     *batchTagModel
 	batchActions *batchActionsModel
 
-	importStratMenu *importStratMenuModel
+	importStratMenu  *importStratMenuModel
+	importSourceMenu *importSourceMenuModel
+	importHostList   *importHostListModel
+	importKeyList    *importKeyListModel
 
 	upgradePrompt *upgradePromptModel
 

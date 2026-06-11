@@ -100,6 +100,15 @@ func (a App) View() tea.View {
 		} else if a.batchTag != nil {
 			overlay := a.batchTag.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.importKeyList != nil {
+			overlay := a.importKeyList.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.importHostList != nil {
+			overlay := a.importHostList.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.importSourceMenu != nil {
+			overlay := a.importSourceMenu.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.importStratMenu != nil {
 			overlay := a.importStratMenu.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)

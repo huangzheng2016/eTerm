@@ -151,6 +151,40 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleBatchActionsKey(msg)
 		}
 
+		if a.importKeyList != nil {
+			closed, confirmed, cmd := a.importKeyList.Update(msg)
+			if confirmed {
+				return a, runTermiusImport(a.db, a.importHostList.items, a.importKeyList.items)
+			}
+			if closed {
+				a.importKeyList = nil
+			}
+			return a, cmd
+		}
+
+		if a.importHostList != nil {
+			closed, proceed, cmd := a.importHostList.Update(msg)
+			if proceed {
+				keyItems := buildKeyItems(a.db, a.importHostList.allKeys)
+				keyItems = lockRequiredKeys(a.importHostList.items, keyItems)
+				a.importKeyList = newImportKeyList(keyItems, a.importHostList.items)
+				return a, cmd
+			}
+			if closed {
+				a.importHostList = nil
+				a.importSourceMenu = newImportSourceMenu()
+			}
+			return a, cmd
+		}
+
+		if a.importSourceMenu != nil {
+			closed, cmd := a.importSourceMenu.Update(msg)
+			if closed {
+				a.importSourceMenu = nil
+			}
+			return a, cmd
+		}
+
 		if a.importStratMenu != nil {
 			closed, cmd := a.importStratMenu.Update(msg)
 			if closed {
@@ -659,6 +693,38 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.EscMenuRequestMsg:
 		a.escMenu = newEscMenu()
 		return a, nil
+
+	case types.OpenImportSourceMenuMsg:
+		a.importSourceMenu = newImportSourceMenu()
+		return a, nil
+
+	case termiusLoadMsg:
+		return a, loadTermiusData()
+
+	case termiusExportResultMsg:
+		if msg.err != nil {
+			var tc tea.Cmd
+			a.toast, tc = a.toast.Show(fmt.Sprintf("Termius export error: %v", msg.err), components.ToastError, 5*time.Second)
+			a.importSourceMenu = nil
+			return a, tc
+		}
+		hostItems := buildHostItems(a.db, msg.hosts)
+		hl := newImportHostList(hostItems)
+		hl.allKeys = msg.keys
+		a.importHostList = hl
+		a.importSourceMenu = nil
+		return a, nil
+
+	case termiusImportResultMsg:
+		a.importKeyList = nil
+		a.importHostList = nil
+		var tc tea.Cmd
+		if msg.err != nil {
+			a.toast, tc = a.toast.Show(fmt.Sprintf("Import error: %v", msg.err), components.ToastError, 5*time.Second)
+		} else {
+			a.toast, tc = a.toast.Show(fmt.Sprintf("导入完成: %d 成功, %d 跳过", msg.imported, msg.skipped), components.ToastSuccess, 3*time.Second)
+		}
+		return a, tea.Batch(tc, func() tea.Msg { return types.RefreshListMsg{} })
 
 	case types.OpenSettingsMsg:
 		return a.openSettingsTab()
