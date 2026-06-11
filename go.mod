@@ -32,7 +32,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
-	github.com/huangzheng2016/termius_exporter v0.1.0 // indirect
+	github.com/huangzheng2016/termius_exporter v0.2.0
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
 	github.com/jcmturner/gofork v1.7.6 // indirect

@@ -80,11 +80,26 @@ func (m Model) maybeOverlay(bg string) string {
 	case modeImport:
 		overlay := m.renderImportOverlay()
 		return m.placeOverlay(bg, overlay)
+	case modeDelete:
+		overlay := m.renderDeleteOverlay()
+		return m.placeOverlay(bg, overlay)
 	}
 	return bg
 }
 
 // PLACEHOLDER_OVERLAYS
+
+func (m Model) renderDeleteOverlay() string {
+	title := overlayTitleStyle.Render("删除密钥")
+	name := lipgloss.NewStyle().Bold(true).Render(m.pendingDeleteName)
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"确认删除密钥 "+name+" ?",
+		"",
+		overlayHintStyle.Render("y 确认  n/esc 取消"),
+	)
+	return overlayBoxStyle.Width(m.overlayWidth()).Render(content)
+}
 
 func (m Model) overlayWidth() int {
 	w := m.width - 8

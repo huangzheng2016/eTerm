@@ -103,12 +103,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				case viewkeys.MatchKey(msg, m.vk.Delete):
 					if k := m.SelectedKey(); k != nil {
-						database := m.db
-						id := k.ID
-						return m, func() tea.Msg {
-							err := keys.DeleteKey(database, id)
-							return keyDeletedMsg{err: err}
-						}
+						m.pendingDeleteID = k.ID
+						m.pendingDeleteName = k.Name
+						m.mode = modeDelete
+						return m, nil
 					}
 				case viewkeys.MatchKey(msg, m.vk.Copy):
 					if k := m.SelectedKey(); k != nil {
@@ -222,6 +220,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			return m, nil
+
+		case modeDelete:
+			switch msg.String() {
+			case "y":
+				database := m.db
+				id := m.pendingDeleteID
+				m.resetMode()
+				return m, func() tea.Msg {
+					err := keys.DeleteKey(database, id)
+					return keyDeletedMsg{err: err}
+				}
+			case "n", "esc":
+				m.resetMode()
+				return m, nil
+			}
 		}
 
 	case tea.MouseClickMsg:

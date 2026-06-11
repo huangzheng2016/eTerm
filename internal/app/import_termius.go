@@ -195,6 +195,8 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 				skipped++
 				continue
 			}
+			// Remove any soft-deleted record with the same name before re-creating.
+			database.Unscoped().Where("name = ? AND deleted_at IS NOT NULL", ki.chosenAlias).Delete(&db.SSHKey{})
 			k := db.SSHKey{
 				SyncID:         fmt.Sprintf("termius-%s", ki.chosenAlias),
 				Name:           ki.chosenAlias,
@@ -234,9 +236,21 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 			authMethod := "agent"
 			if keyID != nil {
 				authMethod = "key"
+			} else if hi.rec.KeyID > 0 || hi.rec.KeyName != "" {
+				// Key referenced but not found/imported — mark as key auth so the
+				// user sees the correct method.
+				authMethod = "key"
 			} else if hi.rec.Password != "" {
 				authMethod = "password"
 			}
+			var encPassword string
+			if hi.rec.Password != "" {
+				if enc, err := security.Encrypt([]byte(hi.rec.Password), secKey.Bytes()); err == nil {
+					encPassword = enc
+				}
+			}
+			// Remove any soft-deleted host with the same alias before re-creating.
+			database.Unscoped().Where("alias = ? AND deleted_at IS NOT NULL", hi.chosenAlias).Delete(&db.Host{})
 			h := db.Host{
 				SyncID:     fmt.Sprintf("termius-%s", hi.chosenAlias),
 				Alias:      hi.chosenAlias,
@@ -245,7 +259,7 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 				Username:   hi.rec.Username,
 				AuthMethod: authMethod,
 				KeyID:      keyID,
-				Password:   hi.rec.Password,
+				Password:   encPassword,
 			}
 			if err := database.Create(&h).Error; err != nil {
 				skipped++

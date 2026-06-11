@@ -21,6 +21,7 @@ const (
 	modeNone     inputMode = 0
 	modeGenerate inputMode = 1
 	modeImport   inputMode = 2
+	modeDelete   inputMode = 3
 )
 
 type keyItem struct {
@@ -52,10 +53,12 @@ type Model struct {
 	typeOptions []string
 	typeIdx     int
 	step        int
-	sshKeys     []db.SSHKey
-	gridCursor  int
-	gridLayout  components.GridLayout
-	vk          viewkeys.KeyViewKeys
+	sshKeys        []db.SSHKey
+	gridCursor     int
+	gridLayout     components.GridLayout
+	vk             viewkeys.KeyViewKeys
+	pendingDeleteID uint
+	pendingDeleteName string
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.KeyViewKeys) { m.vk = vk }
