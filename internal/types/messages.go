@@ -281,6 +281,9 @@ type UpgradeDownloadDoneMsg struct {
 // EscMenuRequestMsg triggers the ESC menu overlay (QUIT / SETTINGS) on the home view.
 type EscMenuRequestMsg struct{}
 
+// OpenImportSourceMenuMsg triggers the import source picker overlay.
+type OpenImportSourceMenuMsg struct{}
+
 // OpenSettingsMsg requests opening the settings tab.
 type OpenSettingsMsg struct{}
 
