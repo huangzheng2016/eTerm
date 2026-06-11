@@ -23,6 +23,64 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scroll = 0
 		return m, nil
 
+	case types.RefreshListMsg:
+		return m, m.reload()
+
+	case tea.MouseClickMsg:
+		if !m.loaded || len(m.rows) == 0 || msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		listW, _, stacked := m.layoutWidths()
+		if msg.Y < 2 {
+			return m, nil
+		}
+		row := msg.Y - 2
+		if stacked || msg.X < listW {
+			if row >= 0 && row < len(m.rows) {
+				m.sel = row
+				m.scroll = 0
+				m.focusList = true
+			}
+			return m, nil
+		}
+		m.focusList = false
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		if !m.loaded || len(m.rows) == 0 {
+			return m, nil
+		}
+		listW, _, stacked := m.layoutWidths()
+		if !stacked {
+			m.focusList = msg.X < listW
+		}
+		delta := 0
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			delta = -1
+		case tea.MouseWheelDown:
+			delta = 1
+		default:
+			return m, nil
+		}
+		if m.focusList {
+			next := m.sel + delta
+			if next < 0 {
+				next = 0
+			}
+			if next >= len(m.rows) {
+				next = len(m.rows) - 1
+			}
+			if next != m.sel {
+				m.sel = next
+				m.scroll = 0
+			}
+			return m, nil
+		}
+		m.scroll += delta
+		clampTranscriptScroll(m)
+		return m, nil
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc", "escape":
@@ -83,6 +141,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) layoutWidths() (int, int, bool) {
+	listW := m.width / 3
+	if listW < 24 {
+		listW = 24
+	}
+	if listW > m.width-20 {
+		listW = m.width / 2
+	}
+	transW := m.width - listW - 2
+	if transW < 20 {
+		transW = m.width - 2
+		listW = m.width
+	}
+	return listW, transW, listW >= m.width-2
 }
 
 func clampTranscriptScroll(m *Model) {

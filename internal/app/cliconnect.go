@@ -95,7 +95,7 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 			database.Create(&db.ConnectionHistory{
 				HostID: host.ID, ConnectedAt: time.Now(), Status: "failed",
 			})
-			return types.ErrorMsg{Err: fmt.Errorf("SSH connection failed: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SSHConnectMsg{HostID: host.ID}}
 		}
 
 		now := time.Now()
@@ -111,7 +111,7 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 			for _, c := range client.Closers {
 				_ = c.Close()
 			}
-			return types.ErrorMsg{Err: fmt.Errorf("failed to start shell: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SSHConnectMsg{HostID: host.ID}}
 		}
 		is.SetClosers(client.Closers)
 

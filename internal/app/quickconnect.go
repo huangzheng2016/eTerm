@@ -130,7 +130,7 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 			},
 		})
 		if err != nil {
-			return types.ErrorMsg{Err: fmt.Errorf("quick connect failed: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: fmt.Sprintf("%s@%s:%d", msg.Username, msg.Hostname, msg.Port), Retry: msg}
 		}
 
 		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, false)
@@ -139,7 +139,7 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 			for _, c := range client.Closers {
 				_ = c.Close()
 			}
-			return types.ErrorMsg{Err: fmt.Errorf("failed to start shell: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: fmt.Sprintf("%s@%s:%d", msg.Username, msg.Hostname, msg.Port), Retry: msg}
 		}
 		is.SetClosers(client.Closers)
 

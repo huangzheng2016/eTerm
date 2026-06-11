@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -11,6 +12,80 @@ import (
 
 func sshConfigPath() string {
 	return sshconfig.MainConfigPath()
+}
+
+func buildSSHConfigImportPreview(database *gorm.DB, parsed []sshconfig.ParsedHost) types.ImportSSHConfigPreviewResultMsg {
+	var preview types.ImportSSHConfigPreviewResultMsg
+	for _, ph := range parsed {
+		existing, ok := findHostByParsed(database, ph)
+		if !ok {
+			preview.Added++
+			continue
+		}
+		incoming := hostFromParsed(database, ph)
+		if importComparableHost(existing) == importComparableHost(incoming) {
+			preview.Skipped++
+		} else {
+			preview.Changed++
+		}
+	}
+	return preview
+}
+
+type comparableImportHost struct {
+	Alias           string
+	Hostname        string
+	Port            int
+	Username        string
+	AuthMethod      string
+	KeyID           uint
+	HasKeyID        bool
+	Group           string
+	Tags            string
+	Description     string
+	ProxyType       string
+	ProxyHost       string
+	ProxyPort       int
+	ProxyUser       string
+	ProxyCommand    string
+	GSSAPISource    string
+	GSSAPIKeytab    string
+	KrbPrincipal    string
+	ForwardAgent    bool
+	RemoteCommand   string
+	ExtraSSHOptions string
+}
+
+func importComparableHost(h db.Host) comparableImportHost {
+	var keyID uint
+	hasKeyID := false
+	if h.KeyID != nil {
+		keyID = *h.KeyID
+		hasKeyID = true
+	}
+	return comparableImportHost{
+		Alias:           h.Alias,
+		Hostname:        h.Hostname,
+		Port:            h.Port,
+		Username:        h.Username,
+		AuthMethod:      h.AuthMethod,
+		KeyID:           keyID,
+		HasKeyID:        hasKeyID,
+		Group:           h.Group,
+		Tags:            h.Tags,
+		Description:     h.Description,
+		ProxyType:       h.ProxyType,
+		ProxyHost:       h.ProxyHost,
+		ProxyPort:       h.ProxyPort,
+		ProxyUser:       h.ProxyUser,
+		ProxyCommand:    h.ProxyCommand,
+		GSSAPISource:    h.GSSAPISource,
+		GSSAPIKeytab:    h.GSSAPIKeytab,
+		KrbPrincipal:    h.KrbPrincipal,
+		ForwardAgent:    h.ForwardAgent,
+		RemoteCommand:   h.RemoteCommand,
+		ExtraSSHOptions: h.ExtraSSHOptions,
+	}
 }
 
 // CountImportConflicts returns how many parsed host blocks match an existing DB row.
@@ -164,6 +239,7 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 	imported := 0
 	skipped := 0
 	overwritten := 0
+	unresolved := 0
 
 	for _, ph := range parsed {
 		var count int64
@@ -200,8 +276,13 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 					"extra_ssh_options": nh.ExtraSSHOptions,
 				}
 				if err := database.Model(&db.Host{}).Where("id = ?", h.ID).Updates(updates).Error; err != nil {
-					skipped++
-					continue
+					return types.ImportSSHConfigResultMsg{
+						Imported:             imported,
+						Skipped:              skipped,
+						Overwritten:          overwritten,
+						UnresolvedProxyJumps: unresolved,
+						Err:                  fmt.Errorf("overwrite %q: %w", ph.Alias, err),
+					}
 				}
 				overwritten++
 				created[ph.Alias] = h.ID
@@ -213,13 +294,18 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 
 		host := hostFromParsed(database, ph)
 		if err := database.Create(&host).Error; err != nil {
-			continue
+			return types.ImportSSHConfigResultMsg{
+				Imported:             imported,
+				Skipped:              skipped,
+				Overwritten:          overwritten,
+				UnresolvedProxyJumps: unresolved,
+				Err:                  fmt.Errorf("import %q: %w", ph.Alias, err),
+			}
 		}
 		imported++
 		created[ph.Alias] = host.ID
 	}
 
-	unresolved := 0
 	for _, ph := range parsed {
 		if strings.TrimSpace(ph.ProxyJump) == "" {
 			continue

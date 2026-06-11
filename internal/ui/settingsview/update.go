@@ -25,6 +25,16 @@ func (m *Model) openPasswordOverlay() (tea.Model, tea.Cmd) {
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case types.SettingsSavedMsg:
+		if msg.Err != nil {
+			return m, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
+		}
+		m.modified = false
+		return m, tea.Batch(
+			func() tea.Msg { return types.KeyBindingsChangedMsg{} },
+			func() tea.Msg { return types.RefreshListMsg{} },
+		)
+
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height)
 		if m.pwd != nil {
@@ -212,11 +222,16 @@ func (m *Model) save() tea.Cmd {
 	}
 	return tea.Sequence(
 		func() tea.Msg {
-			_ = db.SetSetting(database, "keybindings", string(configData))
-			_ = db.SetSetting(database, "save_session_transcript", saveTr)
-			_ = db.SetSetting(database, "grid_status_words", gridW)
-			return types.KeyBindingsChangedMsg{}
+			if err := db.SetSetting(database, "keybindings", string(configData)); err != nil {
+				return types.SettingsSavedMsg{Err: err}
+			}
+			if err := db.SetSetting(database, "save_session_transcript", saveTr); err != nil {
+				return types.SettingsSavedMsg{Err: err}
+			}
+			if err := db.SetSetting(database, "grid_status_words", gridW); err != nil {
+				return types.SettingsSavedMsg{Err: err}
+			}
+			return types.SettingsSavedMsg{}
 		},
-		func() tea.Msg { return types.RefreshListMsg{} },
 	)
 }

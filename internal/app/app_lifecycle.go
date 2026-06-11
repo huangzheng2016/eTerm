@@ -21,11 +21,11 @@ func (a App) runSync() tea.Cmd {
 	mk := a.masterKey
 	return func() tea.Msg {
 		if mk.IsLocked() {
-			return nil
+			return types.SyncResultMsg{}
 		}
 		cfg := esync.LoadConfig(database, mk)
 		if !cfg.Enabled || cfg.Passphrase == "" {
-			return nil
+			return types.SyncResultMsg{}
 		}
 
 		var tr esync.Transport
@@ -82,6 +82,13 @@ func (a App) runSync() tea.Cmd {
 			return types.SyncResultMsg{Err: err}
 		}
 		mergeRes := esync.MergeRecords(database, mk, cfg.Passphrase, records)
+		if mergeRes.Failed > 0 {
+			return types.SyncResultMsg{
+				Pulled: mergeRes.Merged,
+				Failed: mergeRes.Failed,
+				Err:    fmt.Errorf("merge failed for %d sync record(s)", mergeRes.Failed),
+			}
+		}
 
 		// Collect only records modified since last sync
 		lastSyncAt := time.Time{}
@@ -103,6 +110,23 @@ func (a App) runSync() tea.Cmd {
 		db.SetSetting(database, "sync_last_sync_at", time.Now().Format(time.RFC3339))
 		return types.SyncResultMsg{Pulled: mergeRes.Merged, Pushed: len(dirty), Failed: mergeRes.Failed}
 	}
+}
+
+func (a App) prepareSync(manual bool) (tea.Cmd, bool) {
+	if a.masterKey.IsLocked() {
+		if manual {
+			return func() tea.Msg { return types.SyncResultMsg{Err: fmt.Errorf("sync unavailable while locked")} }, false
+		}
+		return nil, false
+	}
+	cfg := esync.LoadConfig(a.db, a.masterKey)
+	if !cfg.Enabled || cfg.Passphrase == "" {
+		if manual {
+			return func() tea.Msg { return types.SyncResultMsg{Err: fmt.Errorf("sync is disabled or missing passphrase")} }, false
+		}
+		return nil, false
+	}
+	return a.runSync(), true
 }
 
 func syncTickCmd(database *gorm.DB) tea.Cmd {
@@ -248,7 +272,7 @@ func (a *App) processConfirmResult() tea.Cmd {
 		if confirmed {
 			database := a.db
 			return func() tea.Msg {
-				_ = database.Delete(&db.Snippet{}, id).Error
+				_ = db.DeleteSnippetForSync(database, id)
 				return types.SnippetDeletedMsg{ID: id}
 			}
 		}
@@ -262,7 +286,7 @@ func (a *App) processConfirmResult() tea.Cmd {
 		if confirmed {
 			database := a.db
 			return func() tea.Msg {
-				_ = database.Delete(&db.PortForward{}, id).Error
+				_ = db.DeletePortForwardForSync(database, id)
 				return types.ForwardRuleDeletedMsg{ID: id}
 			}
 		}

@@ -2,35 +2,22 @@ package fwdview
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
-)
-
-var (
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
-	emptyHintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func (m Model) View() tea.View {
 	if !m.loaded {
-		return tea.NewView("Loading...")
+		return tea.NewView(components.Loading(m.width, m.height, "Loading..."))
 	}
 
-	help := helpStyle.Render("n:add · e:edit · d:delete · enter:start · x:stop")
-
 	if len(m.rules) == 0 {
-		block := lipgloss.JoinVertical(lipgloss.Center,
+		return tea.NewView(components.EmptyState(m.width, m.height,
 			"No port-forward rules.",
-			"",
-			emptyHintStyle.Render("Press 'n' to add one."),
-			"",
-			help,
-		)
-		if m.width > 0 && m.height > 0 {
-			return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, block))
-		}
-		return tea.NewView(block)
+			"Press '"+viewkeys.HelpLabel(m.vk.New)+"' to add one.",
+			fwdHelpLine(m.vk),
+		))
 	}
 
 	cards := make([]string, len(m.rules))
@@ -40,4 +27,12 @@ func (m Model) View() tea.View {
 	}
 	grid := components.RenderGridRows(cards, len(m.rules), m.gridCursor, m.gridLayout)
 	return tea.NewView(grid)
+}
+
+func fwdHelpLine(vk viewkeys.FwdKeys) string {
+	return viewkeys.HelpLabel(vk.New) + ":add · " +
+		viewkeys.HelpLabel(vk.Edit) + ":edit · " +
+		viewkeys.HelpLabel(vk.Delete) + ":delete · " +
+		viewkeys.HelpLabel(vk.Start) + ":start · " +
+		viewkeys.HelpLabel(vk.Stop) + ":stop"
 }

@@ -71,17 +71,39 @@ func (a App) MainViewChromeTopLines() int {
 // appAdjustMouseForTabContent maps screen mouse coordinates to tab-content coordinates.
 // Clicks on the tab strip / divider (including toast on the divider line) return nil so tab models do not mis-handle them.
 func appAdjustMouseForTabContent(a App, msg tea.Msg) tea.Msg {
-	mc, ok := msg.(tea.MouseClickMsg)
-	if !ok {
-		return msg
-	}
 	top := a.MainViewChromeTopLines()
-	if mc.Y < top {
-		return nil
+	contentH := a.mainContentHeight()
+	switch m := msg.(type) {
+	case tea.MouseClickMsg:
+		if m.Y < top || m.Y >= top+contentH {
+			return nil
+		}
+		mm := m.Mouse()
+		mm.Y -= top
+		return tea.MouseClickMsg(mm)
+	case tea.MouseWheelMsg:
+		if m.Y < top || m.Y >= top+contentH {
+			return nil
+		}
+		mm := m.Mouse()
+		mm.Y -= top
+		return tea.MouseWheelMsg(mm)
+	case tea.MouseMotionMsg:
+		if m.Y < top || m.Y >= top+contentH {
+			return nil
+		}
+		mm := m.Mouse()
+		mm.Y -= top
+		return tea.MouseMotionMsg(mm)
+	case tea.MouseReleaseMsg:
+		if m.Y < top || m.Y >= top+contentH {
+			return nil
+		}
+		mm := m.Mouse()
+		mm.Y -= top
+		return tea.MouseReleaseMsg(mm)
 	}
-	mm := mc.Mouse()
-	mm.Y -= top
-	return tea.MouseClickMsg(mm)
+	return msg
 }
 
 func ptyFromAppSizeForTab(a App, tabType TabType) (cols, rows int) {

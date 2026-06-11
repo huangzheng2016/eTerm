@@ -32,10 +32,41 @@ func sshStatusBarHint(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool) str
 }
 
 func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, sshDisconnected bool) string {
-	if tabType == SSHTab {
+	switch tabType {
+	case SSHTab:
 		return sshStatusBarHint(km, cfg, sshDisconnected)
+	case HomeTab:
+		return homeStatusBarHint(km, cfg)
+	case SnippetTab:
+		return snippetStatusBarHint(km, cfg)
 	}
-	return strings.Join(statusBarShortcutParts(km, cfg, false, false), " · ") + " · ? all keys"
+	return strings.Join(statusBarShortcutParts(km, cfg, false, false), " · ") + " · " + helpLabel(cfg.Help) + " all keys"
+}
+
+// homeStatusBarHint shows the host-list shortcuts inline so they are visible without opening full help.
+func homeStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
+	parts := []string{
+		km.SSHConnect.Help().Key + " connect",
+		km.NewHost.Help().Key + " new",
+		km.EditHost.Help().Key + " edit",
+		km.DeleteHost.Help().Key + " delete",
+		km.Search.Help().Key + " search",
+		helpLabel(cfg.ShowHidden) + " show hidden",
+		helpLabel(cfg.HideHost) + " hide",
+		helpLabel(cfg.Help) + " all keys",
+	}
+	return strings.Join(parts, " · ")
+}
+
+func snippetStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
+	parts := []string{
+		helpLabel(cfg.SnipNew) + " new",
+		helpLabel(cfg.SnipEdit) + " edit",
+		helpLabel(cfg.SnipDelete) + " delete",
+		helpLabel(cfg.SnippetPicker) + " run",
+		helpLabel(cfg.Help) + " all keys",
+	}
+	return strings.Join(parts, " · ")
 }
 
 // dynamicBinding creates a key.Binding from config keys for help display.
@@ -78,7 +109,7 @@ func (h sftpAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 		{dynamicBinding(h.cfg.SFTPUpload, "upload"), dynamicBinding(h.cfg.SFTPDownload, "download"), dynamicBinding(h.cfg.SFTPDelete, "delete")},
 		{dynamicBinding(h.cfg.SFTPMkdir, "mkdir"), dynamicBinding(h.cfg.SFTPRename, "rename"), dynamicBinding(h.cfg.SFTPChmod, "chmod")},
-		{dynamicBinding(h.cfg.SFTPSwitchLeft, "left panel")},
+		{dynamicBinding(h.cfg.SFTPSwitchLeft, "left panel"), dynamicBinding(h.cfg.SFTPSwitchRight, "right panel")},
 	}
 }
 
@@ -109,6 +140,8 @@ func (h keyTabAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.QuitApp, h.km.NewTab, h.km.CloseTabSafe},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
+		{dynamicBinding(h.cfg.KeyNew, "new key"), dynamicBinding(h.cfg.KeyImport, "import key"), dynamicBinding(h.cfg.KeyExport, "export key")},
+		{dynamicBinding(h.cfg.KeyDelete, "delete key"), dynamicBinding(h.cfg.KeyCopy, "copy pubkey")},
 	}
 }
 
@@ -124,6 +157,8 @@ func (h forwardTabAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.QuitApp, h.km.NewTab, h.km.CloseTabSafe},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
+		{dynamicBinding(h.cfg.FwdNew, "new rule"), dynamicBinding(h.cfg.FwdEdit, "edit rule"), dynamicBinding(h.cfg.FwdDelete, "delete rule")},
+		{dynamicBinding(h.cfg.FwdStart, "start"), dynamicBinding(h.cfg.FwdStop, "stop")},
 	}
 }
 
@@ -139,6 +174,7 @@ func (h snippetTabAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.QuitApp, h.km.NewTab, h.km.CloseTabSafe},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
+		{dynamicBinding(h.cfg.SnipNew, "new snippet"), dynamicBinding(h.cfg.SnipEdit, "edit snippet"), dynamicBinding(h.cfg.SnipDelete, "delete snippet")},
 	}
 }
 

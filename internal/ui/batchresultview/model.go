@@ -20,10 +20,11 @@ import (
 var jobIDGen atomic.Uint64
 
 type hostState struct {
-	HostID uint
-	Label  string
-	Status string
-	Output strings.Builder
+	HostID     uint
+	Label      string
+	Status     string
+	FailedKind string
+	Output     strings.Builder
 }
 
 type HostStartMsg struct {
@@ -140,7 +141,6 @@ func (m *Model) run() {
 	}
 	wg.Wait()
 	m.emit(AllDoneMsg{JobID: m.jobID})
-	close(m.ch)
 }
 
 func (m *Model) runHost(hostID uint) {
@@ -301,6 +301,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if msg.Err != nil {
 				m.hosts[i].Status = "failed"
+				m.hosts[i].FailedKind = internalssh.Classify(msg.Err).Kind.Short()
 				m.failed++
 				if m.hosts[i].Output.Len() == 0 {
 					m.hosts[i].Output.WriteString(msg.Err.Error())
@@ -343,6 +344,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgdown":
 			m.scroll += 10
 			return m, nil
+		case "c":
+			out := m.selectedOutput()
+			if strings.TrimSpace(out) == "" {
+				return m, nil
+			}
+			return m, tea.SetClipboard(out)
+		case "r":
+			if m.cursor < 0 || m.cursor >= len(m.hosts) || m.hosts[m.cursor].Status != "failed" {
+				return m, nil
+			}
+			hostID := m.hosts[m.cursor].HostID
+			m.hosts[m.cursor].Status = "queued"
+			m.hosts[m.cursor].Output.Reset()
+			if m.failed > 0 {
+				m.failed--
+			}
+			m.done = false
+			go func() {
+				m.runHost(hostID)
+				m.emit(AllDoneMsg{JobID: m.jobID})
+			}()
+			return m, waitEvent(m)
 		}
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft || len(m.hosts) == 0 {

@@ -18,12 +18,12 @@ const (
 )
 
 type importStratMenuModel struct {
-	conflicts int
-	cursor    importStratItem
+	preview types.ImportSSHConfigPreviewResultMsg
+	cursor  importStratItem
 }
 
-func newImportStratMenu(conflicts int) *importStratMenuModel {
-	return &importStratMenuModel{conflicts: conflicts, cursor: stratSkip}
+func newImportStratMenu(preview types.ImportSSHConfigPreviewResultMsg) *importStratMenuModel {
+	return &importStratMenuModel{preview: preview, cursor: stratSkip}
 }
 
 func (m *importStratMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
@@ -55,7 +55,7 @@ func (m *importStratMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea
 
 func (m *importStratMenuModel) View() string {
 	title := ui.TitleStyle.Render("SSH config import")
-	msg := fmt.Sprintf("%d host entries already exist in eTerm.", m.conflicts)
+	msg := fmt.Sprintf("Preview: %d new, %d changed, %d unchanged.", m.preview.Added, m.preview.Changed, m.preview.Skipped)
 	items := []struct {
 		label string
 		key   string

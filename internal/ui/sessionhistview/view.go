@@ -7,28 +7,18 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 )
 
 func (m *Model) View() tea.View {
 	if !m.loaded {
-		return tea.NewView(ui.DimStyle.Render("Loading session history…"))
+		return tea.NewView(components.Loading(m.width, m.height, "Loading session history..."))
 	}
 	if len(m.rows) == 0 {
-		return tea.NewView(ui.DimStyle.Render("No saved sessions for this host yet."))
+		return tea.NewView(components.EmptyState(m.width, m.height, "No saved sessions for this host yet."))
 	}
 
-	listW := m.width / 3
-	if listW < 24 {
-		listW = 24
-	}
-	if listW > m.width-20 {
-		listW = m.width / 2
-	}
-	transW := m.width - listW - 2
-	if transW < 20 {
-		transW = m.width - 2
-		listW = m.width
-	}
+	listW, transW, stacked := m.layoutWidths()
 
 	var listLines []string
 	for i, r := range m.rows {
@@ -80,7 +70,7 @@ func (m *Model) View() tea.View {
 	hint := ui.DimStyle.Render("tab focus · j/k · pgup/pgdn transcript · esc close")
 
 	var main string
-	if listW >= m.width-2 {
+	if stacked {
 		main = lipgloss.JoinVertical(lipgloss.Left, title, "", listStyled, "", transStyled, "", hint)
 	} else {
 		row := lipgloss.JoinHorizontal(lipgloss.Top, listStyled, "  ", transStyled)

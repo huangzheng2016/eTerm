@@ -104,6 +104,7 @@ type Model struct {
 	kmCfg keymatch.Config
 
 	// Configurable home-specific keys
+	helpKeys           []string
 	quickConnectKeys   []string
 	importSSHKeys      []string
 	exportConfigKeys   []string
@@ -125,6 +126,7 @@ type Model struct {
 type HomeKeyConfig struct {
 	KmCfg          keymatch.Config
 	Keys           listKeyMap
+	Help           []string
 	QuickConnect   []string
 	ImportSSH      []string
 	ExportConfig   []string
@@ -157,6 +159,7 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 		lastClickIdx:       -1,
 		tagList:            newTagList(),
 		kmCfg:              hkc.KmCfg,
+		helpKeys:           hkc.Help,
 		quickConnectKeys:   hkc.QuickConnect,
 		importSSHKeys:      hkc.ImportSSH,
 		exportConfigKeys:   hkc.ExportConfig,
@@ -174,6 +177,7 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
 	m.keys = hkc.Keys
 	m.kmCfg = hkc.KmCfg
+	m.helpKeys = hkc.Help
 	m.quickConnectKeys = hkc.QuickConnect
 	m.importSSHKeys = hkc.ImportSSH
 	m.exportConfigKeys = hkc.ExportConfig

@@ -78,6 +78,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.loadLocalFiles(), m.loadRemoteFiles())
 
 	case tea.KeyPressMsg:
+		if m.namePromptActive {
+			switch msg.String() {
+			case "esc":
+				m.closeNamePrompt()
+				return m, nil
+			case "enter":
+				return m, m.applyNamePrompt()
+			}
+			var cmd tea.Cmd
+			m.nameInput, cmd = m.nameInput.Update(msg)
+			return m, cmd
+		}
+
 		if m.chmodActive {
 			switch msg.String() {
 			case "esc":
@@ -117,11 +130,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		case viewkeys.MatchAny(msg.String(), m.vk.SwitchLeft):
+		case viewkeys.MatchKey(msg, m.vk.SwitchLeft):
 			m.focusedPanel = leftPanel
 			return m, nil
 
-		case viewkeys.MatchAny(msg.String(), m.vk.SwitchRight):
+		case viewkeys.MatchKey(msg, m.vk.SwitchRight):
 			m.focusedPanel = rightPanel
 			return m, nil
 
@@ -131,22 +144,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.String() == "backspace":
 			return m, m.goParentDir()
 
-		case viewkeys.MatchAny(msg.String(), m.vk.Upload):
+		case viewkeys.MatchKey(msg, m.vk.Upload):
 			return m, m.uploadSelected()
 
-		case viewkeys.MatchAny(msg.String(), m.vk.Download):
+		case viewkeys.MatchKey(msg, m.vk.Download):
 			return m, m.downloadSelected()
 
-		case viewkeys.MatchAny(msg.String(), m.vk.Delete):
+		case viewkeys.MatchKey(msg, m.vk.Delete):
 			return m, m.confirmDelete()
 
-		case viewkeys.MatchAny(msg.String(), m.vk.Mkdir):
+		case viewkeys.MatchKey(msg, m.vk.Mkdir):
 			return m, m.mkdirCmd()
 
-		case viewkeys.MatchAny(msg.String(), m.vk.Rename):
+		case viewkeys.MatchKey(msg, m.vk.Rename):
 			return m, m.confirmRename()
 
-		case viewkeys.MatchAny(msg.String(), m.vk.Chmod):
+		case viewkeys.MatchKey(msg, m.vk.Chmod):
 			return m, m.openChmod()
 
 		case msg.String() == "esc":
@@ -154,6 +167,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseClickMsg:
+		if m.namePromptActive {
+			return m.handleNamePromptMouse(msg)
+		}
 		if m.chmodActive {
 			if m2, cmd, done := m.handleChmodMouse(msg); done {
 				return m2, cmd
@@ -203,8 +219,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
+		if m.namePromptActive {
+			return m, nil
+		}
 		if m.chmodActive {
 			return m, nil
+		}
+		if m.width > 0 {
+			if msg.X < m.width/2 {
+				m.focusedPanel = leftPanel
+			} else {
+				m.focusedPanel = rightPanel
+			}
 		}
 	}
 

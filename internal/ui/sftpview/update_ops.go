@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sort"
+	"strconv"
+	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/sftp"
 )
@@ -117,6 +119,21 @@ func (m *Model) uploadSelected() tea.Cmd {
 		return nil
 	}
 	fi := item.(fileItem)
+	remotePath := remoteJoin(m.remotePath, fi.info.Name)
+	if _, err := m.sftpClient.Stat(remotePath); err == nil {
+		m.confirmMsg = fmt.Sprintf("Overwrite remote %q?", fi.info.Name)
+		m.pendingAction = func() tea.Cmd { return m.uploadSelectedOverwrite() }
+		return nil
+	}
+	return m.uploadSelectedOverwrite()
+}
+
+func (m *Model) uploadSelectedOverwrite() tea.Cmd {
+	item := m.localList.SelectedItem()
+	if item == nil {
+		return nil
+	}
+	fi := item.(fileItem)
 	localPath := filepath.Join(m.localPath, fi.info.Name)
 	remotePath := remoteJoin(m.remotePath, fi.info.Name)
 	client := m.sftpClient
@@ -144,6 +161,21 @@ func (m *Model) uploadSelected() tea.Cmd {
 }
 
 func (m *Model) downloadSelected() tea.Cmd {
+	item := m.remoteList.SelectedItem()
+	if item == nil {
+		return nil
+	}
+	fi := item.(fileItem)
+	localPath := filepath.Join(m.localPath, fi.info.Name)
+	if _, err := os.Stat(localPath); err == nil {
+		m.confirmMsg = fmt.Sprintf("Overwrite local %q?", fi.info.Name)
+		m.pendingAction = func() tea.Cmd { return m.downloadSelectedOverwrite() }
+		return nil
+	}
+	return m.downloadSelectedOverwrite()
+}
+
+func (m *Model) downloadSelectedOverwrite() tea.Cmd {
 	item := m.remoteList.SelectedItem()
 	if item == nil {
 		return nil
@@ -205,7 +237,12 @@ func (m Model) deleteSelected() tea.Cmd {
 	remotePath := remoteJoin(m.remotePath, fi.info.Name)
 	client := m.sftpClient
 	return func() tea.Msg {
-		err := client.Remove(remotePath)
+		var err error
+		if fi.info.IsDir {
+			err = sftp.RemoveRemoteAll(client, remotePath)
+		} else {
+			err = client.Remove(remotePath)
+		}
 		if err != nil {
 			return transferCompleteMsg{err: err}
 		}
@@ -213,15 +250,23 @@ func (m Model) deleteSelected() tea.Cmd {
 	}
 }
 
-func (m Model) mkdirCmd() tea.Cmd {
+func (m *Model) mkdirCmd() tea.Cmd {
+	m.namePromptKind = "mkdir"
+	m.namePromptOldName = ""
+	m.nameInput.SetValue("new_folder")
+	m.namePromptActive = true
+	return m.nameInput.Focus()
+}
+
+func (m Model) mkdirNamedCmd(name string) tea.Cmd {
 	if m.focusedPanel == leftPanel {
-		path := filepath.Join(m.localPath, "new_folder")
+		path := filepath.Join(m.localPath, name)
 		return func() tea.Msg {
 			err := os.MkdirAll(path, 0o755)
 			return transferCompleteMsg{err: err}
 		}
 	}
-	remotePath := remoteJoin(m.remotePath, "new_folder")
+	remotePath := remoteJoin(m.remotePath, name)
 	client := m.sftpClient
 	return func() tea.Msg {
 		err := client.Mkdir(remotePath)
@@ -230,6 +275,10 @@ func (m Model) mkdirCmd() tea.Cmd {
 }
 
 func (m Model) renameCmd() tea.Cmd {
+	return m.renameNamedCmd(m.nameInput.Value())
+}
+
+func (m Model) renameNamedCmd(newName string) tea.Cmd {
 	if m.focusedPanel == leftPanel {
 		item := m.localList.SelectedItem()
 		if item == nil {
@@ -237,7 +286,7 @@ func (m Model) renameCmd() tea.Cmd {
 		}
 		fi := item.(fileItem)
 		oldPath := filepath.Join(m.localPath, fi.info.Name)
-		newPath := filepath.Join(m.localPath, fi.info.Name+"_renamed")
+		newPath := filepath.Join(m.localPath, newName)
 		return func() tea.Msg {
 			err := os.Rename(oldPath, newPath)
 			return transferCompleteMsg{err: err}
@@ -250,12 +299,69 @@ func (m Model) renameCmd() tea.Cmd {
 	}
 	fi := item.(fileItem)
 	oldPath := remoteJoin(m.remotePath, fi.info.Name)
-	newPath := remoteJoin(m.remotePath, fi.info.Name+"_renamed")
+	newPath := remoteJoin(m.remotePath, newName)
 	client := m.sftpClient
 	return func() tea.Msg {
 		err := client.Rename(oldPath, newPath)
 		return transferCompleteMsg{err: err}
 	}
+}
+
+func (m *Model) closeNamePrompt() {
+	m.namePromptActive = false
+	m.namePromptKind = ""
+	m.namePromptOldName = ""
+	m.nameInput.SetValue("")
+}
+
+func (m *Model) applyNamePrompt() tea.Cmd {
+	name := m.nameInput.Value()
+	if name == "" || name == "." || name == ".." {
+		m.err = "Name is required"
+		return nil
+	}
+	kind := m.namePromptKind
+	m.namePromptActive = false
+	m.namePromptKind = ""
+	m.namePromptOldName = ""
+	m.nameInput.SetValue("")
+	switch kind {
+	case "mkdir":
+		return m.mkdirNamedCmd(name)
+	case "rename":
+		return m.renameNamedCmd(name)
+	}
+	return nil
+}
+
+func (m Model) handleNamePromptMouse(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	overlay := m.renderNamePromptOverlay()
+	lines := strings.Split(overlay, "\n")
+	ow := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > ow {
+			ow = w
+		}
+	}
+	oh := len(lines)
+	ox := (m.width - ow) / 2
+	oy := (m.height - oh) / 2
+	lx := msg.X - ox
+	ly := msg.Y - oy
+	if lx < 0 || ly < 0 || lx >= ow || ly >= oh {
+		m.closeNamePrompt()
+		return m, nil
+	}
+	if ly == 3 {
+		return m, m.nameInput.Focus()
+	}
+	if ly >= oh-2 {
+		if lx < ow/2 {
+			return m, m.applyNamePrompt()
+		}
+		m.closeNamePrompt()
+	}
+	return m, nil
 }
 
 func (m *Model) openChmod() tea.Cmd {
@@ -358,7 +464,9 @@ func (m *Model) confirmRename() tea.Cmd {
 		}
 		name = item.(fileItem).info.Name
 	}
-	m.confirmMsg = fmt.Sprintf("Rename %q to %q?", name, name+"_renamed")
-	m.pendingAction = func() tea.Cmd { return m.renameCmd() }
-	return nil
+	m.namePromptKind = "rename"
+	m.namePromptOldName = name
+	m.nameInput.SetValue(name)
+	m.namePromptActive = true
+	return m.nameInput.Focus()
 }

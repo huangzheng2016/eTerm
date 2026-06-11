@@ -5,7 +5,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"github.com/huangzheng2016/eTerm/internal/db"
-	"github.com/huangzheng2016/eTerm/internal/keylabels"
 	"github.com/huangzheng2016/eTerm/internal/keymatch"
 	"github.com/huangzheng2016/eTerm/internal/ui/home"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
@@ -17,18 +16,19 @@ const keybindingsSettingKey = "keybindings"
 // KeyBindingConfig holds all configurable keybindings as string slices (each entry is a key combo).
 type KeyBindingConfig struct {
 	// Global
-	QuitApp      []string `json:"quit_app"`
-	Quit         []string `json:"quit"`
-	Help         []string `json:"help"`
-	NewTab       []string `json:"new_tab"`
-	CloseTab     []string `json:"close_tab"`
-	CloseTabSafe []string `json:"close_tab_safe"`
-	NextTab      []string `json:"next_tab"`
-	PrevTab      []string `json:"prev_tab"`
-	Lock         []string `json:"lock"`
-	LockApp      []string `json:"lock_app"`
-	ForwardTab   []string `json:"forward_tab"`
-	SnippetsTab  []string `json:"snippets_tab"`
+	QuitApp        []string `json:"quit_app"`
+	Quit           []string `json:"quit"`
+	Help           []string `json:"help"`
+	NewTab         []string `json:"new_tab"`
+	CloseTab       []string `json:"close_tab"`
+	CloseTabSafe   []string `json:"close_tab_safe"`
+	NextTab        []string `json:"next_tab"`
+	PrevTab        []string `json:"prev_tab"`
+	Lock           []string `json:"lock"`
+	LockApp        []string `json:"lock_app"`
+	ForwardTab     []string `json:"forward_tab"`
+	SnippetsTab    []string `json:"snippets_tab"`
+	CommandPalette []string `json:"command_palette"`
 
 	// Home
 	SSHConnect     []string `json:"ssh_connect"`
@@ -88,18 +88,19 @@ type KeyBindingConfig struct {
 func DefaultKeyBindingConfig() KeyBindingConfig {
 	return KeyBindingConfig{
 		// Global
-		QuitApp:      []string{"ctrl+shift+q", "ctrl+shift+c"},
-		Quit:         []string{"ctrl+c"},
-		Help:         []string{"?"},
-		NewTab:       []string{"ctrl+t"},
-		CloseTab:     []string{"ctrl+w"},
-		CloseTabSafe: []string{"ctrl+shift+w"},
-		NextTab:      []string{"ctrl+tab", "ctrl+pgdown", "alt+n", "ctrl+right"},
-		PrevTab:      []string{"ctrl+shift+tab", "ctrl+pgup", "alt+p", "ctrl+left"},
-		Lock:         []string{"ctrl+l"},
-		LockApp:      []string{"ctrl+shift+l"},
-		ForwardTab:   []string{"ctrl+p"},
-		SnippetsTab:  []string{"ctrl+shift+b"},
+		QuitApp:        []string{"ctrl+shift+q", "ctrl+shift+c"},
+		Quit:           []string{"ctrl+c"},
+		Help:           []string{"?"},
+		NewTab:         []string{"ctrl+t"},
+		CloseTab:       []string{"ctrl+w"},
+		CloseTabSafe:   []string{"ctrl+shift+w"},
+		NextTab:        []string{"ctrl+tab", "ctrl+pgdown", "alt+n", "ctrl+right"},
+		PrevTab:        []string{"ctrl+shift+tab", "ctrl+pgup", "alt+p", "ctrl+left"},
+		Lock:           []string{"ctrl+l"},
+		LockApp:        []string{"ctrl+shift+l"},
+		ForwardTab:     []string{"ctrl+p"},
+		SnippetsTab:    []string{"ctrl+shift+b"},
+		CommandPalette: []string{"ctrl+k"},
 
 		// Home
 		SSHConnect:     []string{"enter"},
@@ -114,8 +115,8 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		QuickConnect:   []string{"q"},
 		ImportSSH:      []string{"I"},
 		ExportConfig:   []string{"E"},
-		ShowHidden:     []string{"H"},
-		HideHost:       []string{"h"},
+		ShowHidden:     []string{"h"},
+		HideHost:       []string{"H"},
 		SnippetPicker:  []string{"ctrl+shift+s"},
 		SessionHistory: []string{"ctrl+shift+h"},
 		ToggleSelect:   []string{"ctrl+space"},
@@ -210,7 +211,7 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		),
 		NewTab: key.NewBinding(
 			key.WithKeys(cfg.NewTab...),
-			key.WithHelp(keylabels.KeysTab, "SSH keys"),
+			key.WithHelp(helpLabel(cfg.NewTab), "SSH keys"),
 		),
 		CloseTab: key.NewBinding(
 			key.WithKeys(cfg.CloseTab...),
@@ -268,6 +269,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 			key.WithKeys(cfg.SnippetsTab...),
 			key.WithHelp(helpLabel(cfg.SnippetsTab), "snippets"),
 		),
+		CommandPalette: key.NewBinding(
+			key.WithKeys(cfg.CommandPalette...),
+			key.WithHelp(helpLabel(cfg.CommandPalette), "commands"),
+		),
 	}
 }
 
@@ -303,6 +308,7 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 		KmCfg: BuildKeymatchConfig(cfg),
 		Keys: home.BuildListKeyMap(cfg.SSHConnect, cfg.SFTPOpen, cfg.NewHost, cfg.EditHost,
 			cfg.DeleteHost, cfg.CopySSH, cfg.CloneHost, cfg.Search, cfg.ToggleView),
+		Help:           cfg.Help,
 		QuickConnect:   cfg.QuickConnect,
 		ImportSSH:      cfg.ImportSSH,
 		ExportConfig:   cfg.ExportConfig,

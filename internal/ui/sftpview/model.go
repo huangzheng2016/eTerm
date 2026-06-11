@@ -46,11 +46,15 @@ type Model struct {
 	hostAlias    string
 
 	// Confirmation state for delete/rename
-	confirmMsg    string       // non-empty = waiting for y/n
-	pendingAction func() tea.Cmd // action to run on 'y'
-	chmodInput    textinput.Model
-	chmodPath     string
-	chmodActive   bool
+	confirmMsg        string         // non-empty = waiting for y/n
+	pendingAction     func() tea.Cmd // action to run on 'y'
+	chmodInput        textinput.Model
+	chmodPath         string
+	chmodActive       bool
+	nameInput         textinput.Model
+	namePromptKind    string
+	namePromptOldName string
+	namePromptActive  bool
 
 	// Configurable keybindings
 	vk viewkeys.SFTPKeys
@@ -83,6 +87,9 @@ func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 	chmodInput := textinput.New()
 	chmodInput.Placeholder = "0644"
 	chmodInput.CharLimit = 4
+	nameInput := textinput.New()
+	nameInput.Placeholder = "name"
+	nameInput.CharLimit = 255
 
 	return Model{
 		localList:    localList,
@@ -94,6 +101,7 @@ func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 		hostAlias:    hostAlias,
 		progressCh:   make(chan sftp.TransferProgress, 64),
 		chmodInput:   chmodInput,
+		nameInput:    nameInput,
 		vk:           vk,
 	}
 }
@@ -129,6 +137,7 @@ func (m *Model) SetSize(w, h int) {
 		cw = 24
 	}
 	m.chmodInput.SetWidth(cw)
+	m.nameInput.SetWidth(cw)
 }
 
 func formatSize(bytes int64) string {

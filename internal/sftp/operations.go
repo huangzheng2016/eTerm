@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type TransferProgress struct {
@@ -17,6 +18,12 @@ type TransferProgress struct {
 }
 
 type ProgressCallback func(TransferProgress)
+
+type RemoteRemoveFS interface {
+	List(path string) ([]FileInfo, error)
+	Remove(path string) error
+	RemoveDirectory(path string) error
+}
 
 func Upload(client *Client, localPath string, remotePath string, progress ProgressCallback) error {
 	localFile, err := os.Open(localPath)
@@ -356,4 +363,29 @@ func DownloadDir(client *Client, remoteDir string, localDir string, progress Pro
 		progress(TransferProgress{Done: true, FileIndex: bs.index, TotalFiles: bs.total})
 	}
 	return nil
+}
+
+func RemoveRemoteAll(fs RemoteRemoveFS, remotePath string) error {
+	entries, err := fs.List(remotePath)
+	if err != nil {
+		return fs.Remove(remotePath)
+	}
+	for _, entry := range entries {
+		child := remoteChild(remotePath, entry.Name)
+		if entry.IsDir {
+			if err := RemoveRemoteAll(fs, child); err != nil {
+				return err
+			}
+		} else if err := fs.Remove(child); err != nil {
+			return err
+		}
+	}
+	return fs.RemoveDirectory(remotePath)
+}
+
+func remoteChild(dir, name string) string {
+	if dir == "/" {
+		return "/" + strings.TrimLeft(name, "/")
+	}
+	return strings.TrimRight(dir, "/") + "/" + strings.TrimLeft(name, "/")
 }

@@ -15,7 +15,7 @@ import (
 
 // handleGridMouse returns done=true when Update should return immediately.
 func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if m.list.FilterState() == list.Filtering {
+	if m.list.FilterState() != list.Unfiltered {
 		return m, nil, false
 	}
 	if msg.Button != tea.MouseLeft && msg.Button != tea.MouseRight {
@@ -23,7 +23,12 @@ func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	}
 	hosts := m.gridHosts()
 	gl := m.gridLayout
+	y := msg.Y
 	if m.mode == tagView && m.selectedTag != "" {
+		if y == 0 {
+			return m, nil, false
+		}
+		y--
 		gridH := m.height - 1
 		if gridH < cardOuterH {
 			gridH = cardOuterH
@@ -34,7 +39,7 @@ func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if gl.PageSize > 0 {
 		page = m.gridCursor / gl.PageSize
 	}
-	globalIdx, ok := gridIndexAtMouse(msg.X, msg.Y, len(hosts), gl, page)
+	globalIdx, ok := gridIndexAtMouse(msg.X, y, len(hosts), gl, page)
 	if !ok {
 		return m, nil, false
 	}
@@ -243,7 +248,7 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 
-	case viewkeys.MatchAny(msg.String(), m.showHiddenKeys):
+	case viewkeys.MatchKey(msg, m.showHiddenKeys):
 		logKeyDispatch("ToggleHidden")
 		m.showHidden = !m.showHidden
 		switch m.mode {
@@ -267,7 +272,7 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, func() tea.Msg { return types.SuccessMsg{Message: toast} }, true
 
-	case viewkeys.MatchAny(msg.String(), m.hideHostKeys):
+	case viewkeys.MatchKey(msg, m.hideHostKeys):
 		logKeyDispatch("ToggleHostHidden")
 		if h := m.SelectedHost(); h != nil {
 			id := h.ID
@@ -275,22 +280,22 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 
-	case viewkeys.MatchAny(msg.String(), m.quickConnectKeys):
+	case viewkeys.MatchKey(msg, m.quickConnectKeys):
 		logKeyDispatch("QuickConnect")
 		return m, func() tea.Msg { return types.QuickConnectRequestMsg{} }, true
 
-	case viewkeys.MatchAny(msg.String(), m.importSSHKeys):
+	case viewkeys.MatchKey(msg, m.importSSHKeys):
 		logKeyDispatch("ImportSSHConfig")
 		return m, func() tea.Msg { return types.ImportSSHConfigPreviewMsg{} }, true
 
-	case viewkeys.MatchAny(msg.String(), m.sessionHistoryKeys):
+	case viewkeys.MatchKey(msg, m.sessionHistoryKeys):
 		logKeyDispatch("SessionHistory")
 		if h := m.SelectedHost(); h != nil {
 			return m, func() tea.Msg { return types.OpenSessionHistoryMsg{HostID: h.ID} }, true
 		}
 		return m, nil, true
 
-	case viewkeys.MatchAny(msg.String(), m.toggleSelectKeys):
+	case viewkeys.MatchKey(msg, m.toggleSelectKeys):
 		if h := m.SelectedHost(); h != nil {
 			if m.selectedHosts == nil {
 				m.selectedHosts = make(map[uint]struct{})
@@ -303,21 +308,21 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 
-	case viewkeys.MatchAny(msg.String(), m.batchTagKeys):
+	case viewkeys.MatchKey(msg, m.batchTagKeys):
 		ids := m.batchHostIDs()
 		if len(ids) == 0 {
 			return m, nil, true
 		}
 		return m, func() tea.Msg { return types.BatchTagRequestMsg{HostIDs: ids} }, true
 
-	case viewkeys.MatchAny(msg.String(), m.batchActionKeys):
+	case viewkeys.MatchKey(msg, m.batchActionKeys):
 		ids := m.batchActionHostIDs()
 		if len(ids) == 0 {
 			return m, nil, true
 		}
 		return m, func() tea.Msg { return types.BatchActionsRequestMsg{HostIDs: ids} }, true
 
-	case viewkeys.MatchAny(msg.String(), m.exportConfigKeys):
+	case viewkeys.MatchKey(msg, m.exportConfigKeys):
 		logKeyDispatch("ExportConfig")
 		return m, func() tea.Msg { return types.ExportConfigMsg{} }, true
 

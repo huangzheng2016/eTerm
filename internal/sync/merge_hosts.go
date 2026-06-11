@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) MergeResult {
+func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) (MergeResult, error) {
 	var res MergeResult
 	type pendingJump struct {
 		hostID     uint
@@ -22,7 +22,10 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 
 		if r.Deleted {
 			if found {
-				database.Unscoped().Delete(&existing)
+				if err := database.Unscoped().Delete(&existing).Error; err != nil {
+					res.Failed++
+					return res, err
+				}
 			}
 			res.Merged++
 			continue
@@ -41,30 +44,30 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 
 		ea := &encAccum{mk: mk}
 		host := db.Host{
-			SyncID:        dto.SyncID,
-			Alias:         dto.Alias,
-			Hostname:      dto.Hostname,
-			Port:          dto.Port,
-			Username:      dto.Username,
-			AuthMethod:    dto.AuthMethod,
-			Password:      ea.enc(dto.Password),
-			Passphrase:    ea.enc(dto.Passphrase),
-			Tags:          dto.Tags,
-			Description:   dto.Description,
-			Group:         dto.Group,
-			ProxyType:     dto.ProxyType,
-			ProxyHost:     dto.ProxyHost,
-			ProxyPort:     dto.ProxyPort,
-			ProxyUser:     dto.ProxyUser,
-			ProxyPassword: ea.enc(dto.ProxyPassword),
-			GSSAPISource:  dto.GSSAPISource,
-			GSSAPIKeytab:  dto.GSSAPIKeytab,
-			KrbPrincipal:  dto.KrbPrincipal,
-			ProxyCommand:  dto.ProxyCommand,
-			ForwardAgent:  dto.ForwardAgent,
-			RemoteCommand: dto.RemoteCommand,
+			SyncID:          dto.SyncID,
+			Alias:           dto.Alias,
+			Hostname:        dto.Hostname,
+			Port:            dto.Port,
+			Username:        dto.Username,
+			AuthMethod:      dto.AuthMethod,
+			Password:        ea.enc(dto.Password),
+			Passphrase:      ea.enc(dto.Passphrase),
+			Tags:            dto.Tags,
+			Description:     dto.Description,
+			Group:           dto.Group,
+			ProxyType:       dto.ProxyType,
+			ProxyHost:       dto.ProxyHost,
+			ProxyPort:       dto.ProxyPort,
+			ProxyUser:       dto.ProxyUser,
+			ProxyPassword:   ea.enc(dto.ProxyPassword),
+			GSSAPISource:    dto.GSSAPISource,
+			GSSAPIKeytab:    dto.GSSAPIKeytab,
+			KrbPrincipal:    dto.KrbPrincipal,
+			ProxyCommand:    dto.ProxyCommand,
+			ForwardAgent:    dto.ForwardAgent,
+			RemoteCommand:   dto.RemoteCommand,
 			ExtraSSHOptions: dto.ExtraSSHOptions,
-			KeyID:         resolveLocalID(database, "ssh_keys", dto.KeySyncID),
+			KeyID:           resolveLocalID(database, "ssh_keys", dto.KeySyncID),
 		}
 		if ea.err != nil {
 			res.Failed++
@@ -73,9 +76,16 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 
 		if found {
 			host.Model = existing.Model
-			database.Save(&host)
+			host.DeletedAt = gorm.DeletedAt{}
+			if err := database.Save(&host).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		} else {
-			database.Create(&host)
+			if err := database.Create(&host).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		}
 
 		if dto.JumpSyncID != "" {
@@ -86,8 +96,11 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 
 	for _, j := range jumps {
 		if jid := resolveLocalID(database, "hosts", j.jumpSyncID); jid != nil {
-			database.Model(&db.Host{}).Where("id = ?", j.hostID).Update("jump_host_id", *jid)
+			if err := database.Model(&db.Host{}).Where("id = ?", j.hostID).Update("jump_host_id", *jid).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		}
 	}
-	return res
+	return res, nil
 }

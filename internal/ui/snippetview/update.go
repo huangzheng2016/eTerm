@@ -46,13 +46,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 		default:
-			s := msg.String()
 			switch {
-			case viewkeys.MatchAny(s, m.vk.New):
+			case viewkeys.MatchKey(msg, m.vk.New):
 				return m, func() tea.Msg {
 					return types.NewTabMsg{Type: "snippet-editor", Title: "New Snippet"}
 				}
-			case viewkeys.MatchAny(s, m.vk.Edit):
+			case viewkeys.MatchKey(msg, m.vk.Edit):
 				if sn := m.SelectedSnippet(); sn != nil && sn.ID != 0 {
 					id := sn.ID
 					return m, func() tea.Msg {
@@ -60,7 +59,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case viewkeys.MatchAny(s, m.vk.Delete):
+			case viewkeys.MatchKey(msg, m.vk.Delete):
 				if sn := m.SelectedSnippet(); sn != nil && sn.ID != 0 {
 					id := sn.ID
 					name := sn.Name

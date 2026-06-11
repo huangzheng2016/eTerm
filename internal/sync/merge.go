@@ -28,20 +28,29 @@ func MergeRecords(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 	}
 
 	var res MergeResult
-	database.Transaction(func(tx *gorm.DB) error {
-		r := mergeSSHKeys(tx, mk, passphrase, keys)
+	_ = database.Transaction(func(tx *gorm.DB) error {
+		r, err := mergeSSHKeys(tx, mk, passphrase, keys)
 		res.Merged += r.Merged
 		res.Failed += r.Failed
-		r = mergeHosts(tx, mk, passphrase, hosts)
+		if err != nil {
+			return err
+		}
+		r, err = mergeHosts(tx, mk, passphrase, hosts)
 		res.Merged += r.Merged
 		res.Failed += r.Failed
-		r = mergePortForwards(tx, passphrase, fwds)
+		if err != nil {
+			return err
+		}
+		r, err = mergePortForwards(tx, passphrase, fwds)
 		res.Merged += r.Merged
 		res.Failed += r.Failed
-		r = mergeSnippets(tx, passphrase, snippets)
+		if err != nil {
+			return err
+		}
+		r, err = mergeSnippets(tx, passphrase, snippets)
 		res.Merged += r.Merged
 		res.Failed += r.Failed
-		return nil
+		return err
 	})
 	return res
 }

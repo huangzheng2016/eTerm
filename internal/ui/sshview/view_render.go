@@ -5,9 +5,11 @@ import (
 	"image/color"
 	"strings"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 // vt.Render() draws the cell grid but does not include a visible text cursor (the TUI
@@ -23,19 +25,99 @@ var scrollIndicatorStyle = lipgloss.NewStyle().
 
 func (m *Model) View() tea.View {
 	var screen string
-	if m.scrollOffset > 0 && !m.emu.IsAltScreen() {
+	switch {
+	case m.sel.active && !m.emu.IsAltScreen():
+		screen = m.renderWithSelection()
+	case m.scrollOffset > 0 && !m.emu.IsAltScreen():
 		screen = m.renderScrollback()
 		indicator := scrollIndicatorStyle.Render(fmt.Sprintf(" ↑ scrollback [%d lines up] — type to return ", m.scrollOffset))
 		screen = strings.TrimRight(screen, "\n") + "\n" + indicator
-	} else {
+	case m.bottomPad > 0 && !m.emu.IsAltScreen():
+		screen = m.renderBottomPad()
+	default:
 		screen = m.renderScreenWithCursor()
 	}
 	if m.disconnected {
-		banner := disconnectBannerStyle.Render("Connection lost · press r to reconnect")
+		key := viewkeys.HelpLabel(m.vk.Reconnect)
+		if key == "" {
+			key = "r"
+		}
+		reason := "Connection lost"
+		if ce := internalssh.Classify(m.endErr); ce != nil {
+			reason = ce.Summary
+		}
+		banner := disconnectBannerStyle.Render(reason + " · press " + key + " to reconnect")
 		screen = strings.TrimRight(screen, "\n") + "\n\n" + banner
 	}
 	v := tea.NewView(screen)
 	return v
+}
+
+// renderWithSelection renders the visible body cell-by-cell, highlighting cells that
+// fall inside the active selection. Used only while selecting; the normal path keeps
+// the fast emu.Render().
+func (m *Model) renderWithSelection() string {
+	w, h := m.emu.Width(), m.emu.Height()
+	if w <= 0 || h <= 0 {
+		return m.emu.Render()
+	}
+	start, end := normSel(m.sel)
+	var lines []string
+	for y := 0; y < h; y++ {
+		absLine := m.visibleAbsLine(y)
+		var line strings.Builder
+		for col := 0; col < w; {
+			cell := m.cellAtAbs(absLine, col)
+			width := 1
+			if cell != nil && cell.Width > 1 {
+				width = cell.Width
+			}
+			content := " "
+			if cell != nil && cell.Content != "" {
+				content = cell.Content
+			}
+			if inSelection(start, end, absLine, col) {
+				st := uv.Style{}
+				if cell != nil {
+					st = cell.Style
+				}
+				sel := selectionCellStyle(st)
+				line.WriteString((&sel).Styled(content))
+			} else if cell != nil && cell.Content != "" {
+				line.WriteString(renderCellANSI(cell))
+			} else {
+				line.WriteString(content)
+			}
+			if width < 1 {
+				width = 1
+			}
+			col += width
+		}
+		lines = append(lines, line.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func selectionCellStyle(s uv.Style) uv.Style {
+	out := s
+	out.Bg = color.RGBA{R: 0x3a, G: 0x3d, B: 0x6e, A: 0xff}
+	if out.Fg == nil {
+		out.Fg = color.RGBA{R: 0xee, G: 0xee, B: 0xee, A: 0xff}
+	}
+	return out
+}
+
+// renderBottomPad shows the live screen pushed up by bottomPad rows, with empty
+// rows below, so the user can scroll past the bottom to see the newest line clearly.
+func (m *Model) renderBottomPad() string {
+	lines := strings.Split(m.renderScreenWithCursor(), "\n")
+	if m.bottomPad < len(lines) {
+		lines = lines[m.bottomPad:]
+	}
+	for i := 0; i < m.bottomPad; i++ {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderScreenWithCursor() string {

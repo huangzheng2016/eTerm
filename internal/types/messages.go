@@ -88,6 +88,14 @@ type ErrorMsg struct {
 	Err error
 }
 
+// ConnErrorMsg opens the persistent connection-error card. Retry carries the
+// tea.Msg to resend when the user presses r (nil means no retry available).
+type ConnErrorMsg struct {
+	Err    error
+	Target string
+	Retry  any
+}
+
 type SuccessMsg struct {
 	Message string
 }
@@ -161,6 +169,13 @@ type ImportSSHConfigPreviewMsg struct{}
 // ImportSSHConflictCountMsg reports how many ~/.ssh/config hosts already exist in DB.
 type ImportSSHConflictCountMsg struct {
 	Count int
+}
+
+type ImportSSHConfigPreviewResultMsg struct {
+	Added   int
+	Changed int
+	Skipped int
+	Err     error
 }
 
 // ImportSSHConfigRunMsg runs import with strategy: skip | overwrite | merge_jumps.
@@ -271,6 +286,11 @@ type OpenSettingsMsg struct{}
 
 // KeyBindingsChangedMsg notifies that keybindings have been updated and should be reloaded.
 type KeyBindingsChangedMsg struct{}
+
+// SettingsSavedMsg reports the result of saving settings.
+type SettingsSavedMsg struct {
+	Err error
+}
 
 // OpenSyncMsg requests opening the sync settings tab.
 type OpenSyncMsg struct{}

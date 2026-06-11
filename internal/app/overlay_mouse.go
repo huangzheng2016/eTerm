@@ -44,8 +44,10 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.batchActions = nil
 		a.batchTag = nil
 		a.importStratMenu = nil
+		a.commandPalette = nil
 		a.helpOverlay = false
 		a.upgradePrompt = nil
+		a.connError = nil
 		if a.confirm.IsActive() {
 			a.confirm, _ = a.confirm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 			cmd := a.processConfirmResult()
@@ -55,6 +57,28 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 	}
 	if onClick != nil {
 		return onClick(lx, ly)
+	}
+	return a, nil
+}
+
+// commandPaletteMouse handles clicks inside the command palette overlay.
+// Layout: border(1) + padding(1) + title(1) + input(1) + blank(1) + items from ly=4.
+func (a App) commandPaletteMouse(lx, ly int) (tea.Model, tea.Cmd) {
+	if a.commandPalette == nil {
+		return a, nil
+	}
+	if ly == 2 {
+		return a, a.commandPalette.input.Focus()
+	}
+	itemY := ly - 4
+	if itemY >= 0 && itemY < len(a.commandPalette.filtered) && itemY < 8 {
+		a.commandPalette.cursor = itemY
+		selected := a.commandPalette.selectedMsg()
+		a.commandPalette = nil
+		if selected == nil {
+			return a, nil
+		}
+		return a, func() tea.Msg { return selected }
 	}
 	return a, nil
 }

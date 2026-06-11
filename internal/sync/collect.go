@@ -17,7 +17,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 
 	// SSHKeys (skip file mode)
 	var keys []db.SSHKey
-	if err := database.Where("(storage_mode = ? OR storage_mode = ?) AND updated_at > ?", "database", "", lastSyncTime).Find(&keys).Error; err != nil {
+	if err := database.Unscoped().Where("(storage_mode = ? OR storage_mode = ?) AND updated_at > ?", "database", "", lastSyncTime).Find(&keys).Error; err != nil {
 		return nil, err
 	}
 	for _, k := range keys {
@@ -30,7 +30,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 
 	// Hosts
 	var hosts []db.Host
-	if err := database.Where("updated_at > ?", lastSyncTime).Find(&hosts).Error; err != nil {
+	if err := database.Unscoped().Where("updated_at > ?", lastSyncTime).Find(&hosts).Error; err != nil {
 		return nil, err
 	}
 	for _, h := range hosts {
@@ -43,7 +43,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 
 	// PortForwards
 	var fwds []db.PortForward
-	if err := database.Where("updated_at > ?", lastSyncTime).Find(&fwds).Error; err != nil {
+	if err := database.Unscoped().Where("updated_at > ?", lastSyncTime).Find(&fwds).Error; err != nil {
 		return nil, err
 	}
 	for _, f := range fwds {
@@ -56,7 +56,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 
 	// Snippets
 	var snippets []db.Snippet
-	if err := database.Where("updated_at > ?", lastSyncTime).Find(&snippets).Error; err != nil {
+	if err := database.Unscoped().Where("updated_at > ?", lastSyncTime).Find(&snippets).Error; err != nil {
 		return nil, err
 	}
 	for _, s := range snippets {
@@ -99,15 +99,24 @@ func encryptPayload(dto interface{}, passphrase string) (string, error) {
 }
 
 func buildKeyRecord(k db.SSHKey, mk *security.MasterKeyManager, passphrase, deviceID string) (SyncRecord, error) {
+	if k.SyncDel {
+		return SyncRecord{
+			SyncID:    k.SyncID,
+			Type:      TypeSSHKey,
+			Deleted:   true,
+			DeviceID:  deviceID,
+			UpdatedAt: k.UpdatedAt,
+		}, nil
+	}
 	dto := SSHKeyDTO{
-		SyncID:      k.SyncID,
-		Name:        k.Name,
-		Type:        k.Type,
-		PrivateKey:  decryptField(k.PrivateKeyData, mk),
-		PublicKey:   k.PublicKeyData,
-		Fingerprint: k.Fingerprint,
-		Bits:        k.Bits,
-		Passphrase:  decryptField(k.Passphrase, mk),
+		SyncID:          k.SyncID,
+		Name:            k.Name,
+		Type:            k.Type,
+		PrivateKey:      decryptField(k.PrivateKeyData, mk),
+		PublicKey:       k.PublicKeyData,
+		Fingerprint:     k.Fingerprint,
+		Bits:            k.Bits,
+		Passphrase:      decryptField(k.Passphrase, mk),
 		CertificatePath: k.CertificatePath,
 	}
 	payload, err := encryptPayload(dto, passphrase)
@@ -124,8 +133,16 @@ func buildKeyRecord(k db.SSHKey, mk *security.MasterKeyManager, passphrase, devi
 	}, nil
 }
 
-
 func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager, passphrase, deviceID string) (SyncRecord, error) {
+	if h.SyncDel {
+		return SyncRecord{
+			SyncID:    h.SyncID,
+			Type:      TypeHost,
+			Deleted:   true,
+			DeviceID:  deviceID,
+			UpdatedAt: h.UpdatedAt,
+		}, nil
+	}
 	// Resolve FK sync IDs
 	var keySyncID, jumpSyncID string
 	if h.KeyID != nil {
@@ -142,30 +159,30 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 	}
 
 	dto := HostDTO{
-		SyncID:        h.SyncID,
-		Alias:         h.Alias,
-		Hostname:      h.Hostname,
-		Port:          h.Port,
-		Username:      h.Username,
-		AuthMethod:    h.AuthMethod,
-		Password:      decryptField(h.Password, mk),
-		KeySyncID:     keySyncID,
-		Passphrase:    decryptField(h.Passphrase, mk),
-		JumpSyncID:    jumpSyncID,
-		Tags:          h.Tags,
-		Description:   h.Description,
-		Group:         h.Group,
-		ProxyType:     h.ProxyType,
-		ProxyHost:     h.ProxyHost,
-		ProxyPort:     h.ProxyPort,
-		ProxyUser:     h.ProxyUser,
-		ProxyPassword: decryptField(h.ProxyPassword, mk),
-		GSSAPISource:  h.GSSAPISource,
-		GSSAPIKeytab:  h.GSSAPIKeytab,
-		KrbPrincipal:  h.KrbPrincipal,
-		ProxyCommand:  h.ProxyCommand,
-		ForwardAgent:  h.ForwardAgent,
-		RemoteCommand: h.RemoteCommand,
+		SyncID:          h.SyncID,
+		Alias:           h.Alias,
+		Hostname:        h.Hostname,
+		Port:            h.Port,
+		Username:        h.Username,
+		AuthMethod:      h.AuthMethod,
+		Password:        decryptField(h.Password, mk),
+		KeySyncID:       keySyncID,
+		Passphrase:      decryptField(h.Passphrase, mk),
+		JumpSyncID:      jumpSyncID,
+		Tags:            h.Tags,
+		Description:     h.Description,
+		Group:           h.Group,
+		ProxyType:       h.ProxyType,
+		ProxyHost:       h.ProxyHost,
+		ProxyPort:       h.ProxyPort,
+		ProxyUser:       h.ProxyUser,
+		ProxyPassword:   decryptField(h.ProxyPassword, mk),
+		GSSAPISource:    h.GSSAPISource,
+		GSSAPIKeytab:    h.GSSAPIKeytab,
+		KrbPrincipal:    h.KrbPrincipal,
+		ProxyCommand:    h.ProxyCommand,
+		ForwardAgent:    h.ForwardAgent,
+		RemoteCommand:   h.RemoteCommand,
 		ExtraSSHOptions: h.ExtraSSHOptions,
 	}
 	payload, err := encryptPayload(dto, passphrase)
@@ -183,6 +200,15 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 }
 
 func buildFwdRecord(f db.PortForward, database *gorm.DB, passphrase, deviceID string) (SyncRecord, error) {
+	if f.SyncDel {
+		return SyncRecord{
+			SyncID:    f.SyncID,
+			Type:      TypePortFwd,
+			Deleted:   true,
+			DeviceID:  deviceID,
+			UpdatedAt: f.UpdatedAt,
+		}, nil
+	}
 	var hostSyncID string
 	if f.HostID > 0 {
 		var host db.Host
@@ -213,6 +239,15 @@ func buildFwdRecord(f db.PortForward, database *gorm.DB, passphrase, deviceID st
 }
 
 func buildSnippetRecord(s db.Snippet, passphrase, deviceID string) (SyncRecord, error) {
+	if s.SyncDel {
+		return SyncRecord{
+			SyncID:    s.SyncID,
+			Type:      TypeSnippet,
+			Deleted:   true,
+			DeviceID:  deviceID,
+			UpdatedAt: s.UpdatedAt,
+		}, nil
+	}
 	dto := SnippetDTO{
 		SyncID:  s.SyncID,
 		Name:    s.Name,

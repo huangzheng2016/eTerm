@@ -40,7 +40,7 @@ func (a App) batchConnectHostCmd(hostID uint, extraCommand string) tea.Cmd {
 	return func() tea.Msg {
 		var host db.Host
 		if err := database.Preload("Key").First(&host, hostID).Error; err != nil {
-			return nil
+			return types.ErrorMsg{Err: fmt.Errorf("batch connect host #%d: %w", hostID, err)}
 		}
 		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "ssh", 0, 0); bm != nil {
 			if em, ok := bm.(types.ErrorMsg); ok {
@@ -78,7 +78,7 @@ func (a App) batchConnectHostCmd(hostID uint, extraCommand string) tea.Cmd {
 			},
 		})
 		if err != nil {
-			return nil
+			return types.ErrorMsg{Err: fmt.Errorf("batch connect %s: %w", hostDisplayName(host), err)}
 		}
 
 		now := time.Now()
@@ -89,7 +89,7 @@ func (a App) batchConnectHostCmd(hostID uint, extraCommand string) tea.Cmd {
 		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, host.ForwardAgent)
 		if err != nil {
 			client.Close()
-			return nil
+			return types.ErrorMsg{Err: fmt.Errorf("batch shell %s: %w", hostDisplayName(host), err)}
 		}
 		is.SetClosers(client.Closers)
 		startPortForwards(database, client.Client, hostID, is)

@@ -8,11 +8,10 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 var (
-	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
-
 	overlayBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#7D56F4")).
@@ -45,24 +44,16 @@ func keyCardDesc(keyType, fingerprint, certificatePath string) string {
 
 func (m Model) View() tea.View {
 	if !m.loaded {
-		return tea.NewView("Loading...")
+		return tea.NewView(components.Loading(m.width, m.height, "Loading..."))
 	}
 
-	help := helpStyle.Render("n:generate · i:import · e:export · d:delete · c:copy pubkey")
-
 	if len(m.sshKeys) == 0 {
-		block := lipgloss.JoinVertical(lipgloss.Center,
+		bg := components.EmptyState(m.width, m.height,
 			"No SSH keys.",
-			"",
-			helpStyle.Render("Press 'n' to generate or 'i' to import."),
-			"",
-			help,
+			"Press '"+viewkeys.HelpLabel(m.vk.New)+"' to generate or '"+viewkeys.HelpLabel(m.vk.Import)+"' to import.",
+			keyHelpLine(m.vk),
 		)
-		if m.width > 0 && m.height > 0 {
-			bg := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, block)
-			return tea.NewView(m.maybeOverlay(bg))
-		}
-		return tea.NewView(m.maybeOverlay(block))
+		return tea.NewView(m.maybeOverlay(bg))
 	}
 
 	cards := make([]string, len(m.sshKeys))
@@ -71,6 +62,14 @@ func (m Model) View() tea.View {
 	}
 	grid := components.RenderGridRows(cards, len(m.sshKeys), m.gridCursor, m.gridLayout)
 	return tea.NewView(m.maybeOverlay(grid))
+}
+
+func keyHelpLine(vk viewkeys.KeyViewKeys) string {
+	return viewkeys.HelpLabel(vk.New) + ":generate · " +
+		viewkeys.HelpLabel(vk.Import) + ":import · " +
+		viewkeys.HelpLabel(vk.Export) + ":export · " +
+		viewkeys.HelpLabel(vk.Delete) + ":delete · " +
+		viewkeys.HelpLabel(vk.Copy) + ":copy pubkey"
 }
 
 func (m Model) maybeOverlay(bg string) string {

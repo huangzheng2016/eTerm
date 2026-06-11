@@ -62,6 +62,10 @@ func (c *Client) Remove(path string) error {
 	return c.sftpClient.Remove(path)
 }
 
+func (c *Client) RemoveDirectory(path string) error {
+	return c.sftpClient.RemoveDirectory(path)
+}
+
 func (c *Client) Rename(oldPath, newPath string) error {
 	return c.sftpClient.Rename(oldPath, newPath)
 }

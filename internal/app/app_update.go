@@ -8,6 +8,8 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/sshconfig"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/batchresultview"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
@@ -19,6 +21,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/version"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -118,6 +121,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Quick connect overlay intercepts all keys when active
 		if a.quickConnect != nil {
 			return a.handleQuickConnectKey(msg)
+		}
+
+		if a.connError != nil {
+			return a.handleConnErrorKey(msg)
+		}
+
+		if a.commandPalette != nil {
+			switch msg.String() {
+			case "esc", "escape":
+				a.commandPalette = nil
+				return a, nil
+			case "enter":
+				selected := a.commandPalette.selectedMsg()
+				a.commandPalette = nil
+				if selected == nil {
+					return a, nil
+				}
+				return a, func() tea.Msg { return selected }
+			}
+			return a, a.commandPalette.Update(msg)
 		}
 
 		if a.batchTag != nil {
@@ -247,12 +270,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			return a.lockSession()
-		case matchCtrlShiftFromKeys(msg, a.kbConfig.SnippetPicker):
+		case viewkeys.MatchKey(msg, a.kbConfig.SnippetPicker):
 			// SSH tab handles this in sshview; elsewhere open snippet picker.
 			if a.activeTabIsSSH() {
 				break
 			}
 			return a, func() tea.Msg { return types.SnippetPickerRequestMsg{} }
+		case key.Matches(msg, a.keyMap.CommandPalette):
+			a.commandPalette = newCommandPaletteFromDB(a.db, a.width)
+			return a, a.commandPalette.input.Focus()
 		}
 
 		// Alt+1..9 jumps to tab by number
@@ -304,6 +330,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a.quickConnectMouse(lx, ly)
 				})
 			}
+			if a.connError != nil {
+				return a.handleOverlayMouse(msg, a.connError.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a.connErrorMouse(lx, ly)
+				})
+			}
+			if a.commandPalette != nil {
+				return a.handleOverlayMouse(msg, a.commandPalette.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a.commandPaletteMouse(lx, ly)
+				})
+			}
 			if a.batchTag != nil {
 				return a.handleOverlayMouse(msg, a.batchTag.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
 					return a.batchTagMouse(lx, ly)
@@ -341,7 +377,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Tab bar click
-			if msg.Y == 0 && len(a.tabs) > 0 {
+			top := a.MainViewChromeTopLines()
+			if msg.Y >= 0 && msg.Y < top-1 && len(a.tabs) > 0 {
 				a.syncTabBar()
 				updated, changed := a.tabBar.HandleClick(msg.X)
 				a.tabBar = updated
@@ -355,7 +392,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		if a.viewState == MainView && msg.Y == 0 && len(a.tabs) > 0 {
+		top := a.MainViewChromeTopLines()
+		if a.viewState == MainView && msg.Y >= 0 && msg.Y < top-1 && len(a.tabs) > 0 {
 			a.syncTabBar()
 			switch msg.Button {
 			case tea.MouseWheelLeft, tea.MouseWheelUp:
@@ -456,7 +494,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		database := a.db
 		id := msg.ID
 		return a, func() tea.Msg {
-			if err := database.Delete(&db.Host{}, id).Error; err != nil {
+			if err := db.DeleteHostForSync(database, id); err != nil {
 				return types.ErrorMsg{Err: err}
 			}
 			return types.RefreshListMsg{}
@@ -609,6 +647,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.toast, tc = a.toast.Show(msg.Err.Error(), components.ToastError, 5*time.Second)
 		return a, tea.Batch(tc, reflowWindow(a))
 
+	case types.ConnErrorMsg:
+		appDebugf("ConnErrorMsg: %v", msg.Err)
+		a.toast = a.toast.Dismiss()
+		a.connError = newConnErrorModel(internalssh.Classify(msg.Err), msg.Target, msg.Retry)
+		return a, reflowWindow(a)
+
 	case types.QuitRequestMsg:
 		return a.quitWithCheck()
 
@@ -639,7 +683,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tt = components.ToastWarning
 		}
 		a.toast, tc = a.toast.Show(tmsg, tt, 3*time.Second)
-		return a, tea.Batch(tc, syncTickCmd(a.db))
+		return a, tea.Batch(tc, syncTickCmd(a.db), func() tea.Msg { return types.RefreshListMsg{} })
 
 	case types.SyncTestResultMsg:
 		// Forward to active sync tab if any
@@ -656,15 +700,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.syncing {
 			return a, nil
 		}
-		a.syncing = true
-		return a, a.runSync()
+		cmd, inFlight := a.prepareSync(true)
+		if cmd == nil {
+			return a, nil
+		}
+		a.syncing = inFlight
+		return a, cmd
 
 	case types.SyncTickMsg:
 		if a.syncing {
 			return a, nil // skip, previous sync still running
 		}
-		a.syncing = true
-		return a, a.runSync()
+		cmd, inFlight := a.prepareSync(false)
+		if cmd == nil {
+			return a, nil
+		}
+		a.syncing = inFlight
+		return a, cmd
 
 	case types.KeyBindingsChangedMsg:
 		a.kbConfig = LoadKeyBindingConfig(a.db)
@@ -702,6 +754,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+
+	case types.RefreshListMsg:
+		var refreshCmds []tea.Cmd
+		for i := range a.tabs {
+			tab := a.tabs[i]
+			if tab.Model == nil {
+				continue
+			}
+			switch tab.Type {
+			case HomeTab, KeyTab, ForwardTab, SnippetTab:
+				updated, cmd := tab.Model.Update(msg)
+				a.tabs[i].Model = updated
+				if cmd != nil {
+					refreshCmds = append(refreshCmds, cmd)
+				}
+			}
+		}
+		return a, tea.Batch(refreshCmds...)
 
 	case types.UpdateAvailableMsg:
 		dismissed, _ := db.GetSetting(a.db, version.SettingUpgradeDismissedTag)
@@ -846,11 +916,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.ImportSSHConfigPreviewMsg:
 		return a, func() tea.Msg {
-			n, err := CountImportConflicts(a.db)
+			parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
 			if err != nil {
 				return types.ErrorMsg{Err: err}
 			}
-			return types.ImportSSHConflictCountMsg{Count: n}
+			preview := buildSSHConfigImportPreview(a.db, parsed)
+			return preview
 		}
 
 	case types.ImportSSHConflictCountMsg:
@@ -859,7 +930,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return importSSHConfig(a.db, "skip")
 			}
 		}
-		a.importStratMenu = newImportStratMenu(msg.Count)
+		a.importStratMenu = newImportStratMenu(types.ImportSSHConfigPreviewResultMsg{Changed: msg.Count})
+		return a, nil
+
+	case types.ImportSSHConfigPreviewResultMsg:
+		if msg.Err != nil {
+			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
+		}
+		if msg.Added == 0 && msg.Changed == 0 && msg.Skipped == 0 {
+			var tc tea.Cmd
+			a.toast, tc = a.toast.Show("No SSH config hosts found", components.ToastWarning, 3*time.Second)
+			return a, tea.Batch(tc, reflowWindow(a))
+		}
+		if msg.Changed == 0 && msg.Skipped == 0 {
+			return a, func() tea.Msg { return importSSHConfig(a.db, "skip") }
+		}
+		a.importStratMenu = newImportStratMenu(msg)
 		return a, nil
 
 	case types.ImportSSHConfigRunMsg:

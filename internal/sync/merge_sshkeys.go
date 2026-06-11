@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) MergeResult {
+func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) (MergeResult, error) {
 	var res MergeResult
 	for _, r := range records {
 		var existing db.SSHKey
@@ -16,7 +16,10 @@ func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 
 		if r.Deleted {
 			if found {
-				database.Unscoped().Delete(&existing)
+				if err := database.Unscoped().Delete(&existing).Error; err != nil {
+					res.Failed++
+					return res, err
+				}
 			}
 			res.Merged++
 			continue
@@ -35,15 +38,15 @@ func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 
 		ea := &encAccum{mk: mk}
 		key := db.SSHKey{
-			SyncID:         dto.SyncID,
-			Name:           dto.Name,
-			Type:           dto.Type,
-			PrivateKeyData: ea.enc(dto.PrivateKey),
-			PublicKeyData:  dto.PublicKey,
-			Fingerprint:    dto.Fingerprint,
-			Bits:           dto.Bits,
-			Passphrase:     ea.enc(dto.Passphrase),
-			StorageMode:    "database",
+			SyncID:          dto.SyncID,
+			Name:            dto.Name,
+			Type:            dto.Type,
+			PrivateKeyData:  ea.enc(dto.PrivateKey),
+			PublicKeyData:   dto.PublicKey,
+			Fingerprint:     dto.Fingerprint,
+			Bits:            dto.Bits,
+			Passphrase:      ea.enc(dto.Passphrase),
+			StorageMode:     "database",
 			CertificatePath: dto.CertificatePath,
 		}
 		if ea.err != nil {
@@ -53,11 +56,18 @@ func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 
 		if found {
 			key.Model = existing.Model
-			database.Save(&key)
+			key.DeletedAt = gorm.DeletedAt{}
+			if err := database.Save(&key).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		} else {
-			database.Create(&key)
+			if err := database.Create(&key).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		}
 		res.Merged++
 	}
-	return res
+	return res, nil
 }

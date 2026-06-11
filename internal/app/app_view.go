@@ -85,6 +85,12 @@ func (a App) View() tea.View {
 		} else if a.quickConnect != nil {
 			overlay := a.quickConnect.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.connError != nil {
+			overlay := a.connError.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.commandPalette != nil {
+			overlay := a.commandPalette.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.snippetPicker != nil {
 			overlay := a.snippetPicker.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
@@ -169,7 +175,7 @@ func (a App) helpOverlayPanel(layoutW, midH int) string {
 	hb.SetWidth(innerW)
 	body := hb.FullHelpView(hmap.FullHelp())
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#eeeeee")).Render("Shortcuts")
-	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("esc · ? · q  close")
+	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("esc · " + helpLabel(a.kbConfig.Help) + " · q  close")
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", body, "", footer)
 	dialog := lipgloss.NewStyle().
 		MaxWidth(layoutW-2).

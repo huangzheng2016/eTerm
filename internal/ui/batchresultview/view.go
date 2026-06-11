@@ -16,7 +16,7 @@ func (m *Model) View() tea.View {
 		fmt.Sprintf("hosts:%d  running:%d  ok:%d  failed:%d  %s", len(m.hosts), m.running, m.success, m.failed, doneLabel(m.done)),
 	)
 	command := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(m.command)
-	hint := ui.DimStyle.Render("j/k select host · click host · wheel list/output · pgup/pgdn · esc close")
+	hint := ui.DimStyle.Render("j/k/click select · r retry failed · c copy output · wheel list/output · pgup/pgdn · esc close")
 
 	if len(m.hosts) == 0 {
 		return tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, "", status, "", command, "", hint))
@@ -30,14 +30,20 @@ func (m *Model) View() tea.View {
 		listW = m.width / 2
 	}
 	bodyW := m.width - listW - 2
+	stacked := false
 	if bodyW < 20 {
 		bodyW = m.width - 2
 		listW = m.width
+		stacked = true
 	}
 
 	var rows []string
 	for i, host := range m.hosts {
-		line := fmt.Sprintf("%-18s %s", truncate(host.Label, max(8, listW-8)), host.Status)
+		status := host.Status
+		if host.Status == "failed" && host.FailedKind != "" {
+			status += ": " + host.FailedKind
+		}
+		line := fmt.Sprintf("%-18s %s", truncate(host.Label, max(8, listW-8)), status)
 		style := ui.DimStyle
 		if i == m.cursor {
 			style = ui.SelectedStyle
@@ -72,6 +78,9 @@ func (m *Model) View() tea.View {
 		Render(body)
 
 	main := lipgloss.JoinHorizontal(lipgloss.Top, listBlock, "  ", outputBlock)
+	if stacked {
+		main = lipgloss.JoinVertical(lipgloss.Left, listBlock, "", outputBlock)
+	}
 	return tea.NewView(lipgloss.JoinVertical(lipgloss.Left, title, status, "", command, "", main, "", hint))
 }
 

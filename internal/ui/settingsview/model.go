@@ -105,6 +105,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Lock App", "lock_app"},
 		{"Global", "Forwards Tab", "forward_tab"},
 		{"Global", "Snippets Tab", "snippets_tab"},
+		{"Global", "Command Palette", "command_palette"},
 		// Home
 		{"Home", "SSH Connect", "ssh_connect"},
 		{"Home", "SFTP Open", "sftp_open"},
@@ -184,6 +185,9 @@ func (m *Model) ConfigJSON() []byte {
 // keyString converts a tea.KeyPressMsg to a human-readable key string.
 func keyString(msg tea.KeyPressMsg) string {
 	k := msg.Key()
+	if s := msg.String(); s != "" && s != " " {
+		return s
+	}
 	ks := k.Keystroke()
 	if ks != "" {
 		return ks

@@ -99,6 +99,10 @@ type App struct {
 
 	upgradePrompt *upgradePromptModel
 
+	commandPalette *commandPaletteModel
+
+	connError *connErrorModel
+
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint
 	pendingQuickConnect        *types.QuickConnectMsg

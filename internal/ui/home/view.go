@@ -5,6 +5,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 var tagBadgeStyle = lipgloss.NewStyle().
@@ -12,11 +15,9 @@ var tagBadgeStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("230")).
 	Padding(0, 1)
 
-var tagEmptyHintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262"))
-
 func (m Model) View() tea.View {
 	if !m.loaded {
-		return tea.NewView("Loading...")
+		return tea.NewView(components.Loading(m.width, m.height, "Loading..."))
 	}
 
 	if m.mode == tagView {
@@ -24,39 +25,29 @@ func (m Model) View() tea.View {
 			// Show tag picker list
 			if len(m.allTags) == 0 {
 				return tea.NewView(m.centeredEmptyHint(
-					"No tags found. Add tags to hosts via 'e' (edit).",
-					"t: groups · n: new host · ?: all keys",
+					"No tags found. Add tags to hosts via '"+homeBindingLabel(m.keys.EditHost.Help().Key, "e")+"' (edit).",
+					m.emptyHint(),
 				))
 			}
 			return tea.NewView(m.tagList.View())
 		}
 		// Show filtered host list with tag badge
 		badge := tagBadgeStyle.Render(fmt.Sprintf(" %s ", m.selectedTag))
-		hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("  bksp:back  t:group view")
+		hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("  bksp:back  " + homeBindingLabel(m.keys.ToggleView.Help().Key, "t") + ":group view")
 		header := badge + hint
 		hosts := m.gridHosts()
 		if len(hosts) == 0 {
-			hintText := "bksp: tag list · t: groups · /: search"
-			var hintStr string
-			if m.width > 0 {
-				hintStr = tagEmptyHintStyle.Width(m.width).Render(hintText)
-			} else {
-				hintStr = tagEmptyHintStyle.Render(hintText)
-			}
-			block := lipgloss.JoinVertical(lipgloss.Center,
+			body := components.EmptyState(0, 0,
 				"No hosts with this tag.",
-				"",
-				hintStr,
+				"bksp: tag list · "+homeBindingLabel(m.keys.ToggleView.Help().Key, "t")+": groups · "+homeBindingLabel(m.keys.Search.Help().Key, "/")+": search",
 			)
-			body := block
-			if m.width > 0 && m.height > 1 {
-				subH := m.height - 1
-				if subH < 1 {
-					subH = 1
-				}
-				body = lipgloss.Place(m.width, subH, lipgloss.Center, lipgloss.Center, block)
-			}
-			return tea.NewView(lipgloss.JoinVertical(lipgloss.Left, header, body))
+			return tea.NewView(components.Page{
+				Width:      m.width,
+				Height:     m.height,
+				Header:     header,
+				Body:       body,
+				CenterBody: true,
+			}.Render())
 		}
 		// In search mode, show bubbles list (has search input UI)
 		if m.list.FilterState() != 0 {
@@ -74,8 +65,8 @@ func (m Model) View() tea.View {
 	hosts := m.gridHosts()
 	if len(hosts) == 0 {
 		return tea.NewView(m.centeredEmptyHint(
-			"No connections. Press 'n' to add one.",
-			"t: tags · n: new host · ?: all keys",
+			"No connections. Press '"+homeBindingLabel(m.keys.NewHost.Help().Key, "n")+"' to add one.",
+			m.emptyHint(),
 		))
 	}
 
@@ -89,20 +80,21 @@ func (m Model) View() tea.View {
 
 // centeredEmptyHint adds an optional muted shortcut line under the primary text, then centers the block.
 func (m Model) centeredEmptyHint(primary, hint string) string {
-	var block string
 	if hint != "" {
-		var hintStr string
-		if m.width > 0 {
-			hintStr = tagEmptyHintStyle.Width(m.width).Render(hint)
-		} else {
-			hintStr = tagEmptyHintStyle.Render(hint)
-		}
-		block = lipgloss.JoinVertical(lipgloss.Center, primary, "", hintStr)
-	} else {
-		block = primary
+		return components.EmptyState(m.width, m.height, primary, hint)
 	}
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, block)
+	return components.EmptyState(m.width, m.height, primary)
+}
+
+func (m Model) emptyHint() string {
+	return homeBindingLabel(m.keys.ToggleView.Help().Key, "t") + ": tags · " +
+		homeBindingLabel(m.keys.NewHost.Help().Key, "n") + ": new host · " +
+		homeBindingLabel(viewkeys.HelpLabel(m.helpKeys), "?") + ": all keys"
+}
+
+func homeBindingLabel(label, fallback string) string {
+	if label != "" {
+		return label
 	}
-	return block
+	return fallback
 }

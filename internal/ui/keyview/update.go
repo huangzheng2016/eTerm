@@ -74,22 +74,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 			default:
-				s := msg.String()
 				switch {
-				case viewkeys.MatchAny(s, m.vk.New):
+				case viewkeys.MatchKey(msg, m.vk.New):
 					m.mode = modeGenerate
 					m.step = 0
 					m.nameInput.SetValue("")
 					cmd := m.nameInput.Focus()
 					return m, tea.Batch(cmd, textinput.Blink)
-				case viewkeys.MatchAny(s, m.vk.Import):
+				case viewkeys.MatchKey(msg, m.vk.Import):
 					m.mode = modeImport
 					m.step = 0
 					m.nameInput.SetValue("")
 					m.certPathInput.SetValue("")
 					cmd := m.nameInput.Focus()
 					return m, tea.Batch(cmd, textinput.Blink)
-				case viewkeys.MatchAny(s, m.vk.Export):
+				case viewkeys.MatchKey(msg, m.vk.Export):
 					if k := m.SelectedKey(); k != nil {
 						database := m.db
 						mk := m.masterKey
@@ -102,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return types.SuccessMsg{Message: "Key exported to exported_key.pem"}
 						}
 					}
-				case viewkeys.MatchAny(s, m.vk.Delete):
+				case viewkeys.MatchKey(msg, m.vk.Delete):
 					if k := m.SelectedKey(); k != nil {
 						database := m.db
 						id := k.ID
@@ -111,7 +110,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return keyDeletedMsg{err: err}
 						}
 					}
-				case viewkeys.MatchAny(s, m.vk.Copy):
+				case viewkeys.MatchKey(msg, m.vk.Copy):
 					if k := m.SelectedKey(); k != nil {
 						return m, tea.SetClipboard(k.PublicKeyData)
 					}

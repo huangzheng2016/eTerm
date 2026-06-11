@@ -1,15 +1,23 @@
 // Package viewkeys provides per-view keybinding configuration passed from the app layer.
 package viewkeys
 
+import (
+	"strings"
+	"unicode"
+
+	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+)
+
 // SFTPKeys holds configurable keybindings for the SFTP view.
 type SFTPKeys struct {
-	Upload     []string
-	Download   []string
-	Delete     []string
-	Mkdir      []string
-	Rename     []string
-	Chmod      []string
-	SwitchLeft []string
+	Upload      []string
+	Download    []string
+	Delete      []string
+	Mkdir       []string
+	Rename      []string
+	Chmod       []string
+	SwitchLeft  []string
 	SwitchRight []string
 }
 
@@ -52,4 +60,50 @@ func MatchAny(msgStr string, keys []string) bool {
 		}
 	}
 	return false
+}
+
+func MatchKey(msg tea.KeyPressMsg, keys []string) bool {
+	k := msg.Key()
+	msgStr := msg.String()
+	ks := k.Keystroke()
+	uk := uv.Key(k)
+	for _, target := range keys {
+		if target == "" {
+			continue
+		}
+		if msgStr == target || ks == target || uk.MatchString(target) {
+			return true
+		}
+		if matchCtrlShift(k, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func HelpLabel(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	if len(keys) == 1 {
+		return keys[0]
+	}
+	return keys[0] + "/" + keys[1]
+}
+
+func matchCtrlShift(k tea.Key, target string) bool {
+	const prefix = "ctrl+shift+"
+	if !strings.HasPrefix(target, prefix) {
+		return false
+	}
+	letter := []rune(strings.TrimPrefix(target, prefix))
+	if len(letter) != 1 {
+		return false
+	}
+	if !k.Mod.Contains(tea.ModCtrl) || !k.Mod.Contains(tea.ModShift) {
+		return false
+	}
+	lower := unicode.ToLower(letter[0])
+	upper := unicode.ToUpper(letter[0])
+	return k.Code == lower || k.Code == upper || k.ShiftedCode == lower || k.ShiftedCode == upper
 }

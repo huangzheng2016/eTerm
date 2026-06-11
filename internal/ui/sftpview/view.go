@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/paginator"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 var (
@@ -62,8 +63,8 @@ func panelListInnerHeight(outer int) int {
 // so the progress bar never gets clipped.
 func (m Model) composeFooter() string {
 	if m.confirmMsg != "" {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#e0a000")).Bold(true).
-			Render(m.confirmMsg + "  [y/n]")
+		return m.fitLine(lipgloss.NewStyle().Foreground(lipgloss.Color("#e0a000")).Bold(true).
+			Render(m.confirmMsg + "  [y/n]"))
 	}
 	if m.transferring {
 		pct := 0.0
@@ -75,7 +76,11 @@ func (m Model) composeFooter() string {
 		if m.progress.TotalFiles > 0 {
 			prefix = fmt.Sprintf("[%d/%d] ", m.progress.FileIndex, m.progress.TotalFiles)
 		}
-		label := prefix + m.progress.CurrentFile + " "
+		labelMax := m.width - 20
+		if labelMax < 8 {
+			labelMax = 8
+		}
+		label := prefix + truncateCells(m.progress.CurrentFile, labelMax) + " "
 		barWidth := m.width - lipgloss.Width(label) - 10 // 10 = [] + space + "100.0%"
 		if barWidth < 8 {
 			barWidth = 8
@@ -86,19 +91,58 @@ func (m Model) composeFooter() string {
 		}
 		empty := barWidth - filled
 		bar := "[" + strings.Repeat("=", filled) + strings.Repeat(" ", empty) + "]"
-		return progressStyle.Render(fmt.Sprintf("%s%s %.1f%%", label, bar, pct))
+		return m.fitLine(progressStyle.Render(fmt.Sprintf("%s%s %.1f%%", label, bar, pct)))
 	}
 	if m.err != "" {
-		return errStyle.Render("Error: " + m.err)
+		return m.fitLine(errStyle.Render("Error: " + m.err))
 	}
 	// Idle: show file counts so the row is never empty.
 	localN := len(m.localList.Items())
 	remoteN := len(m.remoteList.Items())
-	return helpStyle.Render(fmt.Sprintf("Local: %d items  |  Remote: %d items", localN, remoteN))
+	return m.fitLine(helpStyle.Render(fmt.Sprintf("Local: %d items  |  Remote: %d items", localN, remoteN)))
 }
 
 func (m Model) composeHelpLine() string {
-	return helpStyle.Render("h/l:panel | enter:open | bksp:back | u:upload | d:download | x:delete | m:mkdir | r:rename | p:chmod")
+	parts := []string{
+		viewkeys.HelpLabel(m.vk.SwitchLeft) + "/" + viewkeys.HelpLabel(m.vk.SwitchRight) + ":panel",
+		"enter:open",
+		"bksp:back",
+		viewkeys.HelpLabel(m.vk.Upload) + ":upload",
+		viewkeys.HelpLabel(m.vk.Download) + ":download",
+		viewkeys.HelpLabel(m.vk.Delete) + ":delete",
+		viewkeys.HelpLabel(m.vk.Mkdir) + ":mkdir",
+		viewkeys.HelpLabel(m.vk.Rename) + ":rename",
+		viewkeys.HelpLabel(m.vk.Chmod) + ":chmod",
+	}
+	return m.fitLine(helpStyle.Render(strings.Join(parts, " | ")))
+}
+
+func (m Model) fitLine(s string) string {
+	if m.width <= 0 {
+		return s
+	}
+	return truncateCells(s, m.width)
+}
+
+func truncateCells(s string, maxW int) string {
+	if maxW <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxW {
+		return s
+	}
+	if maxW == 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+		candidate := string(runes) + "…"
+		if lipgloss.Width(candidate) <= maxW {
+			return candidate
+		}
+	}
+	return "…"
 }
 
 func (m Model) View() tea.View {
@@ -133,7 +177,9 @@ func (m Model) View() tea.View {
 	parts = append(parts, footer)
 	parts = append(parts, helpLine)
 	main := strings.Join(parts, "\n")
-	if m.chmodActive {
+	if m.namePromptActive {
+		main = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderNamePromptOverlay())
+	} else if m.chmodActive {
 		main = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.renderChmodOverlay())
 	}
 	return tea.NewView(main)
@@ -184,4 +230,22 @@ func (m Model) renderChmodOverlay() string {
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(1, 2).
 		Render(content)
+}
+
+func (m Model) renderNamePromptOverlay() string {
+	titleText := "Name"
+	switch m.namePromptKind {
+	case "mkdir":
+		titleText = "Create Directory"
+	case "rename":
+		titleText = "Rename"
+	}
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4")).Render(titleText)
+	hint := helpStyle.Render("Enter apply | Esc cancel")
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7D56F4")).
+		Padding(1, 2).
+		Render(strings.Join([]string{title, m.nameInput.View(), hint}, "\n"))
+	return box
 }

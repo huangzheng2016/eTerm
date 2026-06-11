@@ -63,25 +63,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 		default:
-			s := msg.String()
 			switch {
-			case viewkeys.MatchAny(s, m.vk.Start):
+			case viewkeys.MatchKey(msg, m.vk.Start):
 				if r := m.SelectedRule(); r != nil && r.ID != 0 {
 					id := r.ID
 					return m, func() tea.Msg { return types.ForwardRuleStartMsg{RuleID: id} }
 				}
 				return m, nil
-			case viewkeys.MatchAny(s, m.vk.Stop):
+			case viewkeys.MatchKey(msg, m.vk.Stop):
 				if r := m.SelectedRule(); r != nil && r.ID != 0 {
 					id := r.ID
 					return m, func() tea.Msg { return types.ForwardRuleStopMsg{RuleID: id} }
 				}
 				return m, nil
-			case viewkeys.MatchAny(s, m.vk.New):
+			case viewkeys.MatchKey(msg, m.vk.New):
 				return m, func() tea.Msg {
 					return types.NewTabMsg{Type: "fwd-editor", Title: "New Forward"}
 				}
-			case viewkeys.MatchAny(s, m.vk.Edit):
+			case viewkeys.MatchKey(msg, m.vk.Edit):
 				if r := m.SelectedRule(); r != nil && r.ID != 0 {
 					id := r.ID
 					return m, func() tea.Msg {
@@ -89,7 +88,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
-			case viewkeys.MatchAny(s, m.vk.Delete):
+			case viewkeys.MatchKey(msg, m.vk.Delete):
 				if r := m.SelectedRule(); r != nil && r.ID != 0 {
 					id := r.ID
 					desc := ruleCardTitle(*r)

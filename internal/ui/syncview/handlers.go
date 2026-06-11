@@ -8,10 +8,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/google/uuid"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
-	"github.com/google/uuid"
 )
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -136,38 +136,62 @@ func (m *Model) save() tea.Cmd {
 	interval := m.inputs[inInterval].Value()
 
 	return func() tea.Msg {
-		db.SetSetting(database, "sync_enabled", enabled)
-		db.SetSetting(database, "sync_mode", mode)
-		db.SetSetting(database, "sync_ssh_host_id", hostID)
-		db.SetSetting(database, "sync_remote_bin", remoteBin)
-		db.SetSetting(database, "sync_remote_db", remoteDB)
-		db.SetSetting(database, "sync_server_url", serverURL)
-		db.SetSetting(database, "sync_interval", interval)
-
-		k := mk.GetKey()
-		if k != nil {
-			defer k.Clear()
-			if apiKeyPlain != "" {
-				enc, err := security.Encrypt([]byte(apiKeyPlain), k.Bytes())
-				if err == nil {
-					db.SetSetting(database, "sync_api_key", enc)
-				}
-			} else {
-				db.SetSetting(database, "sync_api_key", "")
+		set := func(key, value string) error {
+			return db.SetSetting(database, key, value)
+		}
+		for _, kv := range [][2]string{
+			{"sync_enabled", enabled},
+			{"sync_mode", mode},
+			{"sync_ssh_host_id", hostID},
+			{"sync_remote_bin", remoteBin},
+			{"sync_remote_db", remoteDB},
+			{"sync_server_url", serverURL},
+			{"sync_interval", interval},
+		} {
+			if err := set(kv[0], kv[1]); err != nil {
+				return types.ErrorMsg{Err: fmt.Errorf("save sync settings: %w", err)}
 			}
-			if passPlain != "" {
-				enc, err := security.Encrypt([]byte(passPlain), k.Bytes())
-				if err == nil {
-					db.SetSetting(database, "sync_passphrase", enc)
+		}
+
+		if apiKeyPlain != "" || passPlain != "" {
+			k := mk.GetKey()
+			if k == nil {
+				return types.ErrorMsg{Err: fmt.Errorf("master key required to save secrets")}
+			}
+			defer k.Clear()
+			for _, kv := range [][2]string{
+				{"sync_api_key", apiKeyPlain},
+				{"sync_passphrase", passPlain},
+			} {
+				if kv[1] == "" {
+					continue
 				}
-			} else {
-				db.SetSetting(database, "sync_passphrase", "")
+				enc, err := security.Encrypt([]byte(kv[1]), k.Bytes())
+				if err != nil {
+					return types.ErrorMsg{Err: fmt.Errorf("encrypt %s: %w", kv[0], err)}
+				}
+				if err := set(kv[0], enc); err != nil {
+					return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv[0], err)}
+				}
+			}
+		} else {
+			k := mk.GetKey()
+			if k != nil {
+				defer k.Clear()
+				if err := set("sync_api_key", ""); err != nil {
+					return types.ErrorMsg{Err: fmt.Errorf("save sync_api_key: %w", err)}
+				}
+				if err := set("sync_passphrase", ""); err != nil {
+					return types.ErrorMsg{Err: fmt.Errorf("save sync_passphrase: %w", err)}
+				}
 			}
 		}
 
 		devID, _ := db.GetSetting(database, "sync_device_id")
 		if devID == "" {
-			db.SetSetting(database, "sync_device_id", uuid.New().String())
+			if err := set("sync_device_id", uuid.New().String()); err != nil {
+				return types.ErrorMsg{Err: fmt.Errorf("save sync_device_id: %w", err)}
+			}
 		}
 
 		return types.SuccessMsg{Message: "Sync settings saved"}

@@ -8,12 +8,13 @@ package sshview
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
 
-	"github.com/charmbracelet/x/vt"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/vt"
 
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
@@ -21,6 +22,9 @@ import (
 )
 
 var streamIDGen atomic.Uint64
+
+// bottomPadMax is how many empty rows the user can scroll past the live bottom.
+const bottomPadMax = 2
 
 // ChunkMsg carries PTY stdout for one embedded session; StreamID routes it in App.Update.
 type ChunkMsg struct {
@@ -56,6 +60,13 @@ type Model struct {
 	// Scrollback view: scrollOffset > 0 means viewing history.
 	// 0 = live view (bottom of scrollback), N = N lines scrolled up.
 	scrollOffset int
+
+	// bottomPad > 0 lets the user scroll past the live bottom, pushing the
+	// newest line up and showing empty rows below it (0..bottomPadMax).
+	bottomPad int
+
+	// Mouse drag text selection over the visible screen + scrollback.
+	sel selection
 
 	// Configurable keybindings
 	vk viewkeys.SSHKeys
@@ -226,9 +237,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.StreamID != m.streamID {
 			return m, nil
 		}
+		before := m.emu.ScrollbackLen()
 		_, _ = m.emu.Write(msg.Data)
-		// New output arrives — snap back to live view
-		m.scrollOffset = 0
+		// Only follow new output when already at the live view (bottom). When the
+		// user has scrolled up, keep the same lines in view by compensating for the
+		// rows that the new output pushed into scrollback.
+		if m.scrollOffset > 0 {
+			if added := m.emu.ScrollbackLen() - before; added > 0 {
+				m.scrollOffset += added
+				if maxScroll := m.emu.ScrollbackLen(); m.scrollOffset > maxScroll {
+					m.scrollOffset = maxScroll
+				}
+			}
+		}
 		return m, waitChunk(m)
 
 	case StreamDoneMsg:
@@ -250,7 +271,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.disconnected {
-			if viewkeys.MatchAny(msg.String(), m.vk.Reconnect) && m.hostID != 0 {
+			if viewkeys.MatchKey(msg, m.vk.Reconnect) && m.hostID != 0 {
 				hid := m.hostID
 				sid := m.streamID
 				return m, func() tea.Msg {
@@ -260,11 +281,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Snippet picker
-		if viewkeys.MatchAny(msg.String(), m.vk.SnippetPicker) {
+		if viewkeys.MatchKey(msg, m.vk.SnippetPicker) {
 			return m, func() tea.Msg { return types.SnippetPickerRequestMsg{} }
 		}
-		// Any keypress snaps back to live view
+		// Any keypress snaps back to live view and clears any text selection.
 		m.scrollOffset = 0
+		m.bottomPad = 0
+		m.sel.active = false
 		if b := m.encodeKey(msg); len(b) > 0 && m.sess != nil && m.sess.Stdin != nil {
 			_, _ = m.sess.Stdin.Write(b)
 		}
@@ -278,6 +301,43 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_, _ = m.sess.Stdin.Write([]byte(msg.String()))
 		}
 		return m, nil
+
+	case tea.MouseClickMsg:
+		if m.disconnected || m.emu.IsAltScreen() {
+			return m, nil
+		}
+		if msg.Button == tea.MouseLeft {
+			p := selPoint{line: m.visibleAbsLine(msg.Y), col: msg.X}
+			m.sel = selection{active: true, dragging: true, anchor: p, caret: p}
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if !m.sel.dragging {
+			return m, nil
+		}
+		m.sel.caret = selPoint{line: m.visibleAbsLine(msg.Y), col: msg.X}
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		if !m.sel.dragging {
+			return m, nil
+		}
+		m.sel.dragging = false
+		// Click without drag clears the selection; a real drag copies.
+		if m.sel.anchor == m.sel.caret {
+			m.sel.active = false
+			return m, nil
+		}
+		txt := m.selectedText()
+		if txt == "" {
+			m.sel.active = false
+			return m, nil
+		}
+		return m, tea.Batch(
+			tea.SetClipboard(txt),
+			func() tea.Msg { return types.SuccessMsg{Message: fmt.Sprintf("Copied %d chars", len([]rune(txt)))} },
+		)
 
 	case tea.MouseWheelMsg:
 		if m.disconnected {
@@ -302,18 +362,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Normal screen: scroll through scrollback history.
+		// Normal screen: scroll through scrollback history, with up to
+		// bottomPadMax extra rows of empty space below the live view.
 		maxScroll := m.emu.ScrollbackLen()
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			m.scrollOffset += 3
-			if m.scrollOffset > maxScroll {
-				m.scrollOffset = maxScroll
+			if m.bottomPad > 0 {
+				m.bottomPad -= 3
+				if m.bottomPad < 0 {
+					m.bottomPad = 0
+				}
+			} else {
+				m.scrollOffset += 3
+				if m.scrollOffset > maxScroll {
+					m.scrollOffset = maxScroll
+				}
 			}
 		case tea.MouseWheelDown:
-			m.scrollOffset -= 3
-			if m.scrollOffset < 0 {
-				m.scrollOffset = 0
+			if m.scrollOffset > 0 {
+				m.scrollOffset -= 3
+				if m.scrollOffset < 0 {
+					m.scrollOffset = 0
+				}
+			} else {
+				m.bottomPad += 3
+				if m.bottomPad > bottomPadMax {
+					m.bottomPad = bottomPadMax
+				}
 			}
 		}
 		return m, nil

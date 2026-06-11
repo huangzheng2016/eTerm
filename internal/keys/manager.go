@@ -46,12 +46,12 @@ func CreateKey(database *gorm.DB, masterKey *security.MasterKeyManager, name, ke
 	}
 
 	sshKey := db.SSHKey{
-		Name:        name,
-		Type:        strings.ToLower(keyType),
+		Name:          name,
+		Type:          strings.ToLower(keyType),
 		PublicKeyData: publicKey,
-		Fingerprint: fingerprint,
-		Bits:        bits,
-		StorageMode: storageMode,
+		Fingerprint:   fingerprint,
+		Bits:          bits,
+		StorageMode:   storageMode,
 	}
 
 	switch storageMode {
@@ -132,11 +132,11 @@ func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyMana
 	keyType := pubKey.Type()
 
 	sshKey := db.SSHKey{
-		Name:          name,
-		Type:          keyType,
-		PublicKeyData: publicKeyStr,
-		Fingerprint:   fingerprint,
-		StorageMode:   storageMode,
+		Name:            name,
+		Type:            keyType,
+		PublicKeyData:   publicKeyStr,
+		Fingerprint:     fingerprint,
+		StorageMode:     storageMode,
 		CertificatePath: certificatePath,
 	}
 
@@ -228,7 +228,7 @@ func ExportKey(database *gorm.DB, masterKey *security.MasterKeyManager, keyID ui
 }
 
 func DeleteKey(database *gorm.DB, id uint) error {
-	return database.Delete(&db.SSHKey{}, id).Error
+	return db.DeleteSSHKeyForSync(database, id)
 }
 
 func GetPublicKey(database *gorm.DB, id uint) (string, error) {

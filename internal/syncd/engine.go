@@ -1,6 +1,7 @@
 package syncd
 
 import (
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -19,6 +20,7 @@ type SyncEntry struct {
 
 type Engine struct {
 	DB *gorm.DB
+	mu sync.Mutex
 }
 
 func NewEngine(database *gorm.DB) (*Engine, error) {
@@ -43,6 +45,9 @@ func (e *Engine) Pull(sinceRev int64) ([]SyncEntry, int64, error) {
 }
 
 func (e *Engine) Push(entries []SyncEntry) (int64, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	var maxRev int64
 	e.DB.Model(&SyncEntry{}).Select("COALESCE(MAX(revision), 0)").Row().Scan(&maxRev)
 

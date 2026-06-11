@@ -68,7 +68,7 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 			database.Create(&db.ConnectionHistory{
 				HostID: hostID, ConnectedAt: time.Now(), Status: "failed",
 			})
-			return types.ErrorMsg{Err: fmt.Errorf("SSH connection failed: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SSHConnectMsg{HostID: hostID}}
 		}
 		appDebugf("SSH dial OK, opening session (PTY %dx%d)", ptyCols, ptyRows)
 
@@ -86,7 +86,7 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 				_ = c.Close()
 			}
 			appDebugf("NewInteractiveSession failed: %v", err)
-			return types.ErrorMsg{Err: fmt.Errorf("failed to start shell: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SSHConnectMsg{HostID: hostID}}
 		}
 		is.SetClosers(client.Closers)
 
@@ -167,7 +167,7 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 			database.Create(&db.ConnectionHistory{
 				HostID: hostID, ConnectedAt: time.Now(), Status: "failed",
 			})
-			return types.ErrorMsg{Err: fmt.Errorf("SSH connection failed: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SSHReconnectMsg{HostID: hostID, StreamID: msg.StreamID}}
 		}
 
 		now := time.Now()
@@ -184,7 +184,7 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 				_ = c.Close()
 			}
 			appDebugf("NewInteractiveSession failed: %v", err)
-			return types.ErrorMsg{Err: fmt.Errorf("failed to start shell: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SSHReconnectMsg{HostID: hostID, StreamID: msg.StreamID}}
 		}
 		is.SetClosers(client.Closers)
 
@@ -267,7 +267,7 @@ func (a App) applySSHDisconnect(msg types.SSHDisconnectMsg) (App, tea.Cmd) {
 	}
 	var tc tea.Cmd
 	if msg.Err != nil {
-		a.toast, tc = a.toast.Show(fmt.Sprintf("SSH session ended: %v", msg.Err), components.ToastWarning, 3*time.Second)
+		a.toast, tc = a.toast.Show("SSH session ended: "+internalssh.Classify(msg.Err).Summary, components.ToastWarning, 3*time.Second)
 	} else {
 		a.toast, tc = a.toast.Show("SSH session ended", components.ToastInfo, 2*time.Second)
 	}
@@ -322,7 +322,7 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 		})
 		if err != nil {
 			appDebugf("SFTP SSH dial failed: %v", err)
-			return types.ErrorMsg{Err: fmt.Errorf("SFTP connection failed: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SFTPOpenMsg{HostID: hostID}}
 		}
 		appDebugf("SFTP SSH dial OK, creating SFTP layer")
 
@@ -333,7 +333,7 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 				_ = c.Close()
 			}
 			appDebugf("sftp.NewClient failed: %v", err)
-			return types.ErrorMsg{Err: fmt.Errorf("SFTP client failed: %w", err)}
+			return types.ConnErrorMsg{Err: err, Target: hostDisplayName(host), Retry: types.SFTPOpenMsg{HostID: hostID}}
 		}
 
 		appDebugf("SFTP ready, opening tab for %q", hostDisplayName(host))

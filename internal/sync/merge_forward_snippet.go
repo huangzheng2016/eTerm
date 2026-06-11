@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecord) MergeResult {
+func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecord) (MergeResult, error) {
 	var res MergeResult
 	for _, r := range records {
 		var existing db.PortForward
@@ -15,7 +15,10 @@ func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecor
 
 		if r.Deleted {
 			if found {
-				database.Unscoped().Delete(&existing)
+				if err := database.Unscoped().Delete(&existing).Error; err != nil {
+					res.Failed++
+					return res, err
+				}
 			}
 			res.Merged++
 			continue
@@ -45,16 +48,23 @@ func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecor
 
 		if found {
 			fwd.Model = existing.Model
-			database.Save(&fwd)
+			fwd.DeletedAt = gorm.DeletedAt{}
+			if err := database.Save(&fwd).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		} else {
-			database.Create(&fwd)
+			if err := database.Create(&fwd).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		}
 		res.Merged++
 	}
-	return res
+	return res, nil
 }
 
-func mergeSnippets(database *gorm.DB, passphrase string, records []SyncRecord) MergeResult {
+func mergeSnippets(database *gorm.DB, passphrase string, records []SyncRecord) (MergeResult, error) {
 	var res MergeResult
 	for _, r := range records {
 		var existing db.Snippet
@@ -62,7 +72,10 @@ func mergeSnippets(database *gorm.DB, passphrase string, records []SyncRecord) M
 
 		if r.Deleted {
 			if found {
-				database.Unscoped().Delete(&existing)
+				if err := database.Unscoped().Delete(&existing).Error; err != nil {
+					res.Failed++
+					return res, err
+				}
 			}
 			res.Merged++
 			continue
@@ -88,11 +101,18 @@ func mergeSnippets(database *gorm.DB, passphrase string, records []SyncRecord) M
 
 		if found {
 			snip.Model = existing.Model
-			database.Save(&snip)
+			snip.DeletedAt = gorm.DeletedAt{}
+			if err := database.Save(&snip).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		} else {
-			database.Create(&snip)
+			if err := database.Create(&snip).Error; err != nil {
+				res.Failed++
+				return res, err
+			}
 		}
 		res.Merged++
 	}
-	return res
+	return res, nil
 }

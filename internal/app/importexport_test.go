@@ -142,3 +142,29 @@ func TestHostFromParsedUsesIdentityFileWithoutGSSAPI(t *testing.T) {
 		t.Fatalf("got key id %#v want %d", host.KeyID, key.ID)
 	}
 }
+
+func TestBuildSSHConfigImportPreviewCountsAddedChangedSkipped(t *testing.T) {
+	database, err := db.InitDB(filepath.Join(t.TempDir(), "preview.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	same := db.Host{Alias: "same", Hostname: "same.example.com", Port: 22, Username: "root", AuthMethod: "agent"}
+	changed := db.Host{Alias: "changed", Hostname: "old.example.com", Port: 22, Username: "root", AuthMethod: "agent"}
+	if err := database.Create(&same).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Create(&changed).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	preview := buildSSHConfigImportPreview(database, []sshconfig.ParsedHost{
+		{Alias: "same", Hostname: "same.example.com", Port: 22, Username: "root"},
+		{Alias: "changed", Hostname: "new.example.com", Port: 22, Username: "root"},
+		{Alias: "new", Hostname: "new.example.com", Port: 2222, Username: "deploy"},
+	})
+
+	if preview.Added != 1 || preview.Changed != 1 || preview.Skipped != 1 {
+		t.Fatalf("got added=%d changed=%d skipped=%d", preview.Added, preview.Changed, preview.Skipped)
+	}
+}
