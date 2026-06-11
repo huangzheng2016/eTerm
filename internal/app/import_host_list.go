@@ -18,10 +18,14 @@ const (
 	hostListStateRename
 )
 
+const hostListPageSize = 10
+
 type importHostListModel struct {
 	items           []importHostEntry
 	allKeys         []parser.KeyRecord
 	cursor          int
+	page            int
+	pageSize        int
 	state           hostListState
 	aliasCursor     int
 	renameInput     textinput.Model
@@ -33,21 +37,70 @@ func newImportHostList(items []importHostEntry) *importHostListModel {
 	ti.CharLimit = 64
 	return &importHostListModel{
 		items:       items,
+		pageSize:    hostListPageSize,
 		renameInput: ti,
+	}
+}
+
+func (m *importHostListModel) setPageSize(windowHeight int) {
+	// border(2) + padding(2) + title(1) + hint(1) + blank(1) + pager(1) = 8 overhead
+	ps := windowHeight - 8
+	if ps < 3 {
+		ps = 3
+	}
+	m.pageSize = ps
+	// clamp cursor/page to new size
+	totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if m.page >= totalPages {
+		m.page = totalPages - 1
+	}
+	if m.cursor >= len(m.items) {
+		m.cursor = len(m.items) - 1
 	}
 }
 
 func (m *importHostListModel) Update(msg tea.KeyPressMsg) (closed bool, proceed bool, cmd tea.Cmd) {
 	switch m.state {
 	case hostListStateList:
+		totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
+		if totalPages < 1 {
+			totalPages = 1
+		}
+		pageStart := m.page * m.pageSize
+		pageEnd := pageStart + m.pageSize
+		if pageEnd > len(m.items) {
+			pageEnd = len(m.items)
+		}
 		switch msg.String() {
 		case "up", "k":
-			if m.cursor > 0 {
+			if m.cursor > pageStart {
 				m.cursor--
+			} else if m.page > 0 {
+				m.page--
+				m.cursor = m.page*m.pageSize + m.pageSize - 1
+				if m.cursor >= len(m.items) {
+					m.cursor = len(m.items) - 1
+				}
 			}
 		case "down", "j":
-			if m.cursor < len(m.items)-1 {
+			if m.cursor < pageEnd-1 {
 				m.cursor++
+			} else if m.page < totalPages-1 {
+				m.page++
+				m.cursor = m.page * m.pageSize
+			}
+		case "left", "h":
+			if m.page > 0 {
+				m.page--
+				m.cursor = m.page * m.pageSize
+			}
+		case "right", "l":
+			if m.page < totalPages-1 {
+				m.page++
+				m.cursor = m.page * m.pageSize
 			}
 		case "space":
 			if m.cursor < len(m.items) && !m.items[m.cursor].blocked {
@@ -138,10 +191,21 @@ func (m *importHostListModel) View() string {
 
 func (m *importHostListModel) viewList() string {
 	title := ui.TitleStyle.Render("导入主机 (步骤 1/2)")
-	hint := ui.DimStyle.Render("space 选择 · enter 别名 · y 下一步 · esc 返回")
+	hint := ui.DimStyle.Render("space 选择 · enter 别名 · y 下一步 · ←→ 翻页 · esc 返回")
+
+	totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	pageStart := m.page * m.pageSize
+	pageEnd := pageStart + m.pageSize
+	if pageEnd > len(m.items) {
+		pageEnd = len(m.items)
+	}
 
 	var rows string
-	for i, item := range m.items {
+	for i := pageStart; i < pageEnd; i++ {
+		item := m.items[i]
 		cursor := "  "
 		if i == m.cursor {
 			cursor = "▸ "
@@ -183,7 +247,8 @@ func (m *importHostListModel) viewList() string {
 		rows += cursor + rowStyle.Render(line) + "\n"
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, title, hint, "", rows)
+	pager := ui.DimStyle.Render(fmt.Sprintf("第 %d/%d 页", m.page+1, totalPages))
+	content := lipgloss.JoinVertical(lipgloss.Left, title, hint, "", rows, pager)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).

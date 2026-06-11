@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/termius_exporter/pkg/exporter"
 	"github.com/huangzheng2016/termius_exporter/pkg/parser"
 	"golang.org/x/crypto/ssh"
@@ -163,11 +164,17 @@ func computeKeyFingerprint(privateKeyPEM string) string {
 	return "SHA256:" + base64.RawStdEncoding.EncodeToString(h[:])
 }
 
-func runTermiusImport(database *gorm.DB, hosts []importHostEntry, keys []importKeyEntry) tea.Cmd {
+func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, hosts []importHostEntry, keys []importKeyEntry) tea.Cmd {
 	return func() tea.Msg {
 		imported := 0
 		skipped := 0
 		keyAliasToID := make(map[string]uint)
+
+		secKey := masterKey.GetKey()
+		if secKey == nil {
+			return termiusImportResultMsg{err: fmt.Errorf("master key is locked")}
+		}
+		defer secKey.Clear()
 
 		for _, ki := range keys {
 			if ki.blocked || (!ki.selected && !ki.locked) {
@@ -183,11 +190,16 @@ func runTermiusImport(database *gorm.DB, hosts []importHostEntry, keys []importK
 				h := sha256.Sum256(signer.PublicKey().Marshal())
 				fp = "SHA256:" + base64.RawStdEncoding.EncodeToString(h[:])
 			}
+			encrypted, err := security.Encrypt([]byte(ki.rec.PrivateKey), secKey.Bytes())
+			if err != nil {
+				skipped++
+				continue
+			}
 			k := db.SSHKey{
 				SyncID:         fmt.Sprintf("termius-%s", ki.chosenAlias),
 				Name:           ki.chosenAlias,
 				Type:           signer.PublicKey().Type(),
-				PrivateKeyData: ki.rec.PrivateKey,
+				PrivateKeyData: encrypted,
 				PublicKeyData:  string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
 				Fingerprint:    fp,
 				StorageMode:    "database",

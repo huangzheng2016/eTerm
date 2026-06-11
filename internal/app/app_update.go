@@ -45,6 +45,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.batchActions != nil {
 			a.batchActions.syncWidth(a.width)
 		}
+		if a.importHostList != nil {
+			a.importHostList.setPageSize(a.height)
+		}
+		if a.importKeyList != nil {
+			a.importKeyList.setPageSize(a.height)
+		}
 		var layoutCmd tea.Cmd
 		a, layoutCmd = layoutTabModels(a)
 		cmds = append(cmds, layoutCmd)
@@ -154,7 +160,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.importKeyList != nil {
 			closed, confirmed, cmd := a.importKeyList.Update(msg)
 			if confirmed {
-				return a, runTermiusImport(a.db, a.importHostList.items, a.importKeyList.items)
+				return a, runTermiusImport(a.db, a.masterKey, a.importHostList.items, a.importKeyList.items)
 			}
 			if closed {
 				a.importKeyList = nil
@@ -168,6 +174,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				keyItems := buildKeyItems(a.db, a.importHostList.allKeys)
 				keyItems = lockRequiredKeys(a.importHostList.items, keyItems)
 				a.importKeyList = newImportKeyList(keyItems, a.importHostList.items)
+				a.importKeyList.setPageSize(a.height)
 				return a, cmd
 			}
 			if closed {
@@ -710,6 +717,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		hostItems := buildHostItems(a.db, msg.hosts)
 		hl := newImportHostList(hostItems)
+		hl.setPageSize(a.height)
 		hl.allKeys = msg.keys
 		a.importHostList = hl
 		a.importSourceMenu = nil
