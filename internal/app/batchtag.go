@@ -11,6 +11,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 	"gorm.io/gorm"
 )
 
@@ -68,6 +69,10 @@ func (a App) handleBatchTagKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.batchTag.input, cmd = a.batchTag.input.Update(msg)
 	return a, cmd
+}
+
+func (b *batchTagModel) paste(msg tea.PasteMsg) {
+	b.input = inputpaste.TextInput(b.input, msg)
 }
 
 type batchTagApplyMsg struct {

@@ -351,6 +351,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.PasteMsg:
+		if a.quickConnect != nil {
+			return a.handleQuickConnectPaste(msg)
+		}
+		if a.commandPalette != nil {
+			a.commandPalette.paste(msg)
+			return a, nil
+		}
+		if a.batchTag != nil {
+			a.batchTag.paste(msg)
+			return a, nil
+		}
+		if a.batchActions != nil {
+			a.batchActions.paste(msg)
+			return a, nil
+		}
+		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
+			updated, cmd := a.tabs[a.activeTab].Model.Update(msg)
+			a.tabs[a.activeTab].Model = updated
+			return a, cmd
+		}
+
 	case tea.MouseClickMsg:
 		if a.viewState == MainView {
 			a.masterKey.Touch()

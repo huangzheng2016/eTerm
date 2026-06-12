@@ -8,6 +8,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 func (m Model) Init() tea.Cmd {
@@ -47,6 +48,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.inputs[m.focused], cmd = m.inputs[m.focused].Update(msg)
 		return m, cmd
+
+	case tea.PasteMsg:
+		m.inputs[m.focused] = inputpaste.TextInput(m.inputs[m.focused], msg)
+		return m, nil
 
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {

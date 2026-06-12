@@ -10,6 +10,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
@@ -141,6 +142,12 @@ func (a App) handleBatchActionsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return a, nil
+}
+
+func (b *batchActionsModel) paste(msg tea.PasteMsg) {
+	if b.step == 1 {
+		b.command = inputpaste.TextInput(b.command, msg)
+	}
 }
 
 func (a *App) findSSHTabByHostID(hostID uint) *sshview.Model {

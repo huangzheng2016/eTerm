@@ -9,6 +9,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 type hostsLoadedMsg struct {
@@ -136,6 +137,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[idx], cmd = m.inputs[idx].Update(msg)
 			return m, cmd
 		}
+
+	case tea.PasteMsg:
+		idx := inputIndexForField(m.currentField())
+		if idx >= 0 {
+			m.inputs[idx] = inputpaste.TextInput(m.inputs[idx], msg)
+		}
+		return m, nil
 
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {

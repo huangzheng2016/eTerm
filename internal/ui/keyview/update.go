@@ -7,6 +7,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/keys"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
@@ -236,6 +237,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+
+	case tea.PasteMsg:
+		switch m.mode {
+		case modeGenerate:
+			if m.step == 0 {
+				m.nameInput = inputpaste.TextInput(m.nameInput, msg)
+			}
+		case modeImport:
+			switch m.step {
+			case 0:
+				m.nameInput = inputpaste.TextInput(m.nameInput, msg)
+			case 1:
+				m.certPathInput = inputpaste.TextInput(m.certPathInput, msg)
+			case 2:
+				m.keyPaste = inputpaste.TextArea(m.keyPaste, msg)
+			}
+		}
+		return m, nil
 
 	case tea.MouseClickMsg:
 		if m.mode == modeNone && msg.Button == tea.MouseLeft {

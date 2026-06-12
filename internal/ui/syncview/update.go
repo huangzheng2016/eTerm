@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 func (m *Model) Init() tea.Cmd { return nil }
@@ -25,6 +26,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.PasteMsg:
+		f := m.currentField()
+		idx := m.inputIdxForField(f)
+		if idx >= 0 {
+			m.inputs[idx] = inputpaste.TextInput(m.inputs[idx], msg)
+		}
+		return m, nil
 	}
 	f := m.currentField()
 	idx := m.inputIdxForField(f)

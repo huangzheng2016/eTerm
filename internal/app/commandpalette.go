@@ -10,6 +10,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 	"gorm.io/gorm"
 )
 
@@ -113,6 +114,11 @@ func (p *commandPaletteModel) Update(msg tea.KeyPressMsg) tea.Cmd {
 	p.input, cmd = p.input.Update(msg)
 	p.refresh()
 	return cmd
+}
+
+func (p *commandPaletteModel) paste(msg tea.PasteMsg) {
+	p.input = inputpaste.TextInput(p.input, msg)
+	p.refresh()
 }
 
 func (p *commandPaletteModel) View() string {

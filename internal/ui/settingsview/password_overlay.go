@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 type passwordOverlay struct {
@@ -169,6 +170,13 @@ func (o *passwordOverlay) Update(msg tea.Msg) (*passwordOverlay, tea.Cmd) {
 			}
 			return o, nil
 		}
+
+	case tea.PasteMsg:
+		in := o.activeInput()
+		if in != nil {
+			*in = inputpaste.TextInput(*in, msg)
+		}
+		return o, nil
 	}
 
 	in := o.activeInput()

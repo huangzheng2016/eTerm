@@ -10,6 +10,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 type Model struct {
@@ -150,6 +151,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
+	}
+
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		if m.focused == 0 {
+			m.passwordInput = inputpaste.TextInput(m.passwordInput, paste)
+		} else {
+			m.confirmInput = inputpaste.TextInput(m.confirmInput, paste)
+		}
+		return m, nil
 	}
 
 	if m.focused == 0 {

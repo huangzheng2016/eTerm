@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/google/uuid"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/sshconfig"
@@ -163,6 +164,12 @@ func (m Model) save() tea.Cmd {
 
 	if m.host != nil && m.host.ID > 0 {
 		host.Model = m.host.Model
+		host.SyncID = m.host.SyncID
+		if host.SyncID == "" {
+			host.SyncID = uuid.New().String()
+		}
+		host.SyncRev = m.host.SyncRev
+		host.SyncDel = m.host.SyncDel
 		return func() tea.Msg {
 			if err := database.Save(&host).Error; err != nil {
 				return types.ErrorMsg{Err: err}

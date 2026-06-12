@@ -8,6 +8,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/sftp"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
@@ -164,6 +165,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case msg.String() == "esc":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
+		}
+
+	case tea.PasteMsg:
+		if m.namePromptActive {
+			m.nameInput = inputpaste.TextInput(m.nameInput, msg)
+			return m, nil
+		}
+		if m.chmodActive {
+			m.chmodInput = inputpaste.TextInput(m.chmodInput, msg)
+			return m, nil
 		}
 
 	case tea.MouseClickMsg:

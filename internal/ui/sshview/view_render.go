@@ -199,6 +199,9 @@ func renderScrollbackLine(m *Model, w, idx int) string {
 	var sb strings.Builder
 	for x := 0; x < w; x++ {
 		cell := m.emu.ScrollbackCellAt(x, idx)
+		if cell != nil && cell.Width == 0 {
+			continue
+		}
 		if cell == nil || cell.Content == "" {
 			sb.WriteByte(' ')
 		} else {
@@ -212,6 +215,9 @@ func renderScreenLine(m *Model, w, y int) string {
 	var sb strings.Builder
 	for x := 0; x < w; x++ {
 		cell := m.emu.CellAt(x, y)
+		if cell != nil && cell.Width == 0 {
+			continue
+		}
 		if cell == nil || cell.Content == "" {
 			sb.WriteByte(' ')
 		} else {

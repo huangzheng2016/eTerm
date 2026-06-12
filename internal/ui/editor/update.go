@@ -9,6 +9,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 type editorDataLoadedMsg struct {
@@ -237,6 +238,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleMainKey(msg)
 
+	case tea.PasteMsg:
+		return m.pasteCurrentField(msg)
+
 	case tea.MouseClickMsg:
 		if m.advancedActive {
 			return m.handleAdvancedMouse(msg)
@@ -244,6 +248,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMainMouse(msg)
 	}
 
+	return m, nil
+}
+
+func (m Model) pasteCurrentField(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	field := m.currentField()
+	if fieldUsesTextarea(field) {
+		switch field {
+		case remoteCommandField:
+			m.remoteCommand = inputpaste.TextArea(m.remoteCommand, msg)
+		case extraOptionsField:
+			m.extraOptions = inputpaste.TextArea(m.extraOptions, msg)
+		}
+		return m, nil
+	}
+	idx := inputIndexForField(field)
+	if idx >= 0 {
+		m.inputs[idx] = inputpaste.TextInput(m.inputs[idx], msg)
+	}
 	return m, nil
 }
 

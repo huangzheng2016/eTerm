@@ -1,6 +1,7 @@
 package sshview
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -144,6 +145,18 @@ func TestWheelBottomPadStateTransitions(t *testing.T) {
 	m.Update(wheel(tea.MouseWheelUp))
 	if m.scrollOffset == 0 {
 		t.Fatalf("after up #2: expected scrollOffset>0, got %d", m.scrollOffset)
+	}
+}
+
+func TestScrollbackRenderDoesNotSpaceCJK(t *testing.T) {
+	e := mkEmu(20, 5, "这是中文\r\n")
+	m := &Model{emu: e}
+	got := renderScreenLine(m, 20, 0)
+	if strings.Contains(got, "这 是") || strings.Contains(got, "中 文") {
+		t.Fatalf("CJK text was spaced out: %q", got)
+	}
+	if !strings.Contains(got, "这是中文") {
+		t.Fatalf("expected contiguous CJK text, got %q", got)
 	}
 }
 

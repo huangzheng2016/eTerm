@@ -15,6 +15,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 )
 
 type quickConnectModel struct {
@@ -56,6 +57,11 @@ func (q *quickConnectModel) View() string {
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(1, 2).
 		Render(content)
+}
+
+func (a App) handleQuickConnectPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	a.quickConnect.input = inputpaste.TextInput(a.quickConnect.input, msg)
+	return a, nil
 }
 
 func (a App) handleQuickConnectKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
