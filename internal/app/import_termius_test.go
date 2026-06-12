@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/termius_exporter/pkg/parser"
@@ -98,6 +99,27 @@ func TestBuildHostItems_DefaultAliasAndSort(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("expected sorted aliases %v, got %v", want, got)
 		}
+	}
+}
+
+func TestImportHostListViewFitsWindowHeight(t *testing.T) {
+	items := make([]importHostEntry, 40)
+	for i := range items {
+		items[i] = importHostEntry{
+			rec: parser.HostRecord{
+				Aliases:  []string{"host"},
+				Host:     "192.168.1.1",
+				Port:     22,
+				Username: "root",
+			},
+			chosenAlias: "host",
+		}
+	}
+	m := newImportHostList(items)
+	m.setPageSize(24)
+
+	if h := lipgloss.Height(m.View()); h > 24 {
+		t.Fatalf("view height %d exceeds window height 24", h)
 	}
 }
 

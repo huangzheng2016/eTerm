@@ -205,7 +205,7 @@ func (m *importHostListModel) viewList() string {
 		pageEnd = len(m.items)
 	}
 
-	var rows string
+	rows := make([]string, 0, pageEnd-pageStart)
 	for i := pageStart; i < pageEnd; i++ {
 		item := m.items[i]
 		cursor := "  "
@@ -247,11 +247,11 @@ func (m *importHostListModel) viewList() string {
 		}
 
 		line = truncateImportHostLine(line, importHostListRowWidth-lipgloss.Width(cursor))
-		rows += cursor + rowStyle.Render(line) + "\n"
+		rows = append(rows, cursor+rowStyle.Render(line))
 	}
 
 	pager := ui.DimStyle.Render(fmt.Sprintf("第 %d/%d 页", m.page+1, totalPages))
-	content := lipgloss.JoinVertical(lipgloss.Left, title, hint, "", rows, pager)
+	content := lipgloss.JoinVertical(lipgloss.Left, title, hint, "", strings.Join(rows, "\n"), pager)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
