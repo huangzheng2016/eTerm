@@ -28,7 +28,8 @@ func main() {
 	versionFlag := flag.Bool("v", false, "print version and exit")
 	versionJSONFlag := flag.Bool("version-json", false, "print version and commit as JSON and exit")
 	noUpdateCheckFlag := flag.Bool("no-update-check", false, "disable GitHub release check on unlock")
-	flag.Parse()
+	forceUpdateCheck, cliArgs := splitUpgradeCommand(os.Args[1:])
+	flag.CommandLine.Parse(cliArgs)
 
 	if *versionJSONFlag {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{
@@ -113,10 +114,10 @@ func main() {
 		masterKey.UnlockNoPassword()
 		a = app.NewApp(database, masterKey).SetInitCmd(func() tea.Msg {
 			return types.MasterKeyUnlockedMsg{NoPassword: true}
-		}).SetNoUpdateCheck(noUpdateCheck)
+		}).SetNoUpdateCheck(noUpdateCheck).SetForceUpdateCheck(forceUpdateCheck)
 	} else {
 		loginModel := login.New(masterKey, isSetup)
-		a = app.NewApp(database, masterKey).SetLoginModel(loginModel).SetNoUpdateCheck(noUpdateCheck)
+		a = app.NewApp(database, masterKey).SetLoginModel(loginModel).SetNoUpdateCheck(noUpdateCheck).SetForceUpdateCheck(forceUpdateCheck)
 	}
 
 	// CLI direct connect: eterm [user@]host[:port] [-p port]
@@ -135,6 +136,13 @@ func main() {
 	}
 
 	masterKey.Lock()
+}
+
+func splitUpgradeCommand(args []string) (bool, []string) {
+	if len(args) == 0 || args[0] != "upgrade" {
+		return false, args
+	}
+	return true, args[1:]
 }
 
 // parseQuickConnect parses [user@]host[:port] into components.

@@ -664,15 +664,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			})
 		}
-		// Async version check (throttled in DB; ETERM_NO_UPDATE_CHECK / --no-update-check disables).
-		unlockCmds = append(unlockCmds, func() tea.Msg {
-			disabled := a.noUpdateCheck || os.Getenv("ETERM_NO_UPDATE_CHECK") != ""
-			tag, url, err := version.PollLatestRelease(a.db, disabled)
-			if err != nil || tag == "" {
-				return nil
-			}
-			return types.UpdateAvailableMsg{Version: tag, URL: url}
-		})
+		if a.forceUpdateCheck {
+			unlockCmds = append(unlockCmds, func() tea.Msg {
+				tag, url, err := version.CheckLatestRelease()
+				return types.UpdateCheckDoneMsg{Version: tag, URL: url, Err: err}
+			})
+		} else {
+			// Async version check (throttled in DB; ETERM_NO_UPDATE_CHECK / --no-update-check disables).
+			unlockCmds = append(unlockCmds, func() tea.Msg {
+				disabled := a.noUpdateCheck || os.Getenv("ETERM_NO_UPDATE_CHECK") != ""
+				tag, url, err := version.PollLatestRelease(a.db, disabled)
+				if err != nil || tag == "" {
+					return nil
+				}
+				return types.UpdateAvailableMsg{Version: tag, URL: url}
+			})
+		}
 		// Start sync tick if enabled
 		unlockCmds = append(unlockCmds, syncTickCmd(a.db))
 		return a, tea.Batch(unlockCmds...)
@@ -851,6 +858,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		dismissed, _ := db.GetSetting(a.db, version.SettingUpgradeDismissedTag)
 		if dismissed == msg.Version {
 			return a, nil
+		}
+		a.upgradePrompt = NewUpgradePrompt(msg.Version, msg.URL)
+		return a, nil
+
+	case types.UpdateCheckDoneMsg:
+		if msg.Err != nil {
+			var tc tea.Cmd
+			a.toast, tc = a.toast.Show("Update check failed: "+msg.Err.Error(), components.ToastError, 6*time.Second)
+			return a, tc
+		}
+		if msg.Version == "" {
+			var tc tea.Cmd
+			a.toast, tc = a.toast.Show("Already up to date.", components.ToastInfo, 4*time.Second)
+			return a, tc
 		}
 		a.upgradePrompt = NewUpgradePrompt(msg.Version, msg.URL)
 		return a, nil

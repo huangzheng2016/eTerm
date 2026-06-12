@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"sort"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -57,7 +59,10 @@ type importKeyEntry struct {
 	nameConflict bool // same name, different fingerprint - must rename
 	chosenAlias  string
 	fingerprint  string
+	existingID   uint
 }
+
+const unknownImportAlias = "<UNKNOWN>"
 
 func loadTermiusData() tea.Cmd {
 	return func() tea.Msg {
@@ -70,7 +75,7 @@ func loadTermiusData() tea.Cmd {
 func buildHostItems(database *gorm.DB, hosts []parser.HostRecord) []importHostEntry {
 	items := make([]importHostEntry, 0, len(hosts))
 	for _, h := range hosts {
-		alias := ""
+		alias := unknownImportAlias
 		if len(h.Aliases) > 0 {
 			alias = h.Aliases[0]
 		}
@@ -91,6 +96,9 @@ func buildHostItems(database *gorm.DB, hosts []parser.HostRecord) []importHostEn
 			chosenAlias:  alias,
 		})
 	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return strings.ToLower(items[i].chosenAlias) < strings.ToLower(items[j].chosenAlias)
+	})
 	return items
 }
 
@@ -115,11 +123,19 @@ func buildKeyItemsWithFP(database *gorm.DB, keys []parser.KeyRecord, fps []strin
 		var existing db.SSHKey
 		blocked := false
 		nameConflict := false
+		existingID := uint(0)
 		if err := database.Where("name = ?", alias).First(&existing).Error; err == nil {
 			if existing.Fingerprint == fp && fp != "" {
 				blocked = true
+				existingID = existing.ID
 			} else {
 				nameConflict = true
+			}
+		}
+		if !blocked && !nameConflict && fp != "" {
+			if err := database.Where("fingerprint = ?", fp).First(&existing).Error; err == nil {
+				blocked = true
+				existingID = existing.ID
 			}
 		}
 		items = append(items, importKeyEntry{
@@ -128,6 +144,7 @@ func buildKeyItemsWithFP(database *gorm.DB, keys []parser.KeyRecord, fps []strin
 			nameConflict: nameConflict,
 			chosenAlias:  alias,
 			fingerprint:  fp,
+			existingID:   existingID,
 		})
 	}
 	return items
@@ -177,6 +194,13 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 		defer secKey.Clear()
 
 		for _, ki := range keys {
+			if ki.blocked && ki.existingID != 0 {
+				for _, a := range ki.rec.Aliases {
+					keyAliasToID[a] = ki.existingID
+				}
+				keyAliasToID[ki.chosenAlias] = ki.existingID
+				continue
+			}
 			if ki.blocked || (!ki.selected && !ki.locked) {
 				continue
 			}

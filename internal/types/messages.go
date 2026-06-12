@@ -269,6 +269,13 @@ type UpdateAvailableMsg struct {
 	URL     string
 }
 
+// UpdateCheckDoneMsg reports a forced update check result.
+type UpdateCheckDoneMsg struct {
+	Version string
+	URL     string
+	Err     error
+}
+
 // UpgradeDownloadDoneMsg completes an async download/extract from GitHub Releases.
 type UpgradeDownloadDoneMsg struct {
 	Err           error

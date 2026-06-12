@@ -88,7 +88,8 @@ type App struct {
 	// Keybinding configuration
 	kbConfig KeyBindingConfig
 
-	noUpdateCheck bool
+	noUpdateCheck    bool
+	forceUpdateCheck bool
 
 	syncing bool // true while runSync() is in flight
 
@@ -155,6 +156,11 @@ func (a App) SetInitCmd(cmd tea.Cmd) App {
 
 func (a App) SetNoUpdateCheck(v bool) App {
 	a.noUpdateCheck = v
+	return a
+}
+
+func (a App) SetForceUpdateCheck(v bool) App {
+	a.forceUpdateCheck = v
 	return a
 }
 

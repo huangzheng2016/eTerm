@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -13,12 +14,13 @@ import (
 type hostListState int
 
 const (
-	hostListStateList  hostListState = iota
+	hostListStateList hostListState = iota
 	hostListStateAlias
 	hostListStateRename
 )
 
 const hostListPageSize = 10
+const importHostListRowWidth = 62
 
 type importHostListModel struct {
 	items           []importHostEntry
@@ -244,6 +246,7 @@ func (m *importHostListModel) viewList() string {
 			rowStyle = lipgloss.NewStyle()
 		}
 
+		line = truncateImportHostLine(line, importHostListRowWidth-lipgloss.Width(cursor))
 		rows += cursor + rowStyle.Render(line) + "\n"
 	}
 
@@ -255,6 +258,24 @@ func (m *importHostListModel) viewList() string {
 		Padding(1, 3).
 		Width(70).
 		Render(content)
+}
+
+func truncateImportHostLine(s string, width int) string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return s
+	}
+	if width <= 3 {
+		return strings.Repeat(".", width)
+	}
+	suffix := "..."
+	runes := []rune(s)
+	for i := len(runes); i >= 0; i-- {
+		candidate := strings.TrimRight(string(runes[:i]), " ") + suffix
+		if lipgloss.Width(candidate) <= width {
+			return candidate
+		}
+	}
+	return suffix
 }
 
 func (m *importHostListModel) viewAlias() string {
