@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
@@ -70,6 +72,9 @@ type Model struct {
 
 	// Configurable keybindings
 	vk viewkeys.SSHKeys
+
+	appCursorKeys bool
+	mouseMode     bool
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -77,18 +82,7 @@ func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
 // New creates a model; call SetSize or rely on WindowSizeMsg. hostID is used to reconnect after a network drop.
 func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
 	emu := vt.NewEmulator(80, 24)
-	// Drain the emulator's input pipe so internal writes (e.g. in-band resize
-	// responses) never block emu.Write(). Without this, vi/less freeze the app.
-	go func() {
-		buf := make([]byte, 256)
-		for {
-			_, err := emu.Read(buf)
-			if err != nil {
-				return
-			}
-		}
-	}()
-	return &Model{
+	m := &Model{
 		sess:     is,
 		emu:      emu,
 		streamID: streamIDGen.Add(1),
@@ -96,6 +90,48 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		hostID:   hostID,
 		ch:       make(chan []byte, 128),
 		vk:       vk,
+	}
+	emu.SetCallbacks(vt.Callbacks{
+		EnableMode: func(mode ansi.Mode) {
+			if mode == ansi.ModeCursorKeys {
+				m.appCursorKeys = true
+			}
+			if isMouseTrackingMode(mode) {
+				m.mouseMode = true
+			}
+		},
+		DisableMode: func(mode ansi.Mode) {
+			if mode == ansi.ModeCursorKeys {
+				m.appCursorKeys = false
+			}
+			if isMouseTrackingMode(mode) {
+				m.mouseMode = false
+			}
+		},
+	})
+	// Drain the emulator's input pipe so internal writes (e.g. in-band resize
+	// responses) never block emu.Write(). Without this, vi/less freeze the app.
+	go func() {
+		buf := make([]byte, 256)
+		for {
+			n, err := emu.Read(buf)
+			if err != nil {
+				return
+			}
+			if n > 0 && m.sess != nil && m.sess.Stdin != nil {
+				_, _ = m.sess.Stdin.Write(buf[:n])
+			}
+		}
+	}()
+	return m
+}
+
+func isMouseTrackingMode(mode ansi.Mode) bool {
+	switch mode {
+	case ansi.ModeMouseX10, ansi.ModeMouseNormal, ansi.ModeMouseHighlight, ansi.ModeMouseButtonEvent, ansi.ModeMouseAnyEvent:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -181,10 +217,7 @@ func (m *Model) readLoop() {
 		if n > 0 {
 			b := make([]byte, n)
 			copy(b, buf[:n])
-			select {
-			case m.ch <- b:
-			default:
-			}
+			m.ch <- b
 		}
 		if err != nil {
 			m.setEndErr(err)
@@ -303,6 +336,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseClickMsg:
+		if m.emu.IsAltScreen() && m.sendRemoteMouse(msg) {
+			return m, nil
+		}
 		if m.disconnected || m.emu.IsAltScreen() {
 			return m, nil
 		}
@@ -313,6 +349,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
+		if m.emu.IsAltScreen() && m.sendRemoteMouse(msg) {
+			return m, nil
+		}
 		if !m.sel.dragging {
 			return m, nil
 		}
@@ -320,6 +359,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseReleaseMsg:
+		if m.emu.IsAltScreen() && m.sendRemoteMouse(msg) {
+			return m, nil
+		}
 		if !m.sel.dragging {
 			return m, nil
 		}
@@ -345,6 +387,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// In alternate screen (vim, less), forward scroll to the remote app.
 		if m.emu.IsAltScreen() {
+			if m.sendRemoteMouse(msg) {
+				return m, nil
+			}
 			if m.sess != nil && m.sess.Stdin != nil {
 				lines := 3
 				var seq []byte
@@ -395,4 +440,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *Model) sendRemoteMouse(msg tea.Msg) bool {
+	if m.disconnected || !m.mouseMode {
+		return false
+	}
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		mm := uv.Mouse(msg.Mouse())
+		m.emu.SendMouse(vt.MouseClick(mm))
+	case tea.MouseMotionMsg:
+		mm := uv.Mouse(msg.Mouse())
+		m.emu.SendMouse(vt.MouseMotion(mm))
+	case tea.MouseReleaseMsg:
+		mm := uv.Mouse(msg.Mouse())
+		m.emu.SendMouse(vt.MouseRelease(mm))
+	case tea.MouseWheelMsg:
+		mm := uv.Mouse(msg.Mouse())
+		m.emu.SendMouse(vt.MouseWheel(mm))
+	default:
+		return false
+	}
+	return true
 }

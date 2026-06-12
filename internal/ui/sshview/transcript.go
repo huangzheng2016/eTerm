@@ -55,6 +55,9 @@ func plainLineFromScrollback(m *Model, w, idx int) string {
 	var b strings.Builder
 	for x := 0; x < w; x++ {
 		cell := m.emu.ScrollbackCellAt(x, idx)
+		if cell != nil && cell.Width == 0 {
+			continue
+		}
 		if cell == nil || cell.Content == "" {
 			b.WriteByte(' ')
 		} else {
@@ -68,6 +71,9 @@ func plainLineFromScreen(m *Model, w, y int) string {
 	var b strings.Builder
 	for x := 0; x < w; x++ {
 		cell := m.emu.CellAt(x, y)
+		if cell != nil && cell.Width == 0 {
+			continue
+		}
 		if cell == nil || cell.Content == "" {
 			b.WriteByte(' ')
 		} else {

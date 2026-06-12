@@ -1,11 +1,16 @@
 package sshview
 
 import (
+	"bytes"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/vt"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func mkEmu(w, h int, s string) *vt.Emulator {
@@ -157,6 +162,73 @@ func TestScrollbackRenderDoesNotSpaceCJK(t *testing.T) {
 	}
 	if !strings.Contains(got, "这是中文") {
 		t.Fatalf("expected contiguous CJK text, got %q", got)
+	}
+}
+
+func TestPlainTranscriptDoesNotSpaceCJK(t *testing.T) {
+	e := mkEmu(20, 5, "这是中文\r\n")
+	m := &Model{emu: e}
+	got := m.PlainTranscript(MaxTranscriptBytes)
+	if strings.Contains(got, "这 是") || strings.Contains(got, "中 文") {
+		t.Fatalf("CJK text was spaced out: %q", got)
+	}
+	if !strings.Contains(got, "这是中文") {
+		t.Fatalf("expected contiguous CJK text, got %q", got)
+	}
+}
+
+func TestCursorKeyModeControlsArrowEncoding(t *testing.T) {
+	m := New(nil, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	m.emu.WriteString("\x1b[?1h")
+	if got := string(m.encodeKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))); got != "\x1bOA" {
+		t.Fatalf("application cursor up = %q", got)
+	}
+
+	m.emu.WriteString("\x1b[?1l")
+	if got := string(m.encodeKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))); got != "\x1b[A" {
+		t.Fatalf("normal cursor up = %q", got)
+	}
+}
+
+type captureWriteCloser struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *captureWriteCloser) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *captureWriteCloser) Close() error { return nil }
+
+func (w *captureWriteCloser) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+func TestAltScreenMouseModeForwardsWheelSequence(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	m.emu.WriteString("\x1b[?1049h\x1b[?1000h\x1b[?1006h")
+	m.Update(wheel(tea.MouseWheelDown))
+
+	deadline := time.Now().Add(time.Second)
+	for !strings.Contains(stdin.String(), "\x1b[<") && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	got := stdin.String()
+	if !strings.Contains(got, "\x1b[<") {
+		t.Fatalf("expected SGR mouse sequence, got %q", got)
+	}
+	if strings.Contains(got, "\x1b[B") {
+		t.Fatalf("expected mouse sequence instead of arrow fallback, got %q", got)
 	}
 }
 

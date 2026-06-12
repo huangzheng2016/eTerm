@@ -32,7 +32,7 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 		return append([]byte{0x1b}, []byte(k.Text)...)
 	}
 
-	ack := m.emu.IsAltScreen()
+	ack := m.appCursorKeys
 
 	// Ctrl + letter → control character
 	if ctrl && k.Code >= 'a' && k.Code <= 'z' {
