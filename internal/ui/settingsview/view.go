@@ -62,22 +62,45 @@ func passwordActionLine(selected bool) string {
 	return fmt.Sprintf("%s%s  %s", cursor, labelStyle.Render(label), dimStyle.Render(hint))
 }
 
+func shellInputLine(value string, editing bool, input string, selected bool) string {
+	cursor := "  "
+	if selected {
+		cursor = "> "
+	}
+	label := "Local terminal shell"
+	val := value
+	if val == "" {
+		val = "(auto)"
+	}
+	if editing {
+		val = input
+	}
+	if selected {
+		return fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(labelStyle.Render(label)), selectedStyle.Render(val))
+	}
+	return fmt.Sprintf("%s%s  %s", cursor, labelStyle.Render(label), keyStyle.Render(val))
+}
+
 func (m *Model) buildScrollLines() []scrollLine {
 	var out []scrollLine
 	out = append(out, scrollLine{catStyle.Render("  General"), -1})
 	out = append(out, scrollLine{
-		prefToggleLine("Save session transcripts", m.saveSessionTranscript, m.cursor == 0),
-		0,
+		prefToggleLine("Save session transcripts", m.saveSessionTranscript, m.cursor == cursorSaveTranscript),
+		cursorSaveTranscript,
 	})
 	out = append(out, scrollLine{
-		prefToggleLine("Grid status text", m.gridStatusWords, m.cursor == 1),
-		1,
+		prefToggleLine("Grid status text", m.gridStatusWords, m.cursor == cursorGridStatus),
+		cursorGridStatus,
+	})
+	out = append(out, scrollLine{
+		shellInputLine(m.localTerminalShell, m.state == stateShell, m.shellInput.View(), m.cursor == cursorLocalShell),
+		cursorLocalShell,
 	})
 	out = append(out, scrollLine{"", -1})
 	out = append(out, scrollLine{catStyle.Render("  Security"), -1})
 	out = append(out, scrollLine{
-		passwordActionLine(m.cursor == 2),
-		2,
+		passwordActionLine(m.cursor == cursorPassword),
+		cursorPassword,
 	})
 	out = append(out, scrollLine{"", -1})
 
@@ -91,7 +114,7 @@ func (m *Model) buildScrollLines() []scrollLine {
 			out = append(out, scrollLine{catStyle.Render("  " + e.Category), -1})
 		}
 
-		logical := 3 + i
+		logical := bindingCursorBase + i
 		cursor := "  "
 		lbl := labelStyle.Render(e.Label)
 		keys := keyStyle.Render(formatKeys(e.Keys))
@@ -126,13 +149,15 @@ func (m *Model) View() tea.View {
 	var b strings.Builder
 
 	title := headerStyle.Render("Settings")
-	hints := hintStyle.Render("space/enter:toggle pref  enter:set key  +:add  bksp:clear  C-s:save  C-r:reset  wheel:scroll  esc:close")
+	hints := hintStyle.Render("space/enter:toggle/edit  enter:set key  +:add  bksp:clear  C-s:save  C-r:reset  wheel:scroll  esc:close")
 	b.WriteString(title + "  " + hints + "\n")
 
 	if m.state == stateCapture {
 		b.WriteString(captureStyle.Render("  Press a key to bind...  (esc to cancel)") + "\n")
 	} else if m.state == stateAppend {
 		b.WriteString(captureStyle.Render("  Press a key to add...  (esc to cancel)") + "\n")
+	} else if m.state == stateShell {
+		b.WriteString(captureStyle.Render("  Enter shell path...  (enter to accept, esc to cancel)") + "\n")
 	} else {
 		b.WriteString("\n")
 	}

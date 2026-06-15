@@ -26,6 +26,7 @@ type KeyMap struct {
 	ForwardTab     key.Binding
 	SnippetsTab    key.Binding
 	CommandPalette key.Binding
+	LocalTerminal  key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -105,6 +106,10 @@ func DefaultKeyMap() KeyMap {
 		CommandPalette: key.NewBinding(
 			key.WithKeys("ctrl+k"),
 			key.WithHelp("C-k", "commands"),
+		),
+		LocalTerminal: key.NewBinding(
+			key.WithKeys("ctrl+shift+t"),
+			key.WithHelp("C-S-t", "local shell"),
 		),
 	}
 }

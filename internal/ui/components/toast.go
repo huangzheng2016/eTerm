@@ -20,11 +20,14 @@ type ToastModel struct {
 	message   string
 	toastType ToastType
 	visible   bool
+	seq       uint64
 	timer     time.Time
 	duration  time.Duration
 }
 
-type ToastTimeoutMsg struct{}
+type ToastTimeoutMsg struct {
+	seq uint64
+}
 
 func NewToast() ToastModel {
 	return ToastModel{}
@@ -40,17 +43,21 @@ func (t ToastModel) Show(msg string, tt ToastType, duration time.Duration) (Toas
 	t.message = msg
 	t.toastType = tt
 	t.visible = true
+	t.seq++
 	t.timer = time.Now()
 	t.duration = duration
+	seq := t.seq
 	return t, tea.Tick(duration, func(_ time.Time) tea.Msg {
-		return ToastTimeoutMsg{}
+		return ToastTimeoutMsg{seq: seq}
 	})
 }
 
 func (t ToastModel) Update(msg tea.Msg) (ToastModel, tea.Cmd) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case ToastTimeoutMsg:
-		t.visible = false
+		if msg.seq == t.seq {
+			t.visible = false
+		}
 	}
 	return t, nil
 }

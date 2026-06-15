@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/localterm"
 )
 
 type editState int
@@ -16,6 +18,7 @@ const (
 	stateNormal  editState = iota
 	stateCapture           // waiting for user to press a key (replaces)
 	stateAppend            // waiting for user to press a key (appends)
+	stateShell             // editing local terminal shell
 )
 
 // bindingEntry represents one configurable keybinding row.
@@ -39,6 +42,8 @@ type Model struct {
 
 	saveSessionTranscript bool
 	gridStatusWords       bool
+	localTerminalShell    string
+	shellInput            textinput.Model
 	noPasswordMode        bool
 	pwd                   *passwordOverlay
 }
@@ -52,6 +57,11 @@ func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMo
 	m.entries = buildEntries(configJSON)
 	m.saveSessionTranscript = loadSaveSessionTranscript(database)
 	m.gridStatusWords = loadGridStatusWords(database)
+	m.localTerminalShell = loadLocalTerminalShell(database)
+	ti := textinput.New()
+	ti.Placeholder = localterm.DefaultShell("")
+	ti.CharLimit = 512
+	m.shellInput = ti
 	return m
 }
 
@@ -73,6 +83,14 @@ func loadGridStatusWords(gdb *gorm.DB) bool {
 		return false
 	}
 	return s == "true"
+}
+
+func loadLocalTerminalShell(gdb *gorm.DB) string {
+	s, err := db.GetSetting(gdb, localterm.SettingShell)
+	if err != nil {
+		return ""
+	}
+	return s
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -106,6 +124,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Forwards Tab", "forward_tab"},
 		{"Global", "Snippets Tab", "snippets_tab"},
 		{"Global", "Command Palette", "command_palette"},
+		{"Global", "Local Terminal", "local_terminal"},
 		// Home
 		{"Home", "SSH Connect", "ssh_connect"},
 		{"Home", "SFTP Open", "sftp_open"},

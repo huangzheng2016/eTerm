@@ -146,7 +146,7 @@ func syncTickCmd(database *gorm.DB) tea.Cmd {
 
 func (a App) closeCurrentTabIfAllowed() (App, tea.Cmd) {
 	if len(a.tabs) > 1 && a.activeTab > 0 {
-		if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok {
+		if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok && isTerminalTab(a.tabs[a.activeTab].Type) {
 			finalizeSSHSession(a.db, m)
 			_ = m.Close()
 		}
@@ -178,6 +178,8 @@ func (a *App) syncTabBar() {
 		switch tab.Type {
 		case SSHTab:
 			title = fmt.Sprintf("[S] %s", tab.Title)
+		case LocalTab:
+			title = fmt.Sprintf("[L] %s", tab.Title)
 		case SFTPTab:
 			title = fmt.Sprintf("[F] %s", tab.Title)
 		case ForwardTab:
@@ -227,7 +229,7 @@ func (a App) quitWithCheck() (tea.Model, tea.Cmd) {
 	// Count active SSH sessions (SFTP doesn't need confirmation)
 	var sshCount int
 	for _, tab := range a.tabs {
-		if tab.Type == SSHTab {
+		if isTerminalTab(tab.Type) {
 			if m, ok := tab.Model.(*sshview.Model); ok && !m.Disconnected() {
 				sshCount++
 			}
@@ -237,7 +239,7 @@ func (a App) quitWithCheck() (tea.Model, tea.Cmd) {
 		a = a.closeAllForwardSessions()
 		return a, tea.Quit
 	}
-	msg := fmt.Sprintf("%d SSH session(s) still active. Quit anyway?", sshCount)
+	msg := fmt.Sprintf("%d terminal session(s) still active. Quit anyway?", sshCount)
 	a.pendingQuit = true
 	a.confirm = components.NewConfirm("Quit eTerm", msg).Show()
 	return a, nil

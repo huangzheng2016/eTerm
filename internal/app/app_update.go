@@ -275,6 +275,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var layoutCmd tea.Cmd
 			a, layoutCmd = layoutTabModels(a)
 			return a, layoutCmd
+		case matchCtrlShiftAnyOf(msg, a.keyMap.LocalTerminal) || key.Matches(msg, a.keyMap.LocalTerminal):
+			return a.openLocalTerminal()
 		case matchCtrlShiftAnyOf(msg, a.keyMap.QuitApp) || key.Matches(msg, a.keyMap.QuitApp):
 			return a.quitWithCheck()
 		case key.Matches(msg, a.keyMap.Quit):
@@ -485,7 +487,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx = a.activeTab
 		}
 		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 {
-			if m, ok := a.tabs[idx].Model.(*sshview.Model); ok {
+			if m, ok := a.tabs[idx].Model.(*sshview.Model); ok && isTerminalTab(a.tabs[idx].Type) {
 				finalizeSSHSession(a.db, m)
 				_ = m.Close()
 			}
@@ -531,6 +533,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case openSSHUITabMsg:
 		return a.applyOpenSSHUITab(msg)
+
+	case localTerminalOpenedMsg:
+		return a.applyLocalTerminalOpened(msg)
 
 	case types.SSHDisconnectMsg:
 		return a.applySSHDisconnect(msg)
@@ -850,7 +855,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m, ok := a.tabs[i].Model.(*snippetview.Model); ok {
 					m.SetViewKeys(BuildSnippetKeys(a.kbConfig))
 				}
-			case SSHTab:
+			case SSHTab, LocalTab:
 				if m, ok := a.tabs[i].Model.(*sshview.Model); ok {
 					m.SetViewKeys(BuildSSHKeys(a.kbConfig))
 				}

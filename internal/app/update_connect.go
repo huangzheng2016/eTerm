@@ -232,7 +232,7 @@ func (a App) applySSHDisconnect(msg types.SSHDisconnectMsg) (App, tea.Cmd) {
 	idx := -1
 	if msg.StreamID != 0 {
 		for i := range a.tabs {
-			if a.tabs[i].Type != SSHTab {
+			if !isTerminalTab(a.tabs[i].Type) {
 				continue
 			}
 			if m, ok := a.tabs[i].Model.(*sshview.Model); ok && m.StreamID() == msg.StreamID {
@@ -243,7 +243,7 @@ func (a App) applySSHDisconnect(msg types.SSHDisconnectMsg) (App, tea.Cmd) {
 	}
 	if idx < 0 && msg.Alias != "" {
 		for i := range a.tabs {
-			if a.tabs[i].Type == SSHTab && a.tabs[i].Title == msg.Alias {
+			if isTerminalTab(a.tabs[i].Type) && a.tabs[i].Title == msg.Alias {
 				idx = i
 				break
 			}
@@ -267,9 +267,9 @@ func (a App) applySSHDisconnect(msg types.SSHDisconnectMsg) (App, tea.Cmd) {
 	}
 	var tc tea.Cmd
 	if msg.Err != nil {
-		a.toast, tc = a.toast.Show("SSH session ended: "+internalssh.Classify(msg.Err).Summary, components.ToastWarning, 3*time.Second)
+		a.toast, tc = a.toast.Show("Terminal session ended: "+internalssh.Classify(msg.Err).Summary, components.ToastWarning, 3*time.Second)
 	} else {
-		a.toast, tc = a.toast.Show("SSH session ended", components.ToastInfo, 2*time.Second)
+		a.toast, tc = a.toast.Show("Terminal session ended", components.ToastInfo, 2*time.Second)
 	}
 	return a, tea.Batch(tc, reflowWindow(a), func() tea.Msg { return types.RefreshListMsg{} })
 }

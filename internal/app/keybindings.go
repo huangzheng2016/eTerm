@@ -29,6 +29,7 @@ type KeyBindingConfig struct {
 	ForwardTab     []string `json:"forward_tab"`
 	SnippetsTab    []string `json:"snippets_tab"`
 	CommandPalette []string `json:"command_palette"`
+	LocalTerminal  []string `json:"local_terminal"`
 
 	// Home
 	SSHConnect     []string `json:"ssh_connect"`
@@ -101,6 +102,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		ForwardTab:     []string{"ctrl+p"},
 		SnippetsTab:    []string{"ctrl+shift+b"},
 		CommandPalette: []string{"ctrl+k"},
+		LocalTerminal:  []string{"ctrl+shift+t"},
 
 		// Home
 		SSHConnect:     []string{"enter"},
@@ -272,6 +274,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		CommandPalette: key.NewBinding(
 			key.WithKeys(cfg.CommandPalette...),
 			key.WithHelp(helpLabel(cfg.CommandPalette), "commands"),
+		),
+		LocalTerminal: key.NewBinding(
+			key.WithKeys(cfg.LocalTerminal...),
+			key.WithHelp(helpLabel(cfg.LocalTerminal), "local shell"),
 		),
 	}
 }

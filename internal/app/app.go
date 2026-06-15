@@ -30,6 +30,7 @@ const (
 	SnippetTab        TabType = "snippets"
 	SnippetEditorTab  TabType = "snippet-editor"
 	SSHTab            TabType = "ssh"
+	LocalTab          TabType = "local"
 	BatchResultTab    TabType = "batch-result"
 	SettingsTab       TabType = "settings"
 	SyncTab           TabType = "sync"

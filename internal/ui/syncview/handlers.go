@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	esync "github.com/huangzheng2016/eTerm/internal/sync"
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
@@ -202,10 +204,69 @@ func (m *Model) testConnection() tea.Cmd {
 	serverURL := m.inputs[inServerURL].Value()
 	apiKey := m.inputs[inAPIKey].Value()
 	mode := m.modeIdx
+	remoteBin := m.inputs[inRemoteBin].Value()
+	remoteDB := m.inputs[inRemoteDB].Value()
+	hostIdx := m.hostIdx
+	hostOpts := m.hostOpts
+	database := m.db
+	mk := m.masterKey
 
 	return func() tea.Msg {
 		if mode == 0 {
-			return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("SSH test: use F5 after saving, then trigger manual sync with Ctrl+Y")}
+			if remoteBin == "" {
+				remoteBin = "etermsyncd"
+			}
+			if remoteDB == "" {
+				remoteDB = "~/.config/etermsyncd/sync.db"
+			}
+			if hostIdx < 0 || hostIdx >= len(hostOpts) {
+				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("no SSH host selected")}
+			}
+			if mk.IsLocked() {
+				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("master key locked")}
+			}
+			host := hostOpts[hostIdx]
+			var loaded db.Host
+			if err := database.Preload("Key").First(&loaded, host.ID).Error; err != nil {
+				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("load host: %w", err)}
+			}
+			var hostKey *db.SSHKey
+			if loaded.KeyID != nil {
+				hostKey = &loaded.Key
+			}
+			var jumpHost *db.Host
+			var jumpKey *db.SSHKey
+			if loaded.JumpHostID != nil {
+				var jh db.Host
+				if database.Preload("Key").First(&jh, *loaded.JumpHostID).Error == nil {
+					jumpHost = &jh
+					if jh.KeyID != nil {
+						jumpKey = &jh.Key
+					}
+				}
+			}
+			result, cerr := internalssh.Connect(internalssh.ConnectConfig{
+				Host:      &loaded,
+				Key:       hostKey,
+				JumpHost:  jumpHost,
+				JumpKey:   jumpKey,
+				MasterKey: mk,
+				DB:        database,
+				FingerprintCallback: func(string, int, string, string) bool { return true },
+			})
+			if cerr != nil {
+				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("ssh connect: %w", cerr)}
+			}
+			tr, err := esync.NewSSHTransport(result.Client, result.Closers, remoteBin, remoteDB)
+			if err != nil {
+				result.Close()
+				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("start syncd: %w", err)}
+			}
+			defer tr.Close()
+			if err := tr.Ping(); err != nil {
+				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("ping: %w", err)}
+			}
+			return types.SyncTestResultMsg{OK: true}
 		}
 		url := serverURL + "/api/v1/ping"
 		req, err := http.NewRequest("GET", url, nil)

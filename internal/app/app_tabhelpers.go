@@ -7,7 +7,11 @@ func (a App) activeTabIsSSH() bool {
 	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
 		return false
 	}
-	return a.tabs[a.activeTab].Type == SSHTab
+	return isTerminalTab(a.tabs[a.activeTab].Type)
+}
+
+func isTerminalTab(t TabType) bool {
+	return t == SSHTab || t == LocalTab
 }
 
 func (a App) activeTabIsEditor() bool {

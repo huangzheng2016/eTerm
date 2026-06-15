@@ -15,6 +15,7 @@ type InteractiveSession struct {
 	Stdin         io.WriteCloser
 	Stdout        io.Reader
 	Done          <-chan error
+	Resize        func(rows, cols int) error
 	closers       []io.Closer
 	stopKeepalive chan struct{}
 }
@@ -136,6 +137,7 @@ func NewInteractiveSession(client *ssh.Client, rows, cols int, forwardAgent bool
 		Stdin:         stdin,
 		Stdout:        stdout,
 		Done:          done,
+		Resize:        sess.WindowChange,
 		stopKeepalive: stopKA,
 	}, nil
 }

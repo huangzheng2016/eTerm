@@ -63,7 +63,7 @@ func (a App) View() tea.View {
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
 			tab := a.tabs[a.activeTab]
 			disc := false
-			if tab.Type == SSHTab {
+			if isTerminalTab(tab.Type) {
 				if sm, ok := tab.Model.(*sshview.Model); ok {
 					disc = sm.Disconnected()
 				}

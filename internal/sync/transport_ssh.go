@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -24,6 +25,16 @@ type sshTransport struct {
 // The caller is responsible for establishing the connection (e.g. via internalssh.Connect).
 // closers are additional resources (agent conns, jump clients) closed on Close().
 func NewSSHTransport(client *ssh.Client, closers []io.Closer, remoteBin, remoteDB string) (Transport, error) {
+	expandedDB, err := expandRemotePath(client, remoteDB)
+	if err != nil {
+		return nil, fmt.Errorf("expand remote db: %w", err)
+	}
+	if dir := filepath.Dir(expandedDB); dir != "" && dir != "." {
+		if err := mkdirRemote(client, dir); err != nil {
+			return nil, fmt.Errorf("mkdir remote db dir: %w", err)
+		}
+	}
+
 	session, err := client.NewSession()
 	if err != nil {
 		return nil, fmt.Errorf("ssh session: %w", err)
@@ -40,7 +51,7 @@ func NewSSHTransport(client *ssh.Client, closers []io.Closer, remoteBin, remoteD
 		return nil, err
 	}
 
-	cmd := fmt.Sprintf("%s --stdio --db '%s'", remoteBin, strings.ReplaceAll(remoteDB, "'", "'\\''"))
+	cmd := fmt.Sprintf("%s --stdio --db '%s'", remoteBin, strings.ReplaceAll(expandedDB, "'", "'\\''"))
 	if err := session.Start(cmd); err != nil {
 		session.Close()
 		return nil, fmt.Errorf("ssh exec %q: %w", cmd, err)
@@ -115,4 +126,42 @@ func (t *sshTransport) Close() error {
 		c.Close()
 	}
 	return t.client.Close()
+}
+
+func expandRemotePath(client *ssh.Client, path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := remoteHome(client)
+		if err != nil {
+			return "", err
+		}
+		path = home + path[1:]
+	}
+	return path, nil
+}
+
+func remoteHome(client *ssh.Client) (string, error) {
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	out, err := sess.Output(`printf '%s' "$HOME"`)
+	if err != nil {
+		return "", err
+	}
+	home := strings.TrimSpace(string(out))
+	if home == "" {
+		return "", fmt.Errorf("empty remote home")
+	}
+	return home, nil
+}
+
+func mkdirRemote(client *ssh.Client, dir string) error {
+	sess, err := client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cmd := fmt.Sprintf("mkdir -p '%s'", strings.ReplaceAll(dir, "'", "'\\''"))
+	return sess.Run(cmd)
 }

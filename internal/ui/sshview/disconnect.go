@@ -3,6 +3,7 @@ package sshview
 import (
 	"errors"
 	"io"
+	"os/exec"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -18,6 +19,10 @@ func shouldOfferReconnect(err error) bool {
 	}
 	var exit *ssh.ExitError
 	if errors.As(err, &exit) {
+		return false
+	}
+	var localExit *exec.ExitError
+	if errors.As(err, &localExit) {
 		return false
 	}
 	return true

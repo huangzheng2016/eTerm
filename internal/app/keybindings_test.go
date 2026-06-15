@@ -12,3 +12,10 @@ func TestBuildKeyMapNewTabHelpUsesConfig(t *testing.T) {
 		t.Fatalf("got %q want ctrl+shift+t", got)
 	}
 }
+
+func TestDefaultLocalTerminalKey(t *testing.T) {
+	cfg := DefaultKeyBindingConfig()
+	if len(cfg.LocalTerminal) != 1 || cfg.LocalTerminal[0] != "ctrl+shift+t" {
+		t.Fatalf("LocalTerminal = %#v", cfg.LocalTerminal)
+	}
+}

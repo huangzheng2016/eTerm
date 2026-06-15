@@ -12,6 +12,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -57,6 +58,8 @@ type Model struct {
 	closed bool
 
 	endErr       error
+	waitComplete bool
+	doneClosed   chan struct{}
 	disconnected bool
 
 	// Scrollback view: scrollOffset > 0 means viewing history.
@@ -83,13 +86,14 @@ func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
 func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
 	emu := vt.NewEmulator(80, 24)
 	m := &Model{
-		sess:     is,
-		emu:      emu,
-		streamID: streamIDGen.Add(1),
-		alias:    alias,
-		hostID:   hostID,
-		ch:       make(chan []byte, 128),
-		vk:       vk,
+		sess:       is,
+		emu:        emu,
+		streamID:   streamIDGen.Add(1),
+		alias:      alias,
+		hostID:     hostID,
+		ch:         make(chan []byte, 128),
+		doneClosed: make(chan struct{}),
+		vk:         vk,
 	}
 	emu.SetCallbacks(vt.Callbacks{
 		EnableMode: func(mode ansi.Mode) {
@@ -173,23 +177,41 @@ func (m *Model) SetSize(w, h int) {
 		termH = 1
 	}
 	m.emu.Resize(w, termH)
-	if m.sess != nil && m.sess.Session != nil {
-		_ = m.sess.Session.WindowChange(termH, w)
+	if m.sess != nil && m.sess.Resize != nil {
+		_ = m.sess.Resize(termH, w)
 	}
 }
 
-func (m *Model) setEndErr(err error) {
+func (m *Model) setReadErr(err error) {
 	if err == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if errors.Is(err, io.EOF) && m.waitComplete {
+		return
+	}
 	if m.endErr == nil {
 		m.endErr = err
 		return
 	}
 	// Prefer a concrete error over io.EOF when both appear (read vs Wait).
 	if errors.Is(m.endErr, io.EOF) && !errors.Is(err, io.EOF) {
+		m.endErr = err
+	}
+}
+
+func (m *Model) setWaitErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.waitComplete = true
+	if err == nil {
+		if m.endErr == nil || errors.Is(m.endErr, io.EOF) {
+			m.endErr = nil
+		}
+		return
+	}
+	if m.endErr == nil || errors.Is(m.endErr, io.EOF) {
 		m.endErr = err
 	}
 }
@@ -201,7 +223,10 @@ func (m *Model) Init() tea.Cmd {
 			return
 		}
 		err := <-m.sess.Done
-		m.setEndErr(err)
+		m.setWaitErr(err)
+		if m.doneClosed != nil {
+			close(m.doneClosed)
+		}
 	}()
 	return waitChunk(m)
 }
@@ -220,7 +245,7 @@ func (m *Model) readLoop() {
 			m.ch <- b
 		}
 		if err != nil {
-			m.setEndErr(err)
+			m.setReadErr(err)
 			m.closeCh()
 			return
 		}
@@ -241,6 +266,12 @@ func waitChunk(m *Model) tea.Cmd {
 	return func() tea.Msg {
 		b, ok := <-m.ch
 		if !ok {
+			if m.doneClosed != nil {
+				select {
+				case <-m.doneClosed:
+				case <-time.After(250 * time.Millisecond):
+				}
+			}
 			m.mu.Lock()
 			err := m.endErr
 			m.mu.Unlock()
@@ -296,7 +327,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.sess.Close()
 				m.sess = nil
 			}
-			return m, nil
+			alias := m.alias
+			retry := tea.Msg(nil)
+			if m.hostID != 0 {
+				retry = types.SSHReconnectMsg{HostID: m.hostID, StreamID: m.streamID}
+			}
+			return m, func() tea.Msg {
+				return types.ConnErrorMsg{Err: err, Target: alias, Retry: retry}
+			}
 		}
 		return m, func() tea.Msg {
 			return types.SSHDisconnectMsg{Err: err, Alias: m.alias, StreamID: m.streamID}
