@@ -111,22 +111,8 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: eTerm ${{ steps.version.outputs.version }}
           files: release/*
-          body: |
-            ## eTerm ${{ steps.version.outputs.version }}
-
-            ### 预编译二进制 / Prebuilt binaries
-
-            - **Linux AMD64**: `eterm_linux_amd64.tar.gz`
-            - **macOS AMD64**: `eterm_darwin_amd64.tar.gz`
-            - **macOS ARM64**: `eterm_darwin_arm64.tar.gz`
-            - **Windows AMD64**: `eterm_windows_amd64.zip`
-            - **SHA256SUMS**: hashes for the archives above (client verifies when present)
-
-            解压后将可执行文件放到 `PATH` 中即可。首次运行会在 `~/.config/eterm/` 创建配置与数据库。
-
-            Extract the archive and place the binary on your `PATH`. On first run, config and database are created under `~/.config/eterm/`.
+          fail_on_unmatched_files: true
