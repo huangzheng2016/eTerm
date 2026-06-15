@@ -22,6 +22,10 @@ type Config struct {
 	LastRev    int64
 }
 
+func (c Config) TenantID() string {
+	return TenantIDFromPassphrase(c.Passphrase)
+}
+
 func LoadConfig(database *gorm.DB, mk *security.MasterKeyManager) Config {
 	get := func(key, def string) string {
 		v, err := db.GetSetting(database, key)
@@ -53,7 +57,7 @@ func LoadConfig(database *gorm.DB, mk *security.MasterKeyManager) Config {
 
 	return Config{
 		Enabled:    get("sync_enabled", "false") == "true",
-		Mode:       get("sync_mode", "ssh"),
+		Mode:       get("sync_mode", "http"),
 		SSHHostID:  uint(hostID),
 		RemoteBin:  get("sync_remote_bin", "etermsyncd"),
 		RemoteDB:   get("sync_remote_db", "~/.config/etermsyncd/sync.db"),

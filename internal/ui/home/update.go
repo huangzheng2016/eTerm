@@ -30,6 +30,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.allHosts = msg.hosts
+		m.remotePeers = msg.remotePeers
+		m.remoteHosts = msg.remoteHosts
 		m.allTags = collectAllTags(msg.hosts)
 		m.loaded = true
 		m.gridStatusWords = readGridStatusWords(m.db)

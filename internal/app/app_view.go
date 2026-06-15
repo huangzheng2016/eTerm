@@ -91,6 +91,9 @@ func (a App) View() tea.View {
 		} else if a.commandPalette != nil {
 			overlay := a.commandPalette.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.remoteMenu != nil {
+			overlay := a.remoteMenu.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.snippetPicker != nil {
 			overlay := a.snippetPicker.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)

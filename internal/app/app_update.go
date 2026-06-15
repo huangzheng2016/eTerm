@@ -16,6 +16,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
 	"github.com/huangzheng2016/eTerm/internal/ui/home"
 	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
+	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
 	"github.com/huangzheng2016/eTerm/internal/ui/settingsview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sftpview"
 	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
@@ -147,6 +148,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, func() tea.Msg { return selected }
 			}
 			return a, a.commandPalette.Update(msg)
+		}
+
+		if a.remoteMenu != nil {
+			closed, cmd := a.remoteMenu.Update(msg)
+			if closed {
+				a.remoteMenu = nil
+			}
+			return a, cmd
 		}
 
 		if a.batchTag != nil {
@@ -536,6 +545,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case localTerminalOpenedMsg:
 		return a.applyLocalTerminalOpened(msg)
+
+	case types.RemotePeerMenuMsg:
+		a.remoteMenu = remotemenu.New(msg.Peer, msg.Hosts)
+		return a, nil
+
+	case types.RemoteShellOpenMsg:
+		return a.openRemoteShell(msg)
+
+	case remoteTerminalOpenedMsg:
+		return a.applyRemoteTerminalOpened(msg)
 
 	case types.SSHDisconnectMsg:
 		return a.applySSHDisconnect(msg)

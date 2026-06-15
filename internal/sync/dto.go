@@ -17,47 +17,58 @@ type SyncRecord struct {
 	Type      RecordType `json:"type"`
 	Deleted   bool       `json:"deleted"`
 	DeviceID  string     `json:"device_id"`
+	Meta      string     `json:"meta,omitempty"`
 	Payload   string     `json:"payload"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+type HostMeta struct {
+	SyncID   string `json:"sync_id"`
+	Alias    string `json:"alias"`
+	Hostname string `json:"hostname"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Tags     string `json:"tags"`
+	Group    string `json:"group"`
+}
+
 type HostDTO struct {
-	SyncID        string `json:"sync_id"`
-	Alias         string `json:"alias"`
-	Hostname      string `json:"hostname"`
-	Port          int    `json:"port"`
-	Username      string `json:"username"`
-	AuthMethod    string `json:"auth_method"`
-	Password      string `json:"password"`
-	KeySyncID     string `json:"key_sync_id"`
-	Passphrase    string `json:"passphrase"`
-	JumpSyncID    string `json:"jump_sync_id"`
-	Tags          string `json:"tags"`
-	Description   string `json:"description"`
-	Group         string `json:"group"`
-	ProxyType     string `json:"proxy_type"`
-	ProxyHost     string `json:"proxy_host"`
-	ProxyPort     int    `json:"proxy_port"`
-	ProxyUser     string `json:"proxy_user"`
-	ProxyPassword string `json:"proxy_password"`
-	GSSAPISource  string `json:"gssapi_source"`
-	GSSAPIKeytab  string `json:"gssapi_keytab"`
-	KrbPrincipal  string `json:"krb_principal"`
-	ProxyCommand  string `json:"proxy_command"`
-	ForwardAgent  bool   `json:"forward_agent"`
-	RemoteCommand string `json:"remote_command"`
+	SyncID          string `json:"sync_id"`
+	Alias           string `json:"alias"`
+	Hostname        string `json:"hostname"`
+	Port            int    `json:"port"`
+	Username        string `json:"username"`
+	AuthMethod      string `json:"auth_method"`
+	Password        string `json:"password"`
+	KeySyncID       string `json:"key_sync_id"`
+	Passphrase      string `json:"passphrase"`
+	JumpSyncID      string `json:"jump_sync_id"`
+	Tags            string `json:"tags"`
+	Description     string `json:"description"`
+	Group           string `json:"group"`
+	ProxyType       string `json:"proxy_type"`
+	ProxyHost       string `json:"proxy_host"`
+	ProxyPort       int    `json:"proxy_port"`
+	ProxyUser       string `json:"proxy_user"`
+	ProxyPassword   string `json:"proxy_password"`
+	GSSAPISource    string `json:"gssapi_source"`
+	GSSAPIKeytab    string `json:"gssapi_keytab"`
+	KrbPrincipal    string `json:"krb_principal"`
+	ProxyCommand    string `json:"proxy_command"`
+	ForwardAgent    bool   `json:"forward_agent"`
+	RemoteCommand   string `json:"remote_command"`
 	ExtraSSHOptions string `json:"extra_ssh_options"`
 }
 
 type SSHKeyDTO struct {
-	SyncID      string `json:"sync_id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	PrivateKey  string `json:"private_key"`
-	PublicKey   string `json:"public_key"`
-	Fingerprint string `json:"fingerprint"`
-	Bits        int    `json:"bits"`
-	Passphrase  string `json:"passphrase"`
+	SyncID          string `json:"sync_id"`
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	PrivateKey      string `json:"private_key"`
+	PublicKey       string `json:"public_key"`
+	Fingerprint     string `json:"fingerprint"`
+	Bits            int    `json:"bits"`
+	Passphrase      string `json:"passphrase"`
 	CertificatePath string `json:"certificate_path"`
 }
 

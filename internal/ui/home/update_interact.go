@@ -21,7 +21,7 @@ func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if msg.Button != tea.MouseLeft && msg.Button != tea.MouseRight {
 		return m, nil, false
 	}
-	hosts := m.gridHosts()
+	entries := m.gridEntries()
 	gl := m.gridLayout
 	y := msg.Y
 	if m.mode == tagView && m.selectedTag != "" {
@@ -39,7 +39,7 @@ func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if gl.PageSize > 0 {
 		page = m.gridCursor / gl.PageSize
 	}
-	globalIdx, ok := gridIndexAtMouse(msg.X, y, len(hosts), gl, page)
+	globalIdx, ok := gridIndexAtMouse(msg.X, y, len(entries), gl, page)
 	if !ok {
 		return m, nil, false
 	}
@@ -60,6 +60,13 @@ func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 		if globalIdx == m.lastClickIdx && now.Sub(m.lastClickAt) < doubleClickWindow {
 			m.lastClickAt = time.Time{}
 			m.lastClickIdx = -1
+			if p := m.SelectedPeer(); p != nil {
+				peer := *p
+				hosts := append([]types.RemoteHost(nil), m.remoteHosts...)
+				return m, func() tea.Msg {
+					return types.RemotePeerMenuMsg{Peer: peer, Hosts: hosts}
+				}, true
+			}
 			if h := m.SelectedHost(); h != nil {
 				return m, func() tea.Msg {
 					return types.SSHConnectMsg{HostID: h.ID}
@@ -140,7 +147,7 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch msg.String() {
 	case "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
 		dir := msg.String()
-		hosts := m.gridHosts()
+		entries := m.gridEntries()
 		gl := m.gridLayout
 		if m.mode == tagView && m.selectedTag != "" {
 			gridH := m.height - 1
@@ -149,7 +156,7 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			}
 			gl = computeGrid(m.width, gridH)
 		}
-		newCur, changed := gridMove(dir, m.gridCursor, len(hosts), gl)
+		newCur, changed := gridMove(dir, m.gridCursor, len(entries), gl)
 		if changed {
 			m.gridCursor = newCur
 		}
@@ -174,6 +181,13 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 
 	case m.kmCfg.MatchConnect(msg) || key.Matches(msg, m.keys.SSHConnect):
 		logKeyDispatch("SSHConnect")
+		if p := m.SelectedPeer(); p != nil {
+			peer := *p
+			hosts := append([]types.RemoteHost(nil), m.remoteHosts...)
+			return m, func() tea.Msg {
+				return types.RemotePeerMenuMsg{Peer: peer, Hosts: hosts}
+			}, true
+		}
 		if h := m.SelectedHost(); h != nil {
 			return m, func() tea.Msg {
 				return types.SSHConnectMsg{HostID: h.ID}

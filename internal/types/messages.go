@@ -68,6 +68,33 @@ type SFTPOpenMsg struct {
 	HostID uint
 }
 
+type RemotePeer struct {
+	ID   string
+	Name string
+}
+
+type RemoteHost struct {
+	SyncID   string `json:"sync_id"`
+	Alias    string `json:"alias"`
+	Hostname string `json:"hostname"`
+	Port     int    `json:"port"`
+	Username string `json:"username"`
+	Tags     string `json:"tags"`
+	Group    string `json:"group"`
+}
+
+type RemotePeerMenuMsg struct {
+	Peer  RemotePeer
+	Hosts []RemoteHost
+}
+
+type RemoteShellOpenMsg struct {
+	Peer       RemotePeer
+	Target     string
+	HostSyncID string
+	HostLabel  string
+}
+
 type MasterKeyUnlockedMsg struct {
 	Salt       string
 	Verifier   string

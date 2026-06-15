@@ -77,10 +77,10 @@ func (m *Model) loadFromDB() {
 	if get("sync_enabled", "false") == "true" {
 		m.enableIdx = 1
 	}
-	switch get("sync_mode", "ssh") {
-	case "http":
-		m.modeIdx = 1
+	switch get("sync_mode", "http") {
 	case "https":
+		m.modeIdx = 1
+	case "ssh":
 		m.modeIdx = 2
 	default:
 		m.modeIdx = 0

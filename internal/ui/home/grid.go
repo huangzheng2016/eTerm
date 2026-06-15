@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 )
 
@@ -72,7 +73,19 @@ func cardTitle(h db.Host, status HostStatus, selected bool, showStatusWords bool
 	if name == "" {
 		name = h.Hostname
 	}
-	return prefix + name
+	return prefix + "[L]" + name
+}
+
+func peerCardTitle(p types.RemotePeer, selected bool) string {
+	selMark := " "
+	if selected {
+		selMark = "*"
+	}
+	return selMark + statusDotOnline + " [R]" + p.Name
+}
+
+func peerCardDesc(p types.RemotePeer) string {
+	return "remote eterm"
 }
 
 // cardDesc returns the second line of a host card.
@@ -88,6 +101,33 @@ func renderGrid(hosts []db.Host, cursor int, gl gridLayout, width int, hostStatu
 	}
 	cards := make([]string, total)
 	for i, h := range hosts {
+		status := StatusUnknown
+		if hostStatus != nil {
+			if s, ok := hostStatus[h.ID]; ok {
+				status = s
+			}
+		}
+		sel := false
+		if selected != nil {
+			_, sel = selected[h.ID]
+		}
+		cards[i] = components.RenderCard(cardTitle(h, status, sel, showStatusWords), cardDesc(h), i == cursor, gl.CardW)
+	}
+	return components.RenderGridRows(cards, total, cursor, gl)
+}
+
+func renderGridEntries(entries []gridEntry, cursor int, gl gridLayout, width int, hostStatus map[uint]HostStatus, selected map[uint]struct{}, showStatusWords bool) string {
+	total := len(entries)
+	if total == 0 {
+		return ""
+	}
+	cards := make([]string, total)
+	for i, entry := range entries {
+		if entry.peer != nil {
+			cards[i] = components.RenderCard(peerCardTitle(*entry.peer, false), peerCardDesc(*entry.peer), i == cursor, gl.CardW)
+			continue
+		}
+		h := *entry.host
 		status := StatusUnknown
 		if hostStatus != nil {
 			if s, ok := hostStatus[h.ID]; ok {

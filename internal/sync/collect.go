@@ -194,9 +194,26 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 		Type:      TypeHost,
 		Deleted:   h.SyncDel,
 		DeviceID:  deviceID,
+		Meta:      hostMetaJSON(h),
 		Payload:   payload,
 		UpdatedAt: h.UpdatedAt,
 	}, nil
+}
+
+func hostMetaJSON(h db.Host) string {
+	data, err := json.Marshal(HostMeta{
+		SyncID:   h.SyncID,
+		Alias:    h.Alias,
+		Hostname: h.Hostname,
+		Port:     h.Port,
+		Username: h.Username,
+		Tags:     h.Tags,
+		Group:    h.Group,
+	})
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func buildFwdRecord(f db.PortForward, database *gorm.DB, passphrase, deviceID string) (SyncRecord, error) {

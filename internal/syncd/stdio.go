@@ -37,7 +37,7 @@ func RunStdio(engine *Engine) error {
 			resp.OK = true
 
 		case "pull":
-			entries, rev, err := engine.Pull(req.Since)
+			entries, rev, err := engine.Pull("", req.Since)
 			if err != nil {
 				resp.Error = err.Error()
 			} else {
@@ -47,7 +47,7 @@ func RunStdio(engine *Engine) error {
 
 		case "push":
 			entries := wireToEntries(req.Records)
-			rev, err := engine.Push(entries)
+			rev, err := engine.Push("", entries)
 			if err != nil {
 				resp.Error = err.Error()
 			} else {
@@ -70,7 +70,7 @@ func entriesToWire(entries []SyncEntry) []syncRecordWire {
 	for i, e := range entries {
 		out[i] = syncRecordWire{
 			SyncID: e.SyncID, Type: e.Type, Deleted: e.Deleted,
-			DeviceID: e.DeviceID, Payload: e.Payload, UpdatedAt: e.UpdatedAt,
+			DeviceID: e.DeviceID, Meta: e.Meta, Payload: e.Payload, UpdatedAt: e.UpdatedAt,
 		}
 	}
 	return out
@@ -81,9 +81,8 @@ func wireToEntries(records []syncRecordWire) []SyncEntry {
 	for i, r := range records {
 		out[i] = SyncEntry{
 			SyncID: r.SyncID, Type: r.Type, Deleted: r.Deleted,
-			DeviceID: r.DeviceID, Payload: r.Payload, UpdatedAt: r.UpdatedAt,
+			DeviceID: r.DeviceID, Meta: r.Meta, Payload: r.Payload, UpdatedAt: r.UpdatedAt,
 		}
 	}
 	return out
 }
-

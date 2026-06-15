@@ -1,6 +1,7 @@
 # Binaries
 /eterm
 /etermsyncd
+/etermsyncd-*
 /gendemo
 *.exe
 *.exe~
@@ -52,3 +53,4 @@ Thumbs.db
 
 # Local planning notes (not committed)
 .plan/
+/docs/superpowers/

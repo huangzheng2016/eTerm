@@ -13,11 +13,17 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/keymatch"
 	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"gorm.io/gorm"
 )
 
 type hostItem struct {
 	host db.Host
+}
+
+type gridEntry struct {
+	peer *types.RemotePeer
+	host *db.Host
 }
 
 // displayGroupName is the label shown in the list; blank DB group means "Default".
@@ -52,8 +58,10 @@ func (i hostItem) Description() string {
 }
 
 type hostsLoadedMsg struct {
-	hosts []db.Host
-	err   error
+	hosts       []db.Host
+	remotePeers []types.RemotePeer
+	remoteHosts []types.RemoteHost
+	err         error
 }
 
 type viewMode int
@@ -99,6 +107,9 @@ type Model struct {
 
 	// Host online status (from TCP probe)
 	hostStatus map[uint]HostStatus
+
+	remotePeers []types.RemotePeer
+	remoteHosts []types.RemoteHost
 
 	// Configurable keymatch config
 	kmCfg keymatch.Config
@@ -220,16 +231,44 @@ func (m Model) gridHosts() []db.Host {
 	return hosts
 }
 
-func (m Model) SelectedHost() *db.Host {
+func (m Model) gridEntries() []gridEntry {
 	hosts := m.gridHosts()
-	if len(hosts) == 0 {
+	entries := make([]gridEntry, 0, len(m.remotePeers)+len(hosts))
+	if m.mode == groupView && m.list.FilterState() == list.Unfiltered {
+		for i := range m.remotePeers {
+			peer := m.remotePeers[i]
+			entries = append(entries, gridEntry{peer: &peer})
+		}
+	}
+	for i := range hosts {
+		host := hosts[i]
+		entries = append(entries, gridEntry{host: &host})
+	}
+	return entries
+}
+
+func (m Model) SelectedHost() *db.Host {
+	entries := m.gridEntries()
+	if len(entries) == 0 {
 		return nil
 	}
 	idx := m.gridCursor
-	if idx < 0 || idx >= len(hosts) {
+	if idx < 0 || idx >= len(entries) {
 		idx = 0
 	}
-	return &hosts[idx]
+	return entries[idx].host
+}
+
+func (m Model) SelectedPeer() *types.RemotePeer {
+	entries := m.gridEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+	idx := m.gridCursor
+	if idx < 0 || idx >= len(entries) {
+		idx = 0
+	}
+	return entries[idx].peer
 }
 
 func readGridStatusWords(database *gorm.DB) bool {
@@ -293,7 +332,8 @@ func (m Model) loadHosts() tea.Cmd {
 	return func() tea.Msg {
 		var hosts []db.Host
 		err := m.db.Order("last_connected_at DESC NULLS LAST, alias ASC").Find(&hosts).Error
-		return hostsLoadedMsg{hosts: hosts, err: err}
+		peers, remoteHosts := m.loadRemoteSummary()
+		return hostsLoadedMsg{hosts: hosts, remotePeers: peers, remoteHosts: remoteHosts, err: err}
 	}
 }
 

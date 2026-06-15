@@ -4,6 +4,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
 
 	bubbleshelp "charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
@@ -107,6 +108,8 @@ type App struct {
 	commandPalette *commandPaletteModel
 
 	connError *connErrorModel
+
+	remoteMenu *remotemenu.Model
 
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint

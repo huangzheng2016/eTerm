@@ -6,15 +6,21 @@ import (
 )
 
 type openSSHUITabMsg struct {
-	is           *internalssh.InteractiveSession
-	alias        string
-	hostID       uint
-	historyID    uint
+	is              *internalssh.InteractiveSession
+	alias           string
+	hostID          uint
+	historyID       uint
 	initialCommands []string
-	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
+	replaceTabAt    int // append when < 0; otherwise replace a.tabs[replaceTabAt]
 }
 
 type sftpOpenedMsg struct {
 	client    *sftp.Client
 	hostAlias string
+}
+
+type remoteTerminalOpenedMsg struct {
+	is      *internalssh.InteractiveSession
+	title   string
+	tabType TabType
 }

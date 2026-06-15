@@ -12,13 +12,19 @@ import (
 type httpTransport struct {
 	baseURL string
 	apiKey  string
+	tenant  string
 	client  *http.Client
 }
 
 func NewHTTPTransport(baseURL, apiKey string) Transport {
+	return NewHTTPTransportWithTenant(baseURL, apiKey, "")
+}
+
+func NewHTTPTransportWithTenant(baseURL, apiKey, tenant string) Transport {
 	return &httpTransport{
 		baseURL: baseURL,
 		apiKey:  apiKey,
+		tenant:  tenant,
 		client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -70,7 +76,6 @@ func (t *httpTransport) Pull(sinceRev int64) ([]SyncRecord, int64, error) {
 	return result.Records, result.Revision, nil
 }
 
-
 func (t *httpTransport) Push(records []SyncRecord) (int64, error) {
 	body := struct {
 		Records []SyncRecord `json:"records"`
@@ -111,5 +116,8 @@ func (t *httpTransport) Close() error { return nil }
 func (t *httpTransport) setAuth(req *http.Request) {
 	if t.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	}
+	if t.tenant != "" {
+		req.Header.Set("X-ETerm-Tenant", t.tenant)
 	}
 }

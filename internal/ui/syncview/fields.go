@@ -4,7 +4,7 @@ import tea "charm.land/bubbletea/v2"
 
 func (m *Model) visibleFields() []int {
 	fields := []int{fieldEnabled, fieldMode}
-	if m.modeIdx == 0 { // SSH
+	if m.modeIdx == 2 { // SSH
 		fields = append(fields, fieldSSHHost, fieldRemoteBin, fieldRemoteDB)
 	} else { // HTTP/HTTPS
 		fields = append(fields, fieldServerURL, fieldAPIKey)

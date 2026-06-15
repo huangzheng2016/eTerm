@@ -32,7 +32,7 @@ const (
 )
 
 var enableOptions = []string{"Off", "On"}
-var modeOptions = []string{"SSH", "HTTP", "HTTPS"}
+var modeOptions = []string{"HTTP", "HTTPS", "SSH"}
 
 const inputInnerWidth = 39
 

@@ -97,11 +97,11 @@ func (m *Model) clampFocus() {
 
 func (m *Model) save() tea.Cmd {
 	if m.enableIdx == 1 {
-		if m.modeIdx == 0 && m.hostIdx < 0 {
+		if m.modeIdx == 2 && m.hostIdx < 0 {
 			m.err = "SSH Host is required"
 			return nil
 		}
-		if m.modeIdx > 0 && m.inputs[inServerURL].Value() == "" {
+		if m.modeIdx < 2 && m.inputs[inServerURL].Value() == "" {
 			m.err = "Server URL is required"
 			return nil
 		}
@@ -119,11 +119,11 @@ func (m *Model) save() tea.Cmd {
 	if m.enableIdx == 1 {
 		enabled = "true"
 	}
-	mode := "ssh"
+	mode := "http"
 	if m.modeIdx == 1 {
-		mode = "http"
-	} else if m.modeIdx == 2 {
 		mode = "https"
+	} else if m.modeIdx == 2 {
+		mode = "ssh"
 	}
 
 	hostID := ""
@@ -212,7 +212,7 @@ func (m *Model) testConnection() tea.Cmd {
 	mk := m.masterKey
 
 	return func() tea.Msg {
-		if mode == 0 {
+		if mode == 2 {
 			if remoteBin == "" {
 				remoteBin = "etermsyncd"
 			}
@@ -246,12 +246,12 @@ func (m *Model) testConnection() tea.Cmd {
 				}
 			}
 			result, cerr := internalssh.Connect(internalssh.ConnectConfig{
-				Host:      &loaded,
-				Key:       hostKey,
-				JumpHost:  jumpHost,
-				JumpKey:   jumpKey,
-				MasterKey: mk,
-				DB:        database,
+				Host:                &loaded,
+				Key:                 hostKey,
+				JumpHost:            jumpHost,
+				JumpKey:             jumpKey,
+				MasterKey:           mk,
+				DB:                  database,
 				FingerprintCallback: func(string, int, string, string) bool { return true },
 			})
 			if cerr != nil {

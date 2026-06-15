@@ -62,8 +62,8 @@ func (m Model) View() tea.View {
 	}
 
 	// Group view (default)
-	hosts := m.gridHosts()
-	if len(hosts) == 0 {
+	entries := m.gridEntries()
+	if len(entries) == 0 {
 		return tea.NewView(m.centeredEmptyHint(
 			"No connections. Press '"+homeBindingLabel(m.keys.NewHost.Help().Key, "n")+"' to add one.",
 			m.emptyHint(),
@@ -75,7 +75,7 @@ func (m Model) View() tea.View {
 		return tea.NewView(m.list.View())
 	}
 
-	return tea.NewView(renderGrid(hosts, m.gridCursor, m.gridLayout, m.width, m.hostStatus, m.selectedHosts, m.gridStatusWords))
+	return tea.NewView(renderGridEntries(entries, m.gridCursor, m.gridLayout, m.width, m.hostStatus, m.selectedHosts, m.gridStatusWords))
 }
 
 // centeredEmptyHint adds an optional muted shortcut line under the primary text, then centers the block.
