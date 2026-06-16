@@ -76,8 +76,9 @@ type Model struct {
 	// Configurable keybindings
 	vk viewkeys.SSHKeys
 
-	appCursorKeys bool
-	mouseMode     bool
+	appCursorKeys  bool
+	mouseMode      bool
+	bracketedPaste bool
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -100,6 +101,9 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 			if mode == ansi.ModeCursorKeys {
 				m.appCursorKeys = true
 			}
+			if mode == ansi.ModeBracketedPaste {
+				m.bracketedPaste = true
+			}
 			if isMouseTrackingMode(mode) {
 				m.mouseMode = true
 			}
@@ -107,6 +111,9 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		DisableMode: func(mode ansi.Mode) {
 			if mode == ansi.ModeCursorKeys {
 				m.appCursorKeys = false
+			}
+			if mode == ansi.ModeBracketedPaste {
+				m.bracketedPaste = false
 			}
 			if isMouseTrackingMode(mode) {
 				m.mouseMode = false
@@ -369,7 +376,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.sess != nil && m.sess.Stdin != nil {
-			_, _ = m.sess.Stdin.Write([]byte(msg.String()))
+			payload := []byte(msg.String())
+			if m.bracketedPaste {
+				payload = append([]byte(ansi.BracketedPasteStart), append(payload, []byte(ansi.BracketedPasteEnd)...)...)
+			}
+			_, _ = m.sess.Stdin.Write(payload)
 		}
 		return m, nil
 

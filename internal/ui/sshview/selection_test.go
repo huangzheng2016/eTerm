@@ -232,6 +232,54 @@ func TestAltScreenMouseModeForwardsWheelSequence(t *testing.T) {
 	}
 }
 
+func TestPasteMsgWritesRawTextWhenBracketedPasteDisabled(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	m.Update(tea.PasteMsg{Content: "hello"})
+
+	if got := stdin.String(); got != "hello" {
+		t.Fatalf("paste = %q, want raw text", got)
+	}
+}
+
+func TestPasteMsgWritesBracketedPasteWhenEnabled(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	m.emu.WriteString("\x1b[?2004h")
+	if !m.bracketedPaste {
+		t.Fatal("bracketed paste mode was not tracked")
+	}
+
+	m.Update(tea.PasteMsg{Content: "hello"})
+
+	want := "\x1b[200~hello\x1b[201~"
+	if got := stdin.String(); got != want {
+		t.Fatalf("paste = %q, want %q", got, want)
+	}
+}
+
+func TestPasteMsgStopsBracketingAfterModeReset(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	m.emu.WriteString("\x1b[?2004h")
+	m.emu.WriteString("\x1b[?2004l")
+	if m.bracketedPaste {
+		t.Fatal("bracketed paste mode was not cleared")
+	}
+
+	m.Update(tea.PasteMsg{Content: "hello"})
+
+	if got := stdin.String(); got != "hello" {
+		t.Fatalf("paste = %q, want raw text", got)
+	}
+}
+
 func TestKeyPressClearsBottomPad(t *testing.T) {
 	e := mkEmu(20, 5, "x\r\n")
 	m := &Model{emu: e, bottomPad: 2}
