@@ -331,6 +331,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, a.keyMap.CommandPalette):
 			a.commandPalette = newCommandPaletteFromDB(a.db, a.width)
 			return a, a.commandPalette.input.Focus()
+		case matchCtrlShiftAnyOf(msg, a.keyMap.PasteImageURL) || key.Matches(msg, a.keyMap.PasteImageURL):
+			if !a.activeTabIsSSH() {
+				break
+			}
+			return a.startImageURLPaste(nil)
 		}
 
 		// Alt+1..9 jumps to tab by number
@@ -377,6 +382,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.batchActions != nil {
 			a.batchActions.paste(msg)
 			return a, nil
+		}
+		if a.activeTabIsSSH() {
+			if a.imageUploadProgressCh == nil {
+				return a.startImageURLPaste(msg)
+			}
 		}
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
 			updated, cmd := a.tabs[a.activeTab].Model.Update(msg)
@@ -968,6 +978,51 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, func() tea.Msg { return types.SuccessMsg{Message: "Master password updated"} }
+
+	case types.ImageUploadProgressMsg:
+		pct := 0.0
+		if msg.TotalBytes > 0 {
+			pct = float64(msg.SentBytes) / float64(msg.TotalBytes) * 100
+		}
+		var tc tea.Cmd
+		a.toast, tc = a.toast.Show(fmt.Sprintf("Uploading image %.1f%%", pct), components.ToastInfo, 30*time.Second)
+		if a.imageUploadProgressCh != nil {
+			return a, tea.Batch(tc, waitImageUploadProgressCmd(a.imageUploadProgressCh, msg.StreamID))
+		}
+		return a, tc
+
+	case types.ImageUploadDoneMsg:
+		a.imageUploadProgressCh = nil
+		if msg.Err != nil {
+			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
+		}
+		if msg.CacheKey != "" && msg.URL != "" && msg.ExpiresAt.After(time.Now()) {
+			if a.imageURLCache == nil {
+				a.imageURLCache = make(map[string]imageURLCacheEntry)
+			}
+			a.imageURLCache[msg.CacheKey] = imageURLCacheEntry{URL: msg.URL, ExpiresAt: msg.ExpiresAt}
+		}
+		if m := sshViewByStreamID(&a, msg.StreamID); m != nil {
+			m.PasteText(msg.URL + " ")
+		}
+		return a, func() tea.Msg { return types.SuccessMsg{Message: "Image URL pasted"} }
+
+	case types.PasteImageURLMsg:
+		return a.startImageURLPaste(nil)
+
+	case imagePasteFallbackMsg:
+		a.imageUploadProgressCh = nil
+		a.toast = a.toast.Dismiss()
+		if m := sshViewByStreamID(&a, msg.streamID); m != nil {
+			updated, cmd := m.Update(msg.msg)
+			for i := range a.tabs {
+				if a.tabs[i].Model == m {
+					a.tabs[i].Model = updated
+					return a, cmd
+				}
+			}
+		}
+		return a, nil
 
 	case types.SuccessMsg:
 		var tc tea.Cmd

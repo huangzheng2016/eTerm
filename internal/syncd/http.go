@@ -3,6 +3,7 @@ package syncd
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -116,5 +117,79 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 		json.NewEncoder(w).Encode(map[string]int64{"revision": rev})
 	}))
 
+	mux.HandleFunc("POST /api/v1/blobs", auth(func(w http.ResponseWriter, r *http.Request) {
+		tenant := r.Header.Get("X-ETerm-Tenant")
+		r.Body = http.MaxBytesReader(w, r.Body, MaxBlobBytes+1)
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
+		if int64(len(data)) > MaxBlobBytes {
+			http.Error(w, ErrBlobTooLarge.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
+		mime := r.Header.Get("X-ETerm-Blob-Mime")
+		if mime == "" {
+			mime = "application/octet-stream"
+		}
+		blob, err := engine.CreateBlob(tenant, mime, r.Header.Get("X-ETerm-Blob-Filename"), data)
+		if err == ErrBlobTooLarge {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":         blob.ID,
+			"url":        "/b/" + blob.DownloadToken,
+			"mime":       blob.Mime,
+			"bytes":      blob.Bytes,
+			"expires_at": blob.ExpiresAt,
+		})
+	}))
+
+	mux.HandleFunc("GET /b/{token}", func(w http.ResponseWriter, r *http.Request) {
+		blob, err := engine.GetBlobByToken(r.PathValue("token"))
+		if err == ErrBlobNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeBlob(w, blob)
+	})
+
+	mux.HandleFunc("GET /api/v1/blobs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		blob, err := engine.GetBlob(r.PathValue("id"), r.URL.Query().Get("t"))
+		if err == ErrBlobNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeBlob(w, blob)
+	})
+
+	mux.HandleFunc("DELETE /api/v1/blobs/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
+		if err := engine.DeleteBlob(r.Header.Get("X-ETerm-Tenant"), r.PathValue("id")); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
 	return mux
+}
+
+func writeBlob(w http.ResponseWriter, blob *BlobEntry) {
+	w.Header().Set("Content-Type", blob.Mime)
+	w.Header().Set("Content-Length", strconv.FormatInt(blob.Bytes, 10))
+	_, _ = w.Write(blob.Data)
 }

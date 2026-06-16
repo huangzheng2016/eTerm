@@ -1,7 +1,10 @@
 package app
 
 import (
+	"time"
+
 	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/syncblob"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
@@ -114,6 +117,13 @@ type App struct {
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint
 	pendingQuickConnect        *types.QuickConnectMsg
+	imageUploadProgressCh      chan syncblob.Progress
+	imageURLCache              map[string]imageURLCacheEntry
+}
+
+type imageURLCacheEntry struct {
+	URL       string
+	ExpiresAt time.Time
 }
 
 func NewApp(database *gorm.DB, masterKey *security.MasterKeyManager) App {

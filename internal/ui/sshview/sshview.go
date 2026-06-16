@@ -166,6 +166,10 @@ func (m *Model) PasteCommand(cmd string) {
 	_, _ = m.sess.Stdin.Write([]byte(cmd))
 }
 
+func (m *Model) PasteText(text string) {
+	m.PasteCommand(text)
+}
+
 // Disconnected is true after a network-style drop; press "r" to send [types.SSHReconnectMsg].
 func (m *Model) Disconnected() bool { return m.disconnected }
 

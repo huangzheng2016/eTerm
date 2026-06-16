@@ -43,10 +43,12 @@ func NewEngine(database *gorm.DB) (*Engine, error) {
 			return nil, err
 		}
 	}
-	if err := database.AutoMigrate(&SyncEntry{}); err != nil {
+	if err := database.AutoMigrate(&SyncEntry{}, &BlobEntry{}); err != nil {
 		return nil, err
 	}
-	return &Engine{DB: database}, nil
+	engine := &Engine{DB: database}
+	_ = engine.CleanupExpiredBlobs()
+	return engine, nil
 }
 
 func (e *Engine) Ping() error {
@@ -100,6 +102,68 @@ func (e *Engine) Push(tenant string, entries []SyncEntry) (int64, error) {
 		}
 	}
 	return maxRev, nil
+}
+
+func (e *Engine) CreateBlob(tenant, mime, filename string, data []byte) (*BlobEntry, error) {
+	if int64(len(data)) > MaxBlobBytes {
+		return nil, ErrBlobTooLarge
+	}
+	id, err := randomBlobID()
+	if err != nil {
+		return nil, err
+	}
+	token, err := randomDownloadToken()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	entry := &BlobEntry{
+		ID:            id,
+		Tenant:        tenant,
+		Mime:          mime,
+		Filename:      filename,
+		Data:          append([]byte(nil), data...),
+		Bytes:         int64(len(data)),
+		DownloadToken: token,
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(BlobTTL),
+	}
+	if err := e.DB.Create(entry).Error; err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+func (e *Engine) GetBlob(id, token string) (*BlobEntry, error) {
+	var entry BlobEntry
+	if err := e.DB.Where("id = ? AND download_token = ?", id, token).First(&entry).Error; err != nil {
+		return nil, ErrBlobNotFound
+	}
+	return e.validBlob(&entry)
+}
+
+func (e *Engine) GetBlobByToken(token string) (*BlobEntry, error) {
+	var entry BlobEntry
+	if err := e.DB.Where("download_token = ?", token).First(&entry).Error; err != nil {
+		return nil, ErrBlobNotFound
+	}
+	return e.validBlob(&entry)
+}
+
+func (e *Engine) validBlob(entry *BlobEntry) (*BlobEntry, error) {
+	if !entry.ExpiresAt.After(time.Now().UTC()) {
+		_ = e.DB.Delete(&entry).Error
+		return nil, ErrBlobNotFound
+	}
+	return entry, nil
+}
+
+func (e *Engine) DeleteBlob(tenant, id string) error {
+	return e.DB.Where("tenant = ? AND id = ?", tenant, id).Delete(&BlobEntry{}).Error
+}
+
+func (e *Engine) CleanupExpiredBlobs() error {
+	return e.DB.Where("expires_at <= ?", time.Now().UTC()).Delete(&BlobEntry{}).Error
 }
 
 func (e *Engine) HostMetas(tenant string) ([]HostMeta, error) {

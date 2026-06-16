@@ -32,7 +32,14 @@ func TestMatchKeyMatchesCtrlShiftLetter(t *testing.T) {
 
 func TestHelpLabelUsesFirstTwoKeys(t *testing.T) {
 	got := HelpLabel([]string{"ctrl+f", "s", "alt+s"})
-	if got != "ctrl+f/s" {
+	if got != "C-f/s" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestHelpLabelShortensCtrlShift(t *testing.T) {
+	got := HelpLabel([]string{"ctrl+shift+h"})
+	if got != "C-S-h" {
 		t.Fatalf("got %q", got)
 	}
 }

@@ -86,9 +86,28 @@ func HelpLabel(keys []string) string {
 		return ""
 	}
 	if len(keys) == 1 {
-		return keys[0]
+		return shortKeyLabel(keys[0])
 	}
-	return keys[0] + "/" + keys[1]
+	return shortKeyLabel(keys[0]) + "/" + shortKeyLabel(keys[1])
+}
+
+func shortKeyLabel(k string) string {
+	parts := strings.Split(k, "+")
+	for i, p := range parts {
+		switch strings.ToLower(p) {
+		case "ctrl":
+			parts[i] = "C"
+		case "shift":
+			parts[i] = "S"
+		case "alt":
+			parts[i] = "A"
+		case "meta":
+			parts[i] = "M"
+		default:
+			parts[i] = p
+		}
+	}
+	return strings.Join(parts, "-")
 }
 
 func matchCtrlShift(k tea.Key, target string) bool {

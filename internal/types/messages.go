@@ -1,5 +1,7 @@
 package types
 
+import "time"
+
 type SwitchTabMsg struct {
 	Index int
 }
@@ -276,6 +278,24 @@ type SnippetPickerRequestMsg struct{}
 type SnippetSelectedMsg struct {
 	Command string
 }
+
+// ImageUploadProgressMsg reports local image upload progress.
+type ImageUploadProgressMsg struct {
+	StreamID   uint64
+	TotalBytes int64
+	SentBytes  int64
+}
+
+// ImageUploadDoneMsg completes local image upload.
+type ImageUploadDoneMsg struct {
+	StreamID  uint64
+	URL       string
+	CacheKey  string
+	ExpiresAt time.Time
+	Err       error
+}
+
+type PasteImageURLMsg struct{}
 
 // SnippetDeleteRequestMsg asks the app to show a confirmation dialog before deleting.
 type SnippetDeleteRequestMsg struct {

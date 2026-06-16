@@ -131,3 +131,51 @@ func TestNewEngineDropsLegacySyncIDUniqueIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBlobCreateGetDelete(t *testing.T) {
+	engine := testEngine(t)
+	data := []byte("image-bytes")
+	blob, err := engine.CreateBlob("tenant-a", "image/png", "a.png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := blob.ExpiresAt.Sub(blob.CreatedAt); d != 30*time.Minute {
+		t.Fatalf("ttl = %v", d)
+	}
+	got, err := engine.GetBlob(blob.ID, blob.DownloadToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Data) != string(data) || got.Mime != "image/png" {
+		t.Fatalf("got %#v", got)
+	}
+	if _, err := engine.GetBlob(blob.ID, "bad-token"); err != ErrBlobNotFound {
+		t.Fatalf("bad token err = %v", err)
+	}
+	if err := engine.DeleteBlob("tenant-a", blob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.GetBlob(blob.ID, blob.DownloadToken); err != ErrBlobNotFound {
+		t.Fatalf("deleted blob err = %v", err)
+	}
+}
+
+func TestBlobRejectsOver10MiB(t *testing.T) {
+	engine := testEngine(t)
+	data := make([]byte, MaxBlobBytes+1)
+	if _, err := engine.CreateBlob("", "image/png", "big.png", data); err != ErrBlobTooLarge {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBlobExpiry(t *testing.T) {
+	engine := testEngine(t)
+	blob, err := engine.CreateBlob("", "image/png", "a.png", []byte("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.DB.Model(&BlobEntry{}).Where("id = ?", blob.ID).Update("expires_at", time.Now().UTC().Add(-time.Minute))
+	if _, err := engine.GetBlob(blob.ID, blob.DownloadToken); err != ErrBlobNotFound {
+		t.Fatalf("expired blob err = %v", err)
+	}
+}

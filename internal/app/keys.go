@@ -27,6 +27,7 @@ type KeyMap struct {
 	SnippetsTab    key.Binding
 	CommandPalette key.Binding
 	LocalTerminal  key.Binding
+	PasteImageURL  key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -110,6 +111,10 @@ func DefaultKeyMap() KeyMap {
 		LocalTerminal: key.NewBinding(
 			key.WithKeys("ctrl+shift+t"),
 			key.WithHelp("C-S-t", "local shell"),
+		),
+		PasteImageURL: key.NewBinding(
+			key.WithKeys("ctrl+shift+i"),
+			key.WithHelp("C-S-i", "paste image url"),
 		),
 	}
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -30,6 +31,7 @@ type KeyBindingConfig struct {
 	SnippetsTab    []string `json:"snippets_tab"`
 	CommandPalette []string `json:"command_palette"`
 	LocalTerminal  []string `json:"local_terminal"`
+	PasteImageURL  []string `json:"paste_image_url"`
 
 	// Home
 	SSHConnect     []string `json:"ssh_connect"`
@@ -103,6 +105,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		SnippetsTab:    []string{"ctrl+shift+b"},
 		CommandPalette: []string{"ctrl+k"},
 		LocalTerminal:  []string{"ctrl+shift+t"},
+		PasteImageURL:  []string{"ctrl+shift+i"},
 
 		// Home
 		SSHConnect:     []string{"enter"},
@@ -191,9 +194,28 @@ func helpLabel(keys []string) string {
 		return ""
 	}
 	if len(keys) == 1 {
-		return keys[0]
+		return shortKeyLabel(keys[0])
 	}
-	return keys[0] + "/" + keys[1]
+	return shortKeyLabel(keys[0]) + "/" + shortKeyLabel(keys[1])
+}
+
+func shortKeyLabel(k string) string {
+	parts := strings.Split(k, "+")
+	for i, p := range parts {
+		switch strings.ToLower(p) {
+		case "ctrl":
+			parts[i] = "C"
+		case "shift":
+			parts[i] = "S"
+		case "alt":
+			parts[i] = "A"
+		case "meta":
+			parts[i] = "M"
+		default:
+			parts[i] = p
+		}
+	}
+	return strings.Join(parts, "-")
 }
 
 // BuildKeyMap constructs the global KeyMap from a KeyBindingConfig.
@@ -278,6 +300,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		LocalTerminal: key.NewBinding(
 			key.WithKeys(cfg.LocalTerminal...),
 			key.WithHelp(helpLabel(cfg.LocalTerminal), "local shell"),
+		),
+		PasteImageURL: key.NewBinding(
+			key.WithKeys(cfg.PasteImageURL...),
+			key.WithHelp(helpLabel(cfg.PasteImageURL), "paste image url"),
 		),
 	}
 }

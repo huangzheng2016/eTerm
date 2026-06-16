@@ -40,6 +40,7 @@ func newCommandPalette(items []commandPaletteItem) *commandPaletteModel {
 
 func newCommandPaletteFromDB(database *gorm.DB, width int) *commandPaletteModel {
 	items := []commandPaletteItem{
+		{Title: "Paste Image URL", Subtitle: "shell", Search: "image paste upload clipboard url", Msg: types.PasteImageURLMsg{}},
 		{Title: "Open Settings", Subtitle: "app", Search: "settings preferences keys", Msg: types.OpenSettingsMsg{}},
 		{Title: "Open Sync", Subtitle: "app", Search: "sync devices", Msg: types.OpenSyncMsg{}},
 		{Title: "Open SSH Keys", Subtitle: "app", Search: "keys ssh", Msg: types.NewTabMsg{Type: string(KeyTab), Title: "Keys"}},

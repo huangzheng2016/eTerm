@@ -23,6 +23,18 @@ func TestCommandPaletteFiltersAndSelectsHostConnect(t *testing.T) {
 	}
 }
 
+func TestCommandPaletteIncludesPasteImageURL(t *testing.T) {
+	p := newCommandPalette([]commandPaletteItem{
+		{Title: "Paste Image URL", Subtitle: "shell", Search: "image paste upload clipboard url", Msg: types.PasteImageURLMsg{}},
+	})
+	p.input.SetValue("image")
+	p.refresh()
+
+	if _, ok := p.selectedMsg().(types.PasteImageURLMsg); !ok {
+		t.Fatalf("selected = %T", p.selectedMsg())
+	}
+}
+
 func TestCommandPaletteMouseSelectsItem(t *testing.T) {
 	a := App{commandPalette: newCommandPalette([]commandPaletteItem{
 		{Title: "Connect prod", Subtitle: "host", Search: "prod", Msg: types.SSHConnectMsg{HostID: 7}},
