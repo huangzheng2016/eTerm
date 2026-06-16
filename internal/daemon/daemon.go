@@ -21,6 +21,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/wskeepalive"
 	"gorm.io/gorm"
 )
 
@@ -52,6 +53,11 @@ type wsHello struct {
 	Name    string `json:"name"`
 	Version int    `json:"version"`
 }
+
+const (
+	wsKeepaliveInterval = 25 * time.Second
+	wsKeepaliveTimeout  = 5 * time.Second
+)
 
 func Run(ctx context.Context, cfg Config) error {
 	dbPath := cfg.DBPath
@@ -164,6 +170,9 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 		return err
 	}
 	defer c.CloseNow()
+	keepaliveCtx, stopKeepalive := context.WithCancel(ctx)
+	defer stopKeepalive()
+	wskeepalive.Start(keepaliveCtx, c, wsKeepaliveInterval, wsKeepaliveTimeout)
 
 	hello, _ := json.Marshal(wsHello{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: rt.name, Version: 1})
 	if err := c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {

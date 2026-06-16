@@ -81,6 +81,30 @@ func TestAbnormalStreamDoneShowsReconnectDialog(t *testing.T) {
 	}
 }
 
+func TestRemoteLocalShellAbnormalStreamDoneShowsConnectionError(t *testing.T) {
+	m := New(nil, "[R]remote", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	if !updated.(*Model).Disconnected() {
+		t.Fatal("expected session to be marked disconnected")
+	}
+	if cmd == nil {
+		t.Fatal("expected connection error command")
+	}
+	msg := cmd()
+	got, ok := msg.(types.ConnErrorMsg)
+	if !ok {
+		t.Fatalf("got %T want types.ConnErrorMsg", msg)
+	}
+	if got.Target != "[R]remote" {
+		t.Fatalf("target = %q", got.Target)
+	}
+	if got.Retry != nil {
+		t.Fatalf("retry = %#v, want nil for remote local shell", got.Retry)
+	}
+}
+
 func TestNormalStreamDoneClosesWithoutReconnectDialog(t *testing.T) {
 	m := New(nil, "host-a", 42, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = m.Close() })

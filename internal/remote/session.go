@@ -15,6 +15,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/wskeepalive"
 )
 
 type openPayload struct {
@@ -29,6 +30,11 @@ type wsStdin struct {
 	streamID uint32
 	mu       sync.Mutex
 }
+
+const (
+	wsKeepaliveInterval = 25 * time.Second
+	wsKeepaliveTimeout  = 5 * time.Second
+)
 
 func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
 	header := http.Header{}
@@ -91,6 +97,8 @@ func dial(ctx context.Context, urls []string, header http.Header, insecureTLS bo
 func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int) *internalssh.InteractiveSession {
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
+	keepaliveCtx, stopKeepalive := context.WithCancel(ctx)
+	wskeepalive.Start(keepaliveCtx, conn, wsKeepaliveInterval, wsKeepaliveTimeout)
 	stdin := &wsStdin{ctx: ctx, conn: conn, streamID: streamID}
 	is := &internalssh.InteractiveSession{
 		Stdin:  stdin,
@@ -102,6 +110,7 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 			return conn.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameResize, StreamID: streamID, Payload: relay.ResizePayload(rows, cols)}))
 		},
 	}
+	is.AddCloser(closerFunc(stopKeepalive))
 	go func() {
 		defer pw.Close()
 		for {
@@ -131,6 +140,13 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 	}()
 	_ = is.Resize(rows, cols)
 	return is
+}
+
+type closerFunc func()
+
+func (f closerFunc) Close() error {
+	f()
+	return nil
 }
 
 func (w *wsStdin) Write(p []byte) (int, error) {
