@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
@@ -46,5 +47,32 @@ func TestSaveReportsMissingMasterKeyForSecrets(t *testing.T) {
 
 	if _, ok := msg.(types.ErrorMsg); !ok {
 		t.Fatalf("got %T want types.ErrorMsg", msg)
+	}
+}
+
+func TestCtrlYSavesThenStartsSync(t *testing.T) {
+	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.Setup([]byte("pw"))
+	m := New(database, mk)
+	m.enableIdx = 1
+	m.modeIdx = 0
+	m.inputs[inServerURL].SetValue("https://sync.example.com")
+	m.inputs[inPassphrase].SetValue("secret")
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+	msg := cmd()
+	if _, ok := msg.(types.SyncStartMsg); !ok {
+		t.Fatalf("got %T want SyncStartMsg", msg)
+	}
+	mode, _ := db.GetSetting(database, "sync_mode")
+	if mode != "http" {
+		t.Fatalf("sync_mode = %q, want http", mode)
 	}
 }

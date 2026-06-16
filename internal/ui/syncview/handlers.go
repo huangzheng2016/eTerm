@@ -44,7 +44,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.err = "Testing..."
 		return m, m.testConnection()
 	case "ctrl+y":
-		return m, func() tea.Msg { return types.SyncStartMsg{} }
+		return m, m.saveAndSync()
 	case "esc":
 		return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 	}
@@ -56,6 +56,20 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m *Model) saveAndSync() tea.Cmd {
+	saveCmd := m.save()
+	if saveCmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg := saveCmd()
+		if _, ok := msg.(types.SuccessMsg); ok {
+			return types.SyncStartMsg{}
+		}
+		return msg
+	}
 }
 
 func (m *Model) handleSelectorLeft(f int) {

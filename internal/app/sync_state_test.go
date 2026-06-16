@@ -57,3 +57,25 @@ func TestSyncTickDisabledDoesNotSetInFlight(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncStartWhileInFlightShowsToastCommand(t *testing.T) {
+	gdb, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.Setup([]byte("pw"))
+	a := NewApp(gdb, mk)
+	a.viewState = MainView
+	a.syncing = true
+
+	next, cmd := a.Update(types.SyncStartMsg{})
+	updated := next.(App)
+
+	if !updated.syncing {
+		t.Fatal("syncing should stay true")
+	}
+	if cmd == nil {
+		t.Fatal("expected toast command")
+	}
+}

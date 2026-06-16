@@ -839,7 +839,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.SyncStartMsg:
 		if a.syncing {
-			return a, nil
+			var tc tea.Cmd
+			a.toast, tc = a.toast.Show("Sync already running", components.ToastInfo, 2*time.Second)
+			return a, tc
 		}
 		cmd, inFlight := a.prepareSync(true)
 		if cmd == nil {
