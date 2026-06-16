@@ -742,17 +742,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(tc, reflowWindow(a))
 
 	case types.RemoteDaemonLoadingMsg:
+		if msg.Silent {
+			return a, nil
+		}
 		var tc tea.Cmd
 		a.toast, tc = a.toast.Show("Loading daemon peers...", components.ToastInfo, 30*time.Second)
 		return a, tea.Batch(tc, reflowWindow(a))
 
 	case types.RemoteDaemonLoadedMsg:
 		if msg.Err != nil {
+			if msg.Silent {
+				return a, a.forwardToHomeTabs(msg)
+			}
 			var tc tea.Cmd
 			a.toast, tc = a.toast.Show("Daemon peers unavailable: "+msg.Err.Error(), components.ToastWarning, 5*time.Second)
 			return a, tea.Batch(tc, a.forwardToHomeTabs(msg), reflowWindow(a))
 		}
-		a.toast = a.toast.Dismiss()
+		if !msg.Silent {
+			a.toast = a.toast.Dismiss()
+		}
 		return a, tea.Batch(a.forwardToHomeTabs(msg), reflowWindow(a))
 
 	case types.ConnErrorMsg:

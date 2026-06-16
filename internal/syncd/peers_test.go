@@ -24,7 +24,7 @@ func TestPeerRegistryListSortedByTenant(t *testing.T) {
 
 func TestPeerRegistryUnregister(t *testing.T) {
 	r := NewPeerRegistry()
-	r.Register("tenant-a", PeerInfo{ID: "1", Name: "alpha"}, make(chan relay.Frame, 1))
+	id := r.Register("tenant-a", PeerInfo{ID: "1", Name: "alpha"}, make(chan relay.Frame, 1))
 	r.Unregister("tenant-a", "1")
 
 	if len(r.List("tenant-a")) != 0 {
@@ -32,5 +32,32 @@ func TestPeerRegistryUnregister(t *testing.T) {
 	}
 	if _, ok := r.Get("tenant-a", "1"); ok {
 		t.Fatal("unregistered peer is still addressable")
+	}
+	if id != "1" {
+		t.Fatalf("id = %q, want 1", id)
+	}
+}
+
+func TestPeerRegistryAllowsDuplicatePeerIDs(t *testing.T) {
+	r := NewPeerRegistry()
+	first := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, make(chan relay.Frame, 1))
+	second := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, make(chan relay.Frame, 1))
+
+	if first == second {
+		t.Fatalf("duplicate registrations used same id %q", first)
+	}
+	got := r.List("tenant-a")
+	if len(got) != 2 {
+		t.Fatalf("got %d peers, want 2", len(got))
+	}
+	if _, ok := r.Get("tenant-a", first); !ok {
+		t.Fatalf("first id %q not addressable", first)
+	}
+	if _, ok := r.Get("tenant-a", second); !ok {
+		t.Fatalf("second id %q not addressable", second)
+	}
+	r.Unregister("tenant-a", first)
+	if _, ok := r.Get("tenant-a", second); !ok {
+		t.Fatalf("second id %q removed with first", second)
 	}
 }

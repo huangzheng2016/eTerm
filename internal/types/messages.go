@@ -83,13 +83,18 @@ type RemoteHost struct {
 	Group    string `json:"group"`
 }
 
-type RemoteDaemonLoadingMsg struct{}
+type RemoteDaemonLoadingMsg struct {
+	Silent bool
+}
 
 type RemoteDaemonLoadedMsg struct {
-	Peers []RemotePeer
-	Hosts []RemoteHost
-	Err   error
+	Peers  []RemotePeer
+	Hosts  []RemoteHost
+	Err    error
+	Silent bool
 }
+
+type RemoteDaemonRefreshMsg struct{}
 
 type RemotePeerMenuMsg struct {
 	Peer  RemotePeer

@@ -342,10 +342,10 @@ func (m Model) loadHosts() tea.Cmd {
 	}
 }
 
-func (m Model) loadRemote() tea.Cmd {
+func (m Model) loadRemote(silent bool) tea.Cmd {
 	return func() tea.Msg {
 		peers, hosts, err := m.loadRemoteSummary()
-		return types.RemoteDaemonLoadedMsg{Peers: peers, Hosts: hosts, Err: err}
+		return types.RemoteDaemonLoadedMsg{Peers: peers, Hosts: hosts, Err: err, Silent: silent}
 	}
 }
 

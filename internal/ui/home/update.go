@@ -10,6 +10,7 @@ import (
 )
 
 const doubleClickWindow = 450 * time.Millisecond
+const remoteDaemonRefreshInterval = 10 * time.Second
 
 func (m Model) Init() tea.Cmd {
 	return m.reloadHosts()
@@ -57,7 +58,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.RemoteDaemonLoadedMsg:
 		if msg.Err != nil {
-			return m, nil
+			return m, remoteDaemonRefreshTick()
 		}
 		selectedHostID := uint(0)
 		if h := m.SelectedHost(); h != nil {
@@ -74,7 +75,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
+		return m, remoteDaemonRefreshTick()
+
+	case types.RemoteDaemonRefreshMsg:
+		return m, m.loadRemote(true)
 
 	case probeResultMsg:
 		if m.hostStatus == nil {
@@ -114,6 +118,12 @@ func (m Model) reloadHosts() tea.Cmd {
 	return tea.Batch(
 		m.loadHosts(),
 		func() tea.Msg { return types.RemoteDaemonLoadingMsg{} },
-		m.loadRemote(),
+		m.loadRemote(false),
 	)
+}
+
+func remoteDaemonRefreshTick() tea.Cmd {
+	return tea.Tick(remoteDaemonRefreshInterval, func(time.Time) tea.Msg {
+		return types.RemoteDaemonRefreshMsg{}
+	})
 }

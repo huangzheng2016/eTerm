@@ -148,8 +148,8 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 			if json.Unmarshal(f.Payload, &hello) != nil || hello.PeerID == "" {
 				continue
 			}
-			tenant, peerID = hello.Tenant, hello.PeerID
-			h.peers.Register(tenant, PeerInfo{ID: hello.PeerID, Name: hello.Name, LastSeen: time.Now()}, send)
+			tenant = hello.Tenant
+			peerID = h.peers.Register(tenant, PeerInfo{ID: hello.PeerID, Name: hello.Name, LastSeen: time.Now()}, send)
 			continue
 		}
 		if s, ok := h.session(f.StreamID); ok {
