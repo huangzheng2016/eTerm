@@ -4,23 +4,13 @@
 
 ## 功能
 
-- **SSH 终端** -- 交互式 Shell，支持保活、断线重连、滚动回看
-- **SFTP** -- 双栏文件管理器，上传/下载/删除/建目录/重命名
-- **主机管理** -- 别名、分组、标签、搜索、克隆、导入导出 `~/.ssh/config`
-- **会话记录** -- 断开连接后保存终端文本快照，在 Sessions 标签中按主机查看历史输出
-- **网格卡片** -- 多列主机展示，实时在线状态探测；可在设置中开启网格状态文字（ON/OFF/?），默认仅颜色圆点
-- **认证** -- 密码、密钥、Agent、键盘交互、Kerberos/GSSAPI
-- **密钥库** -- 生成、导入、导出 SSH 密钥，本地加密存储
-- **网络** -- ProxyJump、ProxyCommand、HTTP/SOCKS5 代理、本地/远程/动态端口转发
-- **命令片段** -- 可复用命令模板，一键粘贴到 SSH 会话
-- **多设备同步** -- 默认通过 HTTP 同步主机、密钥、片段等数据到远程服务端；age 加密传输，服务端只存密文
-- **远程 LocalShell** -- HTTP 同步模式下，两台同租户 eTerm 可通过 syncd 中转打开对方的本地终端或已同步 SSH 主机
-- **可配置快捷键** -- 所有快捷键均可在设置页修改，支持多键绑定
-- **主密码管理** -- 设置页可修改主密码，自动重加密所有敏感字段
-- **隐藏主机** -- 给主机打 `hidden` 标签隐藏，`H` 切换显示
-- **CLI 直连** -- `eterm [user@]host[:port] [-p port]`，不存在的主机自动创建
-- **更新检查** -- 解锁后异步检查 GitHub 新版本（6 小时节流；`--no-update-check` 或 `ETERM_NO_UPDATE_CHECK` 关闭）
-- **多标签页、鼠标支持、应用锁定**
+- **SSH / LocalShell** -- 多标签终端、滚动回看、断线提示与重连
+- **主机与密钥管理** -- 主机分组、标签、搜索，内置 SSH 密钥库
+- **导入** -- 支持导入 `~/.ssh/config` 与 Termius 主机数据
+- **SFTP 与端口转发** -- 双栏文件管理，本地/远程/动态端口转发
+- **同步与远程 Shell** -- 通过 syncd 在多台设备间同步配置，并打开同租户设备上的远程 Shell
+- **效率工具** -- 命令片段、会话记录、图片短链粘贴、命令面板、可配置快捷键
+- **安全存储** -- 主密码加密敏感字段；同步数据传输前加密，服务端只保存密文
 
 ## 演示
 
@@ -61,6 +51,7 @@ go build -o eterm .
 
 ```bash
 go build -o etermsyncd ./cmd/etermsyncd
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsyncd
 ```
 
 ## 快速开始
@@ -100,48 +91,81 @@ go build -o etermsyncd ./cmd/etermsyncd
 | `C`             | 克隆主机               |
 | `h` / `H`       | 隐藏主机 / 切换隐藏可见      |
 | `/`             | 搜索                 |
-| `t`             | 分组 / 标签视图          |
-| `q`             | 快速连接               |
 | `Esc`           | 打开菜单（退出 / 设置 / 同步） |
-| `Ctrl+Shift+H`  | 当前主机会话历史           |
-| `Ctrl+Space`    | 多选开关（批量打标签）        |
-| `Ctrl+Shift+G`  | 批量添加标签             |
-| `Ctrl+Tab`      | 下一标签页              |
+| `C-S-i`         | 上传剪贴板图片并粘贴短链      |
+| `C-Tab`         | 下一标签页              |
+| `C-k`           | 命令面板               |
 | `?`             | 所有快捷键              |
 
 
 导入 `~/.ssh/config` 时若存在重名主机，可选择跳过或覆盖。
 
+快捷键显示使用短写：`C` = Ctrl，`S` = Shift，`A` = Alt，例如 `C-S-i` 表示 `Ctrl+Shift+I`。
+
 ## 多设备同步
 
-ESC 菜单 -> Sync 打开同步设置。支持 HTTP 与 SSH stdio 两种传输模式。HTTP 是默认模式，也是远程 LocalShell / 远程主机 shell 唯一支持的模式。
+`Esc` -> Sync 打开同步设置。默认使用 HTTP syncd；远程 Shell 和图片短链也依赖 HTTP syncd。
 
-**HTTP 模式**：etermsyncd 作为常驻服务运行，客户端通过 HTTP API 同步。需要 Bearer token 鉴权。Server URL 可填写 `https://...` 或 `http://...`；不写 scheme 时先尝试 HTTPS，失败后回退 HTTP。自签名证书可在 Sync 设置中打开 Insecure TLS。
+最小启动：
 
 ```bash
-# 启动服务端（HTTP 模式必须设置 API key）
 etermsyncd -listen :8443 -db ./sync.db -api-key <token>
-
-# HTTPS
-etermsyncd -listen :8443 -db ./sync.db -api-key <token> -cert server.crt -key server.key
 ```
 
-远程 shell 需要在可被访问的 eTerm 主机上启动 daemon：
+生产环境通常让 syncd 监听本机端口，由反向代理负责 HTTPS：
 
 ```bash
-eterm daemon -c ~/.config/eterm/eterm.db --password <master-password>
+sudo install -m 0755 etermsyncd-linux /usr/local/bin/etermsyncd
+sudo install -d -m 0755 /etc/etermsyncd /var/lib/etermsyncd
+printf 'ETERMSYNCD_API_KEY=%s\n' '<token>' | sudo tee /etc/etermsyncd/etermsyncd.env
+sudo chmod 600 /etc/etermsyncd/etermsyncd.env
 ```
 
-**SSH stdio 模式**：客户端通过 SSH 在远程临时启动 etermsyncd，通过 stdin/stdout 交换 JSON，同步完成后进程退出。不需要常驻服务，SSH 本身提供认证和加密。
+`/etc/systemd/system/etermsyncd.service`：
+
+```ini
+[Unit]
+Description=eTerm sync daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/etermsyncd/etermsyncd.env
+ExecStart=/usr/local/bin/etermsyncd -listen 127.0.0.1:8080 -db /var/lib/etermsyncd/sync.db
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-# 远程机器上部署 etermsyncd 二进制即可
-scp etermsyncd remote-host:~/bin/
+sudo systemctl daemon-reload
+sudo systemctl enable --now etermsyncd
 ```
 
-同步范围：Host、SSHKey（仅 database 模式）、Snippet、PortForward。HostFingerprint、ConnectionHistory、AppSetting 不同步。
+需要远程 Shell 时，在可访问的 eTerm 主机上启动 daemon：
 
-数据在传输前经 age 加密（scrypt passphrase 模式），服务端只存密文，无法解密。
+```bash
+eterm daemon start
+eterm daemon status
+eterm daemon stop
+```
+
+同步设置里仍可选择 SSH 模式做一次性同步，但远程 Shell 和图片托管只支持 HTTP 模式。同步数据在上传前加密，syncd 不保存明文。
+
+## 图片短链粘贴
+
+在 `[L]` 本地 Shell、`[S]` SSH Shell、`[R]` 远程 Shell 中可使用：
+
+- `C-S-i`：读取系统剪贴板图片，上传到 HTTP syncd，向当前 Shell 粘贴短链
+- `C-k` -> `Paste Image URL`：同样功能，适合作为兜底入口
+
+短链格式为 `https://sync.example.com/b/<token>`，有效期 30 分钟。图片最大 10 MiB。该功能只支持 HTTP syncd。
+
+普通文本粘贴不受影响。纯图片剪贴板通常不会触发终端文本粘贴事件，请使用 `C-S-i` 或命令面板入口上传图片。
 
 ## 数据
 
@@ -149,7 +173,7 @@ scp etermsyncd remote-host:~/bin/
 
 敏感字段（密码、私钥）由主密码派生密钥加密。首次运行完成加密初始化，支持无密码模式。设置页可修改主密码。
 
-偏好项（会话转录、网格状态文字）在设置标签页顶部 General 区切换，`Ctrl+S` 保存。
+偏好项在设置标签页中修改，`C-s` 保存。
 
 ## 调试
 
