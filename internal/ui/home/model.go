@@ -34,10 +34,18 @@ func displayGroupName(g string) string {
 	return g
 }
 
+func groupPrefix(g string) string {
+	name := displayGroupName(g)
+	if strings.EqualFold(strings.TrimSpace(name), "Default") {
+		return ""
+	}
+	return "[" + name + "] "
+}
+
 func (i hostItem) FilterValue() string {
 	// Must start with the same prefix as Title() so bubbles' filter highlight
 	// underlines the correct characters.
-	prefix := "[" + displayGroupName(i.host.Group) + "] "
+	prefix := groupPrefix(i.host.Group)
 	name := i.host.Alias
 	if name == "" {
 		name = fmt.Sprintf("%s@%s", i.host.Username, i.host.Hostname)
@@ -46,7 +54,7 @@ func (i hostItem) FilterValue() string {
 }
 
 func (i hostItem) Title() string {
-	prefix := "[" + displayGroupName(i.host.Group) + "] "
+	prefix := groupPrefix(i.host.Group)
 	if i.host.Alias != "" {
 		return prefix + i.host.Alias
 	}

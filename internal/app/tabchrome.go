@@ -24,9 +24,17 @@ func (a App) tabStripItems() []components.TabItem {
 		title := tab.Title
 		switch tab.Type {
 		case SSHTab:
-			title = fmt.Sprintf("[S] %s", tab.Title)
+			if strings.HasPrefix(tab.Title, "[R]") {
+				title = tab.Title
+			} else {
+				title = fmt.Sprintf("[S] %s", tab.Title)
+			}
 		case LocalTab:
-			title = fmt.Sprintf("[L] %s", tab.Title)
+			if strings.HasPrefix(tab.Title, "[R]") {
+				title = tab.Title
+			} else {
+				title = fmt.Sprintf("[L] %s", tab.Title)
+			}
 		case SFTPTab:
 			title = fmt.Sprintf("[F] %s", tab.Title)
 		case ForwardTab:

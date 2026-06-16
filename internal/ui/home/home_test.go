@@ -2,6 +2,7 @@ package home
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -158,5 +159,51 @@ func TestDualPath_EnterMatchesKeyOrKeymatch(t *testing.T) {
 	kmCfg := keymatch.DefaultConfig()
 	if !kmCfg.MatchConnect(msg) && !key.Matches(msg, m.keys.SSHConnect) {
 		t.Fatal("expected KeyEnter to match via keymatch or key.Matches(SSHConnect)")
+	}
+}
+
+func TestHostCardTitleHidesDefaultGroupAndTabPrefixes(t *testing.T) {
+	h := db.Host{Alias: "prod", Hostname: "prod.example", Group: "Default"}
+
+	title := cardTitle(h, StatusOnline, false, false)
+
+	if !strings.Contains(title, "prod") {
+		t.Fatalf("title = %q, want host name", title)
+	}
+	if strings.Contains(title, "[Default]") || strings.Contains(title, "[L]") || strings.Contains(title, "[S]") || strings.Contains(title, "[R]") {
+		t.Fatalf("title = %q, want no tab prefix or default group", title)
+	}
+}
+
+func TestHostCardTitleShowsNonDefaultGroup(t *testing.T) {
+	h := db.Host{Alias: "prod", Hostname: "prod.example", Group: "Prod"}
+
+	title := cardTitle(h, StatusOnline, false, false)
+
+	if !strings.Contains(title, "[Prod]") || !strings.Contains(title, "prod") {
+		t.Fatalf("title = %q, want non-default group and host name", title)
+	}
+}
+
+func TestHostItemTitleHidesDefaultGroupOnly(t *testing.T) {
+	defaultTitle := hostItem{host: db.Host{Alias: "prod", Group: "Default"}}.Title()
+	prodTitle := hostItem{host: db.Host{Alias: "prod", Group: "Prod"}}.Title()
+
+	if strings.Contains(defaultTitle, "[Default]") {
+		t.Fatalf("default title = %q, want no default group", defaultTitle)
+	}
+	if !strings.Contains(prodTitle, "[Prod]") {
+		t.Fatalf("prod title = %q, want non-default group", prodTitle)
+	}
+}
+
+func TestPeerCardTitleUsesDaemonTagOnly(t *testing.T) {
+	title := peerCardTitle(types.RemotePeer{Name: "workstation.local"}, false)
+
+	if !strings.Contains(title, "[Daemon]") || !strings.Contains(title, "workstation.local") {
+		t.Fatalf("title = %q, want daemon tag and name", title)
+	}
+	if strings.Contains(title, "[R]") || strings.Contains(title, "[L]") || strings.Contains(title, "[S]") {
+		t.Fatalf("title = %q, want no tab prefix", title)
 	}
 }

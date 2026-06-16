@@ -65,15 +65,15 @@ func cardTitle(h db.Host, status HostStatus, selected bool, showStatusWords bool
 	}
 	var prefix string
 	if showStatusWords {
-		prefix = selMark + statusDot(status) + lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(" "+statusWord(status)+" ") + "[" + displayGroupName(h.Group) + "] "
+		prefix = selMark + statusDot(status) + lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(" "+statusWord(status)+" ") + groupPrefix(h.Group)
 	} else {
-		prefix = selMark + statusDot(status) + " [" + displayGroupName(h.Group) + "] "
+		prefix = selMark + statusDot(status) + " " + groupPrefix(h.Group)
 	}
 	name := h.Alias
 	if name == "" {
 		name = h.Hostname
 	}
-	return prefix + "[L]" + name
+	return prefix + name
 }
 
 func peerCardTitle(p types.RemotePeer, selected bool) string {
@@ -81,7 +81,7 @@ func peerCardTitle(p types.RemotePeer, selected bool) string {
 	if selected {
 		selMark = "*"
 	}
-	return selMark + statusDotOnline + " [R]" + p.Name
+	return selMark + statusDotOnline + " [Daemon] " + p.Name
 }
 
 func peerCardDesc(p types.RemotePeer) string {

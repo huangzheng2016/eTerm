@@ -22,7 +22,7 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	title := "[R]" + msg.Peer.Name
 	tabType := LocalTab
 	if msg.Target == "host" {
-		title = msg.Peer.Name + "-" + msg.HostLabel
+		title = "[R]" + msg.Peer.Name + "-" + msg.HostLabel
 		tabType = SSHTab
 	}
 	var toastCmd tea.Cmd

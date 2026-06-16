@@ -50,7 +50,7 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 func (m *Model) View() string {
 	var rows []string
-	rows = append(rows, ui.TitleStyle.Render("[R]"+m.Peer.Name), "")
+	rows = append(rows, ui.TitleStyle.Render(m.Peer.Name), "")
 	rows = append(rows, m.row(0, "LocalShell", "remote local terminal"))
 	for i, h := range m.Hosts {
 		rows = append(rows, m.row(i+1, remoteHostLabel(h), fmt.Sprintf("%s@%s:%d", h.Username, h.Hostname, h.Port)))
