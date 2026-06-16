@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/app"
 	"github.com/huangzheng2016/eTerm/internal/config"
-	"github.com/huangzheng2016/eTerm/internal/daemon"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
@@ -143,23 +141,6 @@ func main() {
 	}
 
 	masterKey.Lock()
-}
-
-func runDaemon(args []string) {
-	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
-	dbPath := fs.String("c", "", "path to SQLite database file (default: ~/.config/eterm/eterm.db)")
-	password := fs.String("password", "", "master password (env: ETERM_MASTER_PASSWORD)")
-	name := fs.String("name", "", "peer display name (default: hostname)")
-	fs.Parse(args)
-
-	if err := daemon.Run(context.Background(), daemon.Config{
-		DBPath:   *dbPath,
-		Password: *password,
-		Name:     *name,
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "eterm daemon: %v\n", err)
-		os.Exit(1)
-	}
 }
 
 func splitUpgradeCommand(args []string) (bool, []string) {
