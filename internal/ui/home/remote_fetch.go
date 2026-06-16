@@ -12,21 +12,25 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
-func (m Model) loadRemoteSummary() ([]types.RemotePeer, []types.RemoteHost) {
+func (m Model) loadRemoteSummary() ([]types.RemotePeer, []types.RemoteHost, error) {
 	cfg := esync.LoadConfig(m.db, m.masterKey)
 	if !cfg.Enabled || cfg.Mode != "http" || cfg.ServerURL == "" || cfg.Passphrase == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	client := esync.HTTPClient(3*time.Second, cfg.InsecureTLS)
 	tenant := cfg.TenantID()
 	var peersResp struct {
 		Peers []types.RemotePeer `json:"peers"`
 	}
-	_ = getJSON(client, cfg.ServerURL, "/api/v1/peers", cfg.APIKey, tenant, &peersResp)
+	if err := getJSON(client, cfg.ServerURL, "/api/v1/peers", cfg.APIKey, tenant, &peersResp); err != nil {
+		return nil, nil, err
+	}
 	var hostsResp struct {
 		Hosts []types.RemoteHost `json:"hosts"`
 	}
-	_ = getJSON(client, cfg.ServerURL, "/api/v1/hosts", cfg.APIKey, tenant, &hostsResp)
+	if err := getJSON(client, cfg.ServerURL, "/api/v1/hosts", cfg.APIKey, tenant, &hostsResp); err != nil {
+		return nil, nil, err
+	}
 	sort.Slice(peersResp.Peers, func(i, j int) bool { return peersResp.Peers[i].Name < peersResp.Peers[j].Name })
 	sort.Slice(hostsResp.Hosts, func(i, j int) bool {
 		li := remoteHostLabel(hostsResp.Hosts[i])
@@ -36,7 +40,7 @@ func (m Model) loadRemoteSummary() ([]types.RemotePeer, []types.RemoteHost) {
 		}
 		return li < lj
 	})
-	return peersResp.Peers, hostsResp.Hosts
+	return peersResp.Peers, hostsResp.Hosts, nil
 }
 
 func getJSON(client *http.Client, serverURL, path, apiKey, tenant string, out interface{}) error {

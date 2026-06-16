@@ -207,3 +207,36 @@ func TestPeerCardTitleUsesDaemonTagOnly(t *testing.T) {
 		t.Fatalf("title = %q, want no tab prefix", title)
 	}
 }
+
+func TestHostsLoadedKeepsExistingRemotePeers(t *testing.T) {
+	m, h := loadedModel(t)
+	m.remotePeers = []types.RemotePeer{{ID: "peer-1", Name: "daemon"}}
+
+	out, _ := m.Update(hostsLoadedMsg{hosts: []db.Host{*h}})
+	m = out.(Model)
+
+	if len(m.remotePeers) != 1 || m.remotePeers[0].Name != "daemon" {
+		t.Fatalf("remote peers = %#v, want existing peer preserved", m.remotePeers)
+	}
+}
+
+func TestRemoteLoadedRefreshesDaemonCardsFirst(t *testing.T) {
+	m, h := loadedModel(t)
+
+	out, _ := m.Update(types.RemoteDaemonLoadedMsg{Peers: []types.RemotePeer{{ID: "peer-1", Name: "daemon"}}})
+	m = out.(Model)
+	entries := m.gridEntries()
+
+	if len(entries) < 2 {
+		t.Fatalf("entries = %d, want remote peer and local host", len(entries))
+	}
+	if entries[0].peer == nil || entries[0].peer.Name != "daemon" {
+		t.Fatalf("first entry = %#v, want remote peer first", entries[0])
+	}
+	if entries[1].host == nil || entries[1].host.ID != h.ID {
+		t.Fatalf("second entry = %#v, want local host", entries[1])
+	}
+	if m.gridCursor != 1 {
+		t.Fatalf("gridCursor = %d, want original host selection at index 1", m.gridCursor)
+	}
+}

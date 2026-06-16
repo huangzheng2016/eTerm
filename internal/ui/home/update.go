@@ -12,7 +12,7 @@ import (
 const doubleClickWindow = 450 * time.Millisecond
 
 func (m Model) Init() tea.Cmd {
-	return m.loadHosts()
+	return m.reloadHosts()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -30,8 +30,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.allHosts = msg.hosts
-		m.remotePeers = msg.remotePeers
-		m.remoteHosts = msg.remoteHosts
 		m.allTags = collectAllTags(msg.hosts)
 		m.loaded = true
 		m.gridStatusWords = readGridStatusWords(m.db)
@@ -57,6 +55,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Trigger async host status probing
 		return m, probeHosts(msg.hosts)
 
+	case types.RemoteDaemonLoadedMsg:
+		if msg.Err != nil {
+			return m, nil
+		}
+		selectedHostID := uint(0)
+		if h := m.SelectedHost(); h != nil {
+			selectedHostID = h.ID
+		}
+		m.remotePeers = msg.Peers
+		m.remoteHosts = msg.Hosts
+		if selectedHostID != 0 {
+			entries := m.gridEntries()
+			for i, entry := range entries {
+				if entry.host != nil && entry.host.ID == selectedHostID {
+					m.gridCursor = i
+					break
+				}
+			}
+		}
+		return m, nil
+
 	case probeResultMsg:
 		if m.hostStatus == nil {
 			m.hostStatus = make(map[uint]HostStatus)
@@ -65,13 +84,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, readProbe(msg.ch)
 
 	case types.RefreshListMsg:
-		return m, m.loadHosts()
+		return m, m.reloadHosts()
 
 	case types.HostDeletedMsg:
-		return m, m.loadHosts()
+		return m, m.reloadHosts()
 
 	case types.HostSavedMsg:
-		return m, m.loadHosts()
+		return m, m.reloadHosts()
 
 	case tea.MouseClickMsg:
 		if m2, c, done := m.handleGridMouse(msg); done {
@@ -89,4 +108,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) reloadHosts() tea.Cmd {
+	return tea.Batch(
+		m.loadHosts(),
+		func() tea.Msg { return types.RemoteDaemonLoadingMsg{} },
+		m.loadRemote(),
+	)
 }

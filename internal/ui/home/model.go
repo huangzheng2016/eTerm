@@ -66,10 +66,8 @@ func (i hostItem) Description() string {
 }
 
 type hostsLoadedMsg struct {
-	hosts       []db.Host
-	remotePeers []types.RemotePeer
-	remoteHosts []types.RemoteHost
-	err         error
+	hosts []db.Host
+	err   error
 }
 
 type viewMode int
@@ -340,8 +338,14 @@ func (m Model) loadHosts() tea.Cmd {
 	return func() tea.Msg {
 		var hosts []db.Host
 		err := m.db.Order("last_connected_at DESC NULLS LAST, alias ASC").Find(&hosts).Error
-		peers, remoteHosts := m.loadRemoteSummary()
-		return hostsLoadedMsg{hosts: hosts, remotePeers: peers, remoteHosts: remoteHosts, err: err}
+		return hostsLoadedMsg{hosts: hosts, err: err}
+	}
+}
+
+func (m Model) loadRemote() tea.Cmd {
+	return func() tea.Msg {
+		peers, hosts, err := m.loadRemoteSummary()
+		return types.RemoteDaemonLoadedMsg{Peers: peers, Hosts: hosts, Err: err}
 	}
 }
 
