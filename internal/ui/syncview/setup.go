@@ -78,12 +78,13 @@ func (m *Model) loadFromDB() {
 		m.enableIdx = 1
 	}
 	switch get("sync_mode", "http") {
-	case "https":
-		m.modeIdx = 1
 	case "ssh":
-		m.modeIdx = 2
+		m.modeIdx = 1
 	default:
 		m.modeIdx = 0
+	}
+	if get("sync_insecure_tls", "false") == "true" {
+		m.insecureIdx = 1
 	}
 
 	m.inputs[inRemoteBin].SetValue(get("sync_remote_bin", ""))

@@ -9,17 +9,18 @@ import (
 )
 
 type Config struct {
-	Enabled    bool
-	Mode       string // "ssh", "http", "https"
-	SSHHostID  uint
-	RemoteBin  string
-	RemoteDB   string
-	ServerURL  string
-	APIKey     string // plaintext
-	Passphrase string // plaintext
-	Interval   int    // seconds
-	DeviceID   string
-	LastRev    int64
+	Enabled     bool
+	Mode        string // "http", "ssh"
+	SSHHostID   uint
+	RemoteBin   string
+	RemoteDB    string
+	ServerURL   string
+	InsecureTLS bool
+	APIKey      string // plaintext
+	Passphrase  string // plaintext
+	Interval    int    // seconds
+	DeviceID    string
+	LastRev     int64
 }
 
 func (c Config) TenantID() string {
@@ -55,17 +56,22 @@ func LoadConfig(database *gorm.DB, mk *security.MasterKeyManager) Config {
 	lastRev, _ := strconv.ParseInt(get("sync_last_rev", "0"), 10, 64)
 	hostID, _ := strconv.ParseUint(get("sync_ssh_host_id", "0"), 10, 64)
 
+	mode := get("sync_mode", "http")
+	if mode == "https" {
+		mode = "http"
+	}
 	return Config{
-		Enabled:    get("sync_enabled", "false") == "true",
-		Mode:       get("sync_mode", "http"),
-		SSHHostID:  uint(hostID),
-		RemoteBin:  get("sync_remote_bin", "etermsyncd"),
-		RemoteDB:   get("sync_remote_db", "~/.config/etermsyncd/sync.db"),
-		ServerURL:  get("sync_server_url", ""),
-		APIKey:     decrypt("sync_api_key"),
-		Passphrase: decrypt("sync_passphrase"),
-		Interval:   interval,
-		DeviceID:   get("sync_device_id", ""),
-		LastRev:    lastRev,
+		Enabled:     get("sync_enabled", "false") == "true",
+		Mode:        mode,
+		SSHHostID:   uint(hostID),
+		RemoteBin:   get("sync_remote_bin", "etermsyncd"),
+		RemoteDB:    get("sync_remote_db", "~/.config/etermsyncd/sync.db"),
+		ServerURL:   get("sync_server_url", ""),
+		InsecureTLS: get("sync_insecure_tls", "false") == "true",
+		APIKey:      decrypt("sync_api_key"),
+		Passphrase:  decrypt("sync_passphrase"),
+		Interval:    interval,
+		DeviceID:    get("sync_device_id", ""),
+		LastRev:     lastRev,
 	}
 }

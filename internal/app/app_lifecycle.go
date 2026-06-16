@@ -70,7 +70,7 @@ func (a App) runSync() tea.Cmd {
 			}
 			tr, err = esync.NewSSHTransport(result.Client, result.Closers, cfg.RemoteBin, cfg.RemoteDB)
 		default:
-			tr = esync.NewHTTPTransportWithTenant(cfg.ServerURL, cfg.APIKey, cfg.TenantID())
+			tr = esync.NewHTTPTransportWithOptions(cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS)
 		}
 		if err != nil {
 			return types.SyncResultMsg{Err: err}

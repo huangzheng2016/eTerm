@@ -9,16 +9,16 @@ import (
 )
 
 var (
-	formStyle     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7D56F4")).Padding(1, 3).Width(60)
-	labelStyle    = lipgloss.NewStyle().Width(16).Foreground(lipgloss.Color("#7D56F4"))
-	focusLabel    = lipgloss.NewStyle().Width(16).Foreground(lipgloss.Color("#FF79C6")).Bold(true)
-	arrowStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#666"))
-	arrowFocus    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
-	selStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230"))
-	selFocus      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).Bold(true)
-	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230"))
-	hintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
-	errStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
+	formStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7D56F4")).Padding(1, 3).Width(60)
+	labelStyle  = lipgloss.NewStyle().Width(16).Foreground(lipgloss.Color("#7D56F4"))
+	focusLabel  = lipgloss.NewStyle().Width(16).Foreground(lipgloss.Color("#FF79C6")).Bold(true)
+	arrowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666"))
+	arrowFocus  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6"))
+	selStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("230"))
+	selFocus    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF79C6")).Bold(true)
+	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230"))
+	hintStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
+	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
 )
 
 func (m *Model) View() tea.View {
@@ -41,6 +41,8 @@ func (m *Model) View() tea.View {
 			value = m.renderSelector(enableOptions[m.enableIdx], focused)
 		case fieldMode:
 			value = m.renderSelector(modeOptions[m.modeIdx], focused)
+		case fieldInsecureTLS:
+			value = m.renderSelector(insecureOptions[m.insecureIdx], focused)
 		case fieldSSHHost:
 			name := "(none)"
 			if m.hostIdx >= 0 && m.hostIdx < len(m.hostOpts) {
@@ -70,7 +72,6 @@ func (m *Model) View() tea.View {
 	return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box))
 }
 
-
 func (m *Model) renderSelector(text string, focused bool) string {
 	as := arrowStyle
 	ss := selStyle
@@ -95,6 +96,8 @@ func (m *Model) fieldLabel(f int) string {
 		return "Remote DB"
 	case fieldServerURL:
 		return "Server URL"
+	case fieldInsecureTLS:
+		return "Insecure TLS"
 	case fieldAPIKey:
 		return "API Key"
 	case fieldPassphrase:

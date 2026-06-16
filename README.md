@@ -13,8 +13,8 @@
 - **密钥库** -- 生成、导入、导出 SSH 密钥，本地加密存储
 - **网络** -- ProxyJump、ProxyCommand、HTTP/SOCKS5 代理、本地/远程/动态端口转发
 - **命令片段** -- 可复用命令模板，一键粘贴到 SSH 会话
-- **多设备同步** -- 默认通过 HTTP/HTTPS 同步主机、密钥、片段等数据到远程服务端；age 加密传输，服务端只存密文
-- **远程 LocalShell** -- HTTP/HTTPS 同步模式下，两台同租户 eTerm 可通过 syncd 中转打开对方的本地终端或已同步 SSH 主机
+- **多设备同步** -- 默认通过 HTTP 同步主机、密钥、片段等数据到远程服务端；age 加密传输，服务端只存密文
+- **远程 LocalShell** -- HTTP 同步模式下，两台同租户 eTerm 可通过 syncd 中转打开对方的本地终端或已同步 SSH 主机
 - **可配置快捷键** -- 所有快捷键均可在设置页修改，支持多键绑定
 - **主密码管理** -- 设置页可修改主密码，自动重加密所有敏感字段
 - **隐藏主机** -- 给主机打 `hidden` 标签隐藏，`H` 切换显示
@@ -114,9 +114,9 @@ go build -o etermsyncd ./cmd/etermsyncd
 
 ## 多设备同步
 
-ESC 菜单 -> Sync 打开同步设置。支持 HTTP/HTTPS 与 SSH stdio 两种传输模式。HTTP/HTTPS 是默认模式，也是远程 LocalShell / 远程主机 shell 唯一支持的模式。
+ESC 菜单 -> Sync 打开同步设置。支持 HTTP 与 SSH stdio 两种传输模式。HTTP 是默认模式，也是远程 LocalShell / 远程主机 shell 唯一支持的模式。
 
-**HTTP/HTTPS 模式**：etermsyncd 作为常驻服务运行，客户端通过 HTTP API 同步。需要 Bearer token 鉴权。
+**HTTP 模式**：etermsyncd 作为常驻服务运行，客户端通过 HTTP API 同步。需要 Bearer token 鉴权。Server URL 可填写 `https://...` 或 `http://...`；不写 scheme 时先尝试 HTTPS，失败后回退 HTTP。自签名证书可在 Sync 设置中打开 Insecure TLS。
 
 ```bash
 # 启动服务端（HTTP 模式必须设置 API key）

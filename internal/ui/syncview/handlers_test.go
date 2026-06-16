@@ -38,7 +38,7 @@ func TestSaveReportsMissingMasterKeyForSecrets(t *testing.T) {
 	}
 	m := New(database, security.NewMasterKeyManager(nil, nil, time.Minute))
 	m.enableIdx = 1
-	m.modeIdx = 1
+	m.modeIdx = 0
 	m.inputs[inServerURL].SetValue("https://sync.example.com")
 	m.inputs[inPassphrase].SetValue("secret")
 

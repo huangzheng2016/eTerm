@@ -78,8 +78,8 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 	if !sc.Enabled {
 		return nil, errors.New("sync is disabled")
 	}
-	if sc.Mode != "http" && sc.Mode != "https" {
-		return nil, errors.New("remote shell daemon requires HTTP or HTTPS sync mode")
+	if sc.Mode != "http" {
+		return nil, errors.New("remote shell daemon requires HTTP sync mode")
 	}
 	if sc.ServerURL == "" {
 		return nil, errors.New("sync server URL is required")
@@ -155,17 +155,11 @@ func runLoop(ctx context.Context, rt *runtimeConfig) error {
 }
 
 func runOnce(ctx context.Context, rt *runtimeConfig) error {
-	wsURL := strings.TrimRight(rt.sync.ServerURL, "/") + "/api/v1/ws/daemon"
-	if strings.HasPrefix(wsURL, "http://") {
-		wsURL = "ws://" + strings.TrimPrefix(wsURL, "http://")
-	} else if strings.HasPrefix(wsURL, "https://") {
-		wsURL = "wss://" + strings.TrimPrefix(wsURL, "https://")
-	}
 	header := http.Header{}
 	if rt.sync.APIKey != "" {
 		header.Set("Authorization", "Bearer "+rt.sync.APIKey)
 	}
-	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: header})
+	c, err := dialDaemon(ctx, esync.WSURLCandidates(rt.sync.ServerURL, "/api/v1/ws/daemon"), header, rt.sync.InsecureTLS)
 	if err != nil {
 		return err
 	}
@@ -224,6 +218,23 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 			}
 		}
 	}
+}
+
+func dialDaemon(ctx context.Context, urls []string, header http.Header, insecureTLS bool) (*websocket.Conn, error) {
+	var lastErr error
+	client := esync.HTTPClient(30*time.Second, insecureTLS)
+	for _, u := range urls {
+		conn, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{HTTPHeader: header, HTTPClient: client})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return conn, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("server URL is required")
 }
 
 func openTarget(rt *runtimeConfig, payload []byte) (*internalssh.InteractiveSession, error) {

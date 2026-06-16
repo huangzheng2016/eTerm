@@ -2,9 +2,7 @@ package syncview
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -67,6 +65,8 @@ func (m *Model) handleSelectorLeft(f int) {
 	case fieldMode:
 		m.modeIdx = (m.modeIdx - 1 + len(modeOptions)) % len(modeOptions)
 		m.clampFocus()
+	case fieldInsecureTLS:
+		m.insecureIdx = (m.insecureIdx - 1 + len(insecureOptions)) % len(insecureOptions)
 	case fieldSSHHost:
 		if m.hostIdx > -1 {
 			m.hostIdx--
@@ -81,6 +81,8 @@ func (m *Model) handleSelectorRight(f int) {
 	case fieldMode:
 		m.modeIdx = (m.modeIdx + 1) % len(modeOptions)
 		m.clampFocus()
+	case fieldInsecureTLS:
+		m.insecureIdx = (m.insecureIdx + 1) % len(insecureOptions)
 	case fieldSSHHost:
 		if m.hostIdx < len(m.hostOpts)-1 {
 			m.hostIdx++
@@ -97,11 +99,11 @@ func (m *Model) clampFocus() {
 
 func (m *Model) save() tea.Cmd {
 	if m.enableIdx == 1 {
-		if m.modeIdx == 2 && m.hostIdx < 0 {
+		if m.modeIdx == 1 && m.hostIdx < 0 {
 			m.err = "SSH Host is required"
 			return nil
 		}
-		if m.modeIdx < 2 && m.inputs[inServerURL].Value() == "" {
+		if m.modeIdx == 0 && m.inputs[inServerURL].Value() == "" {
 			m.err = "Server URL is required"
 			return nil
 		}
@@ -121,9 +123,11 @@ func (m *Model) save() tea.Cmd {
 	}
 	mode := "http"
 	if m.modeIdx == 1 {
-		mode = "https"
-	} else if m.modeIdx == 2 {
 		mode = "ssh"
+	}
+	insecureTLS := "false"
+	if m.insecureIdx == 1 {
+		insecureTLS = "true"
 	}
 
 	hostID := ""
@@ -148,6 +152,7 @@ func (m *Model) save() tea.Cmd {
 			{"sync_remote_bin", remoteBin},
 			{"sync_remote_db", remoteDB},
 			{"sync_server_url", serverURL},
+			{"sync_insecure_tls", insecureTLS},
 			{"sync_interval", interval},
 		} {
 			if err := set(kv[0], kv[1]); err != nil {
@@ -203,6 +208,7 @@ func (m *Model) save() tea.Cmd {
 func (m *Model) testConnection() tea.Cmd {
 	serverURL := m.inputs[inServerURL].Value()
 	apiKey := m.inputs[inAPIKey].Value()
+	insecureTLS := m.insecureIdx == 1
 	mode := m.modeIdx
 	remoteBin := m.inputs[inRemoteBin].Value()
 	remoteDB := m.inputs[inRemoteDB].Value()
@@ -212,7 +218,7 @@ func (m *Model) testConnection() tea.Cmd {
 	mk := m.masterKey
 
 	return func() tea.Msg {
-		if mode == 2 {
+		if mode == 1 {
 			if remoteBin == "" {
 				remoteBin = "etermsyncd"
 			}
@@ -268,23 +274,11 @@ func (m *Model) testConnection() tea.Cmd {
 			}
 			return types.SyncTestResultMsg{OK: true}
 		}
-		url := serverURL + "/api/v1/ping"
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
+		tr := esync.NewHTTPTransportWithOptions(serverURL, apiKey, "", insecureTLS)
+		defer tr.Close()
+		if err := tr.Ping(); err != nil {
 			return types.SyncTestResultMsg{Err: err}
 		}
-		if apiKey != "" {
-			req.Header.Set("Authorization", "Bearer "+apiKey)
-		}
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return types.SyncTestResultMsg{Err: err}
-		}
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			return types.SyncTestResultMsg{OK: true}
-		}
-		return types.SyncTestResultMsg{Err: fmt.Errorf("HTTP %d", resp.StatusCode)}
+		return types.SyncTestResultMsg{OK: true}
 	}
 }

@@ -8,15 +8,16 @@ import (
 )
 
 const (
-	fieldEnabled    = 0
-	fieldMode       = 1
-	fieldSSHHost    = 2 // selector (Host)
-	fieldRemoteBin  = 3
-	fieldRemoteDB   = 4
-	fieldServerURL  = 5
-	fieldAPIKey     = 6
-	fieldPassphrase = 7
-	fieldInterval   = 8
+	fieldEnabled     = 0
+	fieldMode        = 1
+	fieldSSHHost     = 2 // selector (Host)
+	fieldRemoteBin   = 3
+	fieldRemoteDB    = 4
+	fieldServerURL   = 5
+	fieldInsecureTLS = 6
+	fieldAPIKey      = 7
+	fieldPassphrase  = 8
+	fieldInterval    = 9
 )
 
 const inputCount = 6
@@ -32,21 +33,23 @@ const (
 )
 
 var enableOptions = []string{"Off", "On"}
-var modeOptions = []string{"HTTP", "HTTPS", "SSH"}
+var modeOptions = []string{"HTTP", "SSH"}
+var insecureOptions = []string{"Off", "On"}
 
 const inputInnerWidth = 39
 
 type Model struct {
-	db        *gorm.DB
-	masterKey *security.MasterKeyManager
-	inputs    [inputCount]textinput.Model
-	enableIdx int
-	modeIdx   int
-	hostIdx   int // SSH host selector, -1 = none
-	hostOpts  []db.Host
-	focused   int
-	width     int
-	height    int
-	err       string
-	testing   bool
+	db          *gorm.DB
+	masterKey   *security.MasterKeyManager
+	inputs      [inputCount]textinput.Model
+	enableIdx   int
+	modeIdx     int
+	insecureIdx int
+	hostIdx     int // SSH host selector, -1 = none
+	hostOpts    []db.Host
+	focused     int
+	width       int
+	height      int
+	err         string
+	testing     bool
 }

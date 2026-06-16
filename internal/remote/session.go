@@ -8,12 +8,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	esync "github.com/huangzheng2016/eTerm/internal/sync"
 )
 
 type openPayload struct {
@@ -29,13 +30,7 @@ type wsStdin struct {
 	mu       sync.Mutex
 }
 
-func Open(ctx context.Context, serverURL, apiKey, tenant, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
-	wsURL := strings.TrimRight(serverURL, "/") + "/api/v1/ws/client"
-	if strings.HasPrefix(wsURL, "http://") {
-		wsURL = "ws://" + strings.TrimPrefix(wsURL, "http://")
-	} else if strings.HasPrefix(wsURL, "https://") {
-		wsURL = "wss://" + strings.TrimPrefix(wsURL, "https://")
-	}
+func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
 	header := http.Header{}
 	if apiKey != "" {
 		header.Set("Authorization", "Bearer "+apiKey)
@@ -43,7 +38,7 @@ func Open(ctx context.Context, serverURL, apiKey, tenant, peerID, target, hostSy
 	if tenant != "" {
 		header.Set("X-ETerm-Tenant", tenant)
 	}
-	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: header})
+	conn, err := dial(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/client"), header, insecureTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +69,23 @@ func Open(ctx context.Context, serverURL, apiKey, tenant, peerID, target, hostSy
 			return sessionFromConn(ctx, conn, streamID, rows, cols), nil
 		}
 	}
+}
+
+func dial(ctx context.Context, urls []string, header http.Header, insecureTLS bool) (*websocket.Conn, error) {
+	var lastErr error
+	client := esync.HTTPClient(30*time.Second, insecureTLS)
+	for _, u := range urls {
+		conn, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{HTTPHeader: header, HTTPClient: client})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return conn, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("server URL is required")
 }
 
 func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int) *internalssh.InteractiveSession {
