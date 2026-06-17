@@ -93,6 +93,13 @@ func (bc *bufferedConn) Read(p []byte) (int, error) {
 	return bc.r.Read(p)
 }
 
+func (bc *bufferedConn) SetNoDelay(noDelay bool) error {
+	if nd, ok := bc.Conn.(interface{ SetNoDelay(bool) error }); ok {
+		return nd.SetNoDelay(noDelay)
+	}
+	return nil
+}
+
 func dialHTTPConnect(proxyAddr, targetAddr, user, pass string) (net.Conn, error) {
 	c, err := net.DialTimeout("tcp", proxyAddr, 30*time.Second)
 	if err != nil {

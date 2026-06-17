@@ -39,6 +39,7 @@ func StartDynamicForward(client *ssh.Client, localPort int) (*PortForwardCloser,
 
 func handleSOCKSConn(client *ssh.Client, c net.Conn, done <-chan struct{}) {
 	defer c.Close()
+	setNoDelay(c)
 	br := bufio.NewReader(c)
 
 	// Negotiation: VER, NMETHODS, METHODS...

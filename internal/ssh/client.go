@@ -75,6 +75,7 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 			closeAll(closers)
 			return nil, fmt.Errorf("failed to connect to jump host: %w", err)
 		}
+		setNoDelay(jumpConn)
 		jumpNcc, jumpChans, jumpReqs, err := ssh.NewClientConn(jumpConn, jumpAddr, jumpConfig)
 		if err != nil {
 			_ = jumpConn.Close()
@@ -111,6 +112,7 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 		closeAll(closers)
 		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
+	setNoDelay(tcpConn)
 	ncc, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, clientConfig)
 	if err != nil {
 		_ = tcpConn.Close()

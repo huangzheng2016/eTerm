@@ -98,8 +98,8 @@ func NewInteractiveSession(client *ssh.Client, rows, cols int, forwardAgent bool
 
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
-		ssh.TTY_OP_ISPEED: 14400,
-		ssh.TTY_OP_OSPEED: 14400,
+		ssh.TTY_OP_ISPEED: 115200,
+		ssh.TTY_OP_OSPEED: 115200,
 	}
 	if err := sess.RequestPty("xterm-256color", rows, cols, modes); err != nil {
 		_ = sess.Close()

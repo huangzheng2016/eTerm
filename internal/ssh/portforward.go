@@ -47,6 +47,7 @@ func StartLocalForward(client *ssh.Client, localPort int, remoteHost string, rem
 			}
 			go func(local net.Conn) {
 				defer local.Close()
+				setNoDelay(local)
 				remote, err := client.Dial("tcp", remoteAddr)
 				if err != nil {
 					return
@@ -88,6 +89,7 @@ func StartRemoteForward(client *ssh.Client, remotePort int, localHost string, lo
 					return
 				}
 				defer local.Close()
+				setNoDelay(local)
 				copyBidi(remote, local, pfc.done)
 			}(conn)
 		}

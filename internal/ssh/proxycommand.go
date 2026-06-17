@@ -24,6 +24,7 @@ func (c *proxyCommandConn) RemoteAddr() net.Addr          { return dummyAddr("pr
 func (c *proxyCommandConn) SetDeadline(_ time.Time) error      { return nil }
 func (c *proxyCommandConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (c *proxyCommandConn) SetWriteDeadline(_ time.Time) error { return nil }
+func (c *proxyCommandConn) SetNoDelay(_ bool) error            { return nil }
 
 func (c *proxyCommandConn) Close() error {
 	_ = c.stdin.Close()
