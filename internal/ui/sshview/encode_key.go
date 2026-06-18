@@ -1,6 +1,7 @@
 package sshview
 
 import (
+	"fmt"
 	"unicode"
 	"unicode/utf8"
 
@@ -61,35 +62,77 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 	// Special keys by Code
 	switch k.Code {
 	case tea.KeyEnter:
+		if seq, ok := modifiedCSIU(13, mod); ok {
+			return seq
+		}
 		return []byte{'\r'}
 	case tea.KeyTab:
-		if shift {
+		if mod == tea.ModShift {
 			return []byte("\x1b[Z")
+		}
+		if seq, ok := modifiedCSIU(9, mod); ok {
+			return seq
 		}
 		return []byte{'\t'}
 	case tea.KeyBackspace:
+		if seq, ok := modifiedCSIU(127, mod); ok {
+			return seq
+		}
 		return []byte{0x7f}
 	case tea.KeyEscape:
+		if seq, ok := modifiedCSIU(27, mod); ok {
+			return seq
+		}
 		return []byte{0x1b}
 	case tea.KeyUp:
+		if seq, ok := modifiedCursorKey('A', mod); ok {
+			return seq
+		}
 		return cursorKey(ack, 'A')
 	case tea.KeyDown:
+		if seq, ok := modifiedCursorKey('B', mod); ok {
+			return seq
+		}
 		return cursorKey(ack, 'B')
 	case tea.KeyRight:
+		if seq, ok := modifiedCursorKey('C', mod); ok {
+			return seq
+		}
 		return cursorKey(ack, 'C')
 	case tea.KeyLeft:
+		if seq, ok := modifiedCursorKey('D', mod); ok {
+			return seq
+		}
 		return cursorKey(ack, 'D')
 	case tea.KeyInsert:
+		if seq, ok := modifiedTildeKey(2, mod); ok {
+			return seq
+		}
 		return []byte("\x1b[2~")
 	case tea.KeyDelete:
+		if seq, ok := modifiedTildeKey(3, mod); ok {
+			return seq
+		}
 		return []byte("\x1b[3~")
 	case tea.KeyHome:
+		if seq, ok := modifiedCursorKey('H', mod); ok {
+			return seq
+		}
 		return []byte("\x1b[H")
 	case tea.KeyEnd:
+		if seq, ok := modifiedCursorKey('F', mod); ok {
+			return seq
+		}
 		return []byte("\x1b[F")
 	case tea.KeyPgUp:
+		if seq, ok := modifiedTildeKey(5, mod); ok {
+			return seq
+		}
 		return []byte("\x1b[5~")
 	case tea.KeyPgDown:
+		if seq, ok := modifiedTildeKey(6, mod); ok {
+			return seq
+		}
 		return []byte("\x1b[6~")
 	case tea.KeyF1:
 		return []byte("\x1bOP")
@@ -179,4 +222,36 @@ func cursorKey(appMode bool, ch byte) []byte {
 		return []byte{0x1b, 'O', ch}
 	}
 	return []byte{0x1b, '[', ch}
+}
+
+func modifierParam(mod tea.KeyMod) (int, bool) {
+	mod &= tea.ModShift | tea.ModAlt | tea.ModCtrl | tea.ModMeta
+	if mod == 0 {
+		return 0, false
+	}
+	return int(mod) + 1, true
+}
+
+func modifiedCSIU(code int, mod tea.KeyMod) ([]byte, bool) {
+	p, ok := modifierParam(mod)
+	if !ok {
+		return nil, false
+	}
+	return []byte(fmt.Sprintf("\x1b[%d;%du", code, p)), true
+}
+
+func modifiedCursorKey(ch byte, mod tea.KeyMod) ([]byte, bool) {
+	p, ok := modifierParam(mod)
+	if !ok {
+		return nil, false
+	}
+	return []byte(fmt.Sprintf("\x1b[1;%d%c", p, ch)), true
+}
+
+func modifiedTildeKey(code int, mod tea.KeyMod) ([]byte, bool) {
+	p, ok := modifierParam(mod)
+	if !ok {
+		return nil, false
+	}
+	return []byte(fmt.Sprintf("\x1b[%d;%d~", code, p)), true
 }
