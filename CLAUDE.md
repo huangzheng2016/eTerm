@@ -1,3 +1,7 @@
+## Branch
+- `master` is the primary branch. Build, tag, and release from `master`.
+- Do not tag or release from `main` (it is stale and has been deleted upstream).
+
 ## Output
 - Return code first. Explanation after, only if non-obvious.
 - No inline prose. Use comments sparingly - only where logic is unclear.
