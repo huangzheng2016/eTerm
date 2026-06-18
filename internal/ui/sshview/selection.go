@@ -19,6 +19,28 @@ type selection struct {
 	caret    selPoint
 }
 
+func (m *Model) DraggingSelection() bool {
+	return m.sel.dragging
+}
+
+func (m *Model) clampMouse(x, y int) (int, int) {
+	w := m.emu.Width()
+	h := m.emu.Height()
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	if w > 0 && x >= w {
+		x = w - 1
+	}
+	if h > 0 && y >= h {
+		y = h - 1
+	}
+	return x, y
+}
+
 // visibleAbsLine maps a content-relative row (0-based, within the SSH body) to an
 // absolute line. It mirrors the window split in renderScrollback so highlighting and
 // hit-testing agree.

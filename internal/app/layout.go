@@ -2,6 +2,7 @@ package app
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
 // reflowWindow re-sends the last known size so tab models pick up chrome (e.g. help row) changes.
@@ -90,20 +91,59 @@ func appAdjustMouseForTabContent(a App, msg tea.Msg) tea.Msg {
 		return tea.MouseWheelMsg(mm)
 	case tea.MouseMotionMsg:
 		if m.Y < top || m.Y >= top+contentH {
-			return nil
+			if !activeSSHDraggingSelection(a) {
+				return nil
+			}
+			mm := m.Mouse()
+			mm.X, mm.Y = clampContentMouse(a.width, contentH, mm.X, mm.Y-top)
+			return tea.MouseMotionMsg(mm)
 		}
 		mm := m.Mouse()
 		mm.Y -= top
 		return tea.MouseMotionMsg(mm)
 	case tea.MouseReleaseMsg:
 		if m.Y < top || m.Y >= top+contentH {
-			return nil
+			if !activeSSHDraggingSelection(a) {
+				return nil
+			}
+			mm := m.Mouse()
+			mm.X, mm.Y = clampContentMouse(a.width, contentH, mm.X, mm.Y-top)
+			return tea.MouseReleaseMsg(mm)
 		}
 		mm := m.Mouse()
 		mm.Y -= top
 		return tea.MouseReleaseMsg(mm)
 	}
 	return msg
+}
+
+func activeSSHDraggingSelection(a App) bool {
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return false
+	}
+	switch a.tabs[a.activeTab].Type {
+	case SSHTab, LocalTab:
+	default:
+		return false
+	}
+	m, ok := a.tabs[a.activeTab].Model.(*sshview.Model)
+	return ok && m.DraggingSelection()
+}
+
+func clampContentMouse(w, h, x, y int) (int, int) {
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	if w > 0 && x >= w {
+		x = w - 1
+	}
+	if h > 0 && y >= h {
+		y = h - 1
+	}
+	return x, y
 }
 
 func ptyFromAppSizeForTab(a App, tabType TabType) (cols, rows int) {

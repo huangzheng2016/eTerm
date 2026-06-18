@@ -41,6 +41,10 @@ type StreamDoneMsg struct {
 	Err      error
 }
 
+type selectionAutoScrollMsg struct {
+	StreamID uint64
+}
+
 // Model streams PTY output through a virtual terminal and forwards keys to the SSH session.
 type Model struct {
 	sess     *internalssh.InteractiveSession
@@ -72,6 +76,9 @@ type Model struct {
 
 	// Mouse drag text selection over the visible screen + scrollback.
 	sel selection
+
+	selectionAutoScrollDir    int
+	selectionAutoScrollQueued bool
 
 	// Configurable keybindings
 	vk viewkeys.SSHKeys
@@ -396,7 +403,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Button == tea.MouseLeft {
-			p := selPoint{line: m.visibleAbsLine(msg.Y), col: msg.X}
+			x, y := m.clampMouse(msg.X, msg.Y)
+			p := selPoint{line: m.visibleAbsLine(y), col: x}
 			m.sel = selection{active: true, dragging: true, anchor: p, caret: p}
 		}
 		return m, nil
@@ -408,8 +416,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sel.dragging {
 			return m, nil
 		}
-		m.sel.caret = selPoint{line: m.visibleAbsLine(msg.Y), col: msg.X}
-		return m, nil
+		x, y := m.clampMouse(msg.X, msg.Y)
+		m.sel.caret = selPoint{line: m.visibleAbsLine(y), col: x}
+		return m, m.updateSelectionAutoScroll(y)
 
 	case tea.MouseReleaseMsg:
 		if m.emu.IsAltScreen() && m.sendRemoteMouse(msg) {
@@ -418,7 +427,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sel.dragging {
 			return m, nil
 		}
+		x, y := m.clampMouse(msg.X, msg.Y)
+		m.sel.caret = selPoint{line: m.visibleAbsLine(y), col: x}
 		m.sel.dragging = false
+		m.selectionAutoScrollDir = 0
+		m.selectionAutoScrollQueued = false
 		// Click without drag clears the selection; a real drag copies.
 		if m.sel.anchor == m.sel.caret {
 			m.sel.active = false
@@ -490,9 +503,78 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case selectionAutoScrollMsg:
+		if msg.StreamID != m.streamID {
+			return m, nil
+		}
+		m.selectionAutoScrollQueued = false
+		if !m.sel.dragging || m.selectionAutoScrollDir == 0 {
+			return m, nil
+		}
+		if !m.scrollSelectionOnce() {
+			m.selectionAutoScrollDir = 0
+			return m, nil
+		}
+		return m, m.queueSelectionAutoScroll()
 	}
 
 	return m, nil
+}
+
+func (m *Model) updateSelectionAutoScroll(y int) tea.Cmd {
+	h := m.emu.Height()
+	if h <= 0 {
+		return nil
+	}
+	switch {
+	case y <= 0:
+		m.selectionAutoScrollDir = -1
+	case y >= h-1:
+		m.selectionAutoScrollDir = 1
+	default:
+		m.selectionAutoScrollDir = 0
+		return nil
+	}
+	return m.queueSelectionAutoScroll()
+}
+
+func (m *Model) queueSelectionAutoScroll() tea.Cmd {
+	if m.selectionAutoScrollQueued || m.selectionAutoScrollDir == 0 {
+		return nil
+	}
+	m.selectionAutoScrollQueued = true
+	streamID := m.streamID
+	return tea.Tick(60*time.Millisecond, func(time.Time) tea.Msg {
+		return selectionAutoScrollMsg{StreamID: streamID}
+	})
+}
+
+func (m *Model) scrollSelectionOnce() bool {
+	switch m.selectionAutoScrollDir {
+	case -1:
+		if m.bottomPad > 0 {
+			m.bottomPad--
+		} else if maxScroll := m.emu.ScrollbackLen(); m.scrollOffset < maxScroll {
+			m.scrollOffset++
+		} else {
+			return false
+		}
+		m.sel.caret.line = m.visibleAbsLine(0)
+	case 1:
+		h := m.emu.Height()
+		if m.scrollOffset > 0 {
+			m.scrollOffset--
+		} else if m.bottomPad < bottomPadMax {
+			m.bottomPad++
+		} else {
+			return false
+		}
+		m.sel.caret.line = m.visibleAbsLine(h - 1)
+	default:
+		return false
+	}
+	return true
 }
 
 func (m *Model) sendRemoteMouse(msg tea.Msg) bool {

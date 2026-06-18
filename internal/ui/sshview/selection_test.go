@@ -308,3 +308,25 @@ func TestVisibleAbsLineScrolled(t *testing.T) {
 		t.Fatalf("visibleAbsLine(2) = %d want %d", got, sbLen)
 	}
 }
+
+func TestDragSelectionAtTopStartsAutoScroll(t *testing.T) {
+	e := mkEmu(20, 5, "L0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nL9\r\n")
+	if e.ScrollbackLen() == 0 {
+		t.Skip("need scrollback")
+	}
+	m := &Model{
+		emu: e,
+		sel: selection{active: true, dragging: true, anchor: selPoint{line: e.ScrollbackLen(), col: 0}, caret: selPoint{line: e.ScrollbackLen(), col: 0}},
+	}
+
+	_, cmd := m.Update(tea.MouseMotionMsg(tea.Mouse{X: 0, Y: 0}))
+	if cmd == nil {
+		t.Fatal("expected drag at top to schedule auto-scroll")
+	}
+	msg := cmd()
+	updated, _ := m.Update(msg)
+	m = updated.(*Model)
+	if m.scrollOffset == 0 {
+		t.Fatal("expected auto-scroll to enter scrollback")
+	}
+}
