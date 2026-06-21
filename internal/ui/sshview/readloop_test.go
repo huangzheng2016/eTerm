@@ -1,6 +1,7 @@
 package sshview
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os/exec"
@@ -45,6 +46,38 @@ func TestReadLoopDoesNotDropChunksWhenChannelIsFull(t *testing.T) {
 
 	if string(got) != "abc" {
 		t.Fatalf("got %q want %q", got, "abc")
+	}
+}
+
+func TestWaitChunkCoalescesQueuedChunks(t *testing.T) {
+	m := &Model{streamID: 7, ch: make(chan []byte, 4)}
+	m.ch <- []byte("a")
+	m.ch <- []byte("b")
+	m.ch <- []byte("c")
+
+	msg := waitChunk(m)()
+	got, ok := msg.(ChunkMsg)
+	if !ok {
+		t.Fatalf("got %T want ChunkMsg", msg)
+	}
+	if got.StreamID != 7 || string(got.Data) != "abc" {
+		t.Fatalf("got stream=%d data=%q", got.StreamID, got.Data)
+	}
+}
+
+func TestWaitChunkDoesNotDropChunkAtCoalesceLimit(t *testing.T) {
+	m := &Model{streamID: 7, ch: make(chan []byte, 2)}
+	first := bytes.Repeat([]byte("a"), maxCoalescedChunkBytes-1)
+	m.ch <- first
+	m.ch <- []byte("bc")
+
+	msg := waitChunk(m)()
+	got, ok := msg.(ChunkMsg)
+	if !ok {
+		t.Fatalf("got %T want ChunkMsg", msg)
+	}
+	if len(got.Data) != maxCoalescedChunkBytes+1 || !bytes.HasSuffix(got.Data, []byte("bc")) {
+		t.Fatalf("got len=%d suffix=%q", len(got.Data), got.Data[len(got.Data)-2:])
 	}
 }
 

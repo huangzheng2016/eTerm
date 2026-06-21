@@ -31,6 +31,8 @@ const bottomPadMax = 2
 
 const selectionAutoScrollEdgePercent = 20
 
+const maxCoalescedChunkBytes = 64 * 1024
+
 // ChunkMsg carries PTY stdout for one embedded session; StreamID routes it in App.Update.
 type ChunkMsg struct {
 	StreamID uint64
@@ -297,8 +299,34 @@ func waitChunk(m *Model) tea.Cmd {
 			m.mu.Unlock()
 			return StreamDoneMsg{StreamID: m.streamID, Err: err}
 		}
-		return ChunkMsg{StreamID: m.streamID, Data: b}
+		return ChunkMsg{StreamID: m.streamID, Data: coalesceQueuedChunks(m.ch, b)}
 	}
+}
+
+func coalesceQueuedChunks(ch <-chan []byte, first []byte) []byte {
+	if len(first) >= maxCoalescedChunkBytes {
+		return first
+	}
+	out := first
+	for len(out) < maxCoalescedChunkBytes {
+		select {
+		case next, ok := <-ch:
+			if !ok {
+				return out
+			}
+			if len(next) == 0 {
+				continue
+			}
+			if len(out)+len(next) > maxCoalescedChunkBytes {
+				out = append(out, next...)
+				return out
+			}
+			out = append(out, next...)
+		default:
+			return out
+		}
+	}
+	return out
 }
 
 // Close ends the SSH session.

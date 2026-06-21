@@ -45,7 +45,11 @@ func (a App) View() tea.View {
 		// pad or truncate to the exact allocated height.
 		allocH := 0
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
-			allocH = a.mainContentHeightForType(a.tabs[a.activeTab].Type)
+			topH := lipgloss.Height(strings.TrimRight(tabChrome, "\n"))
+			allocH = a.height - topH - 1
+			if allocH < 1 {
+				allocH = 1
+			}
 		}
 		contentView = strings.TrimRight(contentView, "\n")
 		cvLines := strings.Count(contentView, "\n") + 1

@@ -63,6 +63,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case sshview.ChunkMsg:
+		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
+			if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok && m.StreamID() == msg.StreamID {
+				updated, cmd := m.Update(msg)
+				a.tabs[a.activeTab].Model = updated
+				return a, cmd
+			}
+		}
 		for i := range a.tabs {
 			if m, ok := a.tabs[i].Model.(*sshview.Model); ok && m.StreamID() == msg.StreamID {
 				updated, cmd := m.Update(msg)
@@ -73,6 +80,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case sshview.StreamDoneMsg:
+		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
+			if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok && m.StreamID() == msg.StreamID {
+				updated, cmd := m.Update(msg)
+				a.tabs[a.activeTab].Model = updated
+				return a, cmd
+			}
+		}
 		for i := range a.tabs {
 			if m, ok := a.tabs[i].Model.(*sshview.Model); ok && m.StreamID() == msg.StreamID {
 				updated, cmd := m.Update(msg)
