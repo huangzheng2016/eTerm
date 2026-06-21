@@ -330,3 +330,20 @@ func TestDragSelectionAtTopStartsAutoScroll(t *testing.T) {
 		t.Fatal("expected auto-scroll to enter scrollback")
 	}
 }
+
+func TestDragSelectionAutoScrollUsesFivePercentEdge(t *testing.T) {
+	e := mkEmu(20, 100, strings.Repeat("x\r\n", 110))
+	m := &Model{emu: e, sel: selection{active: true, dragging: true}}
+
+	_, cmd := m.Update(tea.MouseMotionMsg(tea.Mouse{X: 0, Y: 4}))
+	if cmd == nil {
+		t.Fatal("expected auto-scroll inside 5 percent edge")
+	}
+
+	m.selectionAutoScrollDir = 0
+	m.selectionAutoScrollQueued = false
+	_, cmd = m.Update(tea.MouseMotionMsg(tea.Mouse{X: 0, Y: 5}))
+	if cmd != nil || m.selectionAutoScrollDir != 0 {
+		t.Fatal("unexpected auto-scroll outside 5 percent edge")
+	}
+}

@@ -29,6 +29,8 @@ var streamIDGen atomic.Uint64
 // bottomPadMax is how many empty rows the user can scroll past the live bottom.
 const bottomPadMax = 2
 
+const selectionAutoScrollEdgePercent = 20
+
 // ChunkMsg carries PTY stdout for one embedded session; StreamID routes it in App.Update.
 type ChunkMsg struct {
 	StreamID uint64
@@ -527,10 +529,11 @@ func (m *Model) updateSelectionAutoScroll(y int) tea.Cmd {
 	if h <= 0 {
 		return nil
 	}
+	edgeRows := max(2, h/selectionAutoScrollEdgePercent)
 	switch {
-	case y <= 0:
+	case y < edgeRows:
 		m.selectionAutoScrollDir = -1
-	case y >= h-1:
+	case y >= h-edgeRows:
 		m.selectionAutoScrollDir = 1
 	default:
 		m.selectionAutoScrollDir = 0
