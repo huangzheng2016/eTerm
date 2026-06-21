@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
+
+	"gorm.io/gorm"
 )
 
 type quickConnectModel struct {
@@ -150,7 +153,32 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 		is.SetClosers(client.Closers)
 
 		alias := fmt.Sprintf("%s@%s:%d", msg.Username, msg.Hostname, msg.Port)
-		return openSSHUITabMsg{is: is, alias: alias, replaceTabAt: -1}
+		now := time.Now()
+		var savedHost db.Host
+		err = database.Where("hostname = ? AND port = ? AND username = ?", msg.Hostname, msg.Port, msg.Username).First(&savedHost).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			savedHost = *host
+			savedHost.Alias = alias
+			savedHost.LastConnectedAt = &now
+			if err := database.Create(&savedHost).Error; err != nil {
+				_ = is.Close()
+				return types.ConnErrorMsg{Err: fmt.Errorf("save quick link: %w", err), Target: alias, Retry: msg}
+			}
+		} else if err == nil {
+			if err := database.Model(&db.Host{}).Where("id = ?", savedHost.ID).Update("last_connected_at", now).Error; err != nil {
+				_ = is.Close()
+				return types.ConnErrorMsg{Err: fmt.Errorf("update quick link: %w", err), Target: alias, Retry: msg}
+			}
+		} else {
+			_ = is.Close()
+			return types.ConnErrorMsg{Err: fmt.Errorf("load quick link: %w", err), Target: alias, Retry: msg}
+		}
+		history := db.ConnectionHistory{HostID: savedHost.ID, ConnectedAt: now, Status: "success"}
+		if err := database.Create(&history).Error; err != nil {
+			_ = is.Close()
+			return types.ConnErrorMsg{Err: fmt.Errorf("save quick link history: %w", err), Target: alias, Retry: msg}
+		}
+		return openSSHUITabMsg{is: is, alias: alias, hostID: savedHost.ID, historyID: history.ID, replaceTabAt: -1}
 	}
 	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
 }
