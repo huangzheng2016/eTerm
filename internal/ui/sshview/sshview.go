@@ -448,6 +448,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		x, y := m.clampMouse(msg.X, msg.Y)
 		m.sel.caret = selPoint{line: m.visibleAbsLine(y), col: x}
+		m.sel.moved = true
 		return m, m.updateSelectionAutoScroll(y)
 
 	case tea.MouseReleaseMsg:
@@ -457,13 +458,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.sel.dragging {
 			return m, nil
 		}
-		x, y := m.clampMouse(msg.X, msg.Y)
-		m.sel.caret = selPoint{line: m.visibleAbsLine(y), col: x}
+		w, h := m.emu.Width(), m.emu.Height()
+		inside := msg.X >= 0 && msg.Y >= 0 && (w <= 0 || msg.X < w) && (h <= 0 || msg.Y < h)
+		if inside {
+			x, y := m.clampMouse(msg.X, msg.Y)
+			m.sel.caret = selPoint{line: m.visibleAbsLine(y), col: x}
+		}
 		m.sel.dragging = false
 		m.selectionAutoScrollDir = 0
 		m.selectionAutoScrollQueued = false
 		// Click without drag clears the selection; a real drag copies.
-		if m.sel.anchor == m.sel.caret {
+		if m.sel.anchor == m.sel.caret && !m.sel.moved {
 			m.sel.active = false
 			return m, nil
 		}
@@ -546,6 +551,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectionAutoScrollDir = 0
 			return m, nil
 		}
+		m.sel.moved = true
 		return m, m.queueSelectionAutoScroll()
 	}
 

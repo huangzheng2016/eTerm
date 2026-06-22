@@ -1,6 +1,7 @@
 package syncd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -74,7 +75,8 @@ func TestWebSocketRelayData(t *testing.T) {
 		t.Fatalf("got frame %#v, want OPEN_OK stream 99", f)
 	}
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: []byte("ok")})); err != nil {
+	ansiPayload := []byte("\x1b[48;2;47;52;58m  \x1b[0m\x1b]10;?\x1b\\")
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: ansiPayload})); err != nil {
 		t.Fatal(err)
 	}
 	_, data, err = client.Read(ctx)
@@ -85,8 +87,8 @@ func TestWebSocketRelayData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Type != relay.FrameData || string(f.Payload) != "ok" {
-		t.Fatalf("got frame %#v, want DATA ok", f)
+	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, ansiPayload) {
+		t.Fatalf("got frame %#v, want DATA %q", f, ansiPayload)
 	}
 }
 

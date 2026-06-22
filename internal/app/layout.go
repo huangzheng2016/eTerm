@@ -107,7 +107,7 @@ func appAdjustMouseForTabContent(a App, msg tea.Msg) tea.Msg {
 				return nil
 			}
 			mm := m.Mouse()
-			mm.X, mm.Y = clampContentMouse(a.width, contentH, mm.X, mm.Y-top)
+			mm.Y -= top
 			return tea.MouseReleaseMsg(mm)
 		}
 		mm := m.Mouse()

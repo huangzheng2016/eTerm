@@ -64,8 +64,10 @@ func (s *SSHSession) Run() error {
 		cols, rows = 80, 24
 	}
 
+	setTerminalEnv(s.session)
+
 	// RequestPty(term, height, width, …) — height is rows, width is columns.
-	if err := s.session.RequestPty("xterm-256color", rows, cols, modes); err != nil {
+	if err := s.session.RequestPty(terminalTerm, rows, cols, modes); err != nil {
 		s.session.Close()
 		return err
 	}

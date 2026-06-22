@@ -15,6 +15,7 @@ type selPoint struct {
 type selection struct {
 	active   bool
 	dragging bool
+	moved    bool
 	anchor   selPoint
 	caret    selPoint
 }

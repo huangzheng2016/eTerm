@@ -44,6 +44,8 @@ type wsOpen struct {
 	PeerID     string `json:"peer_id"`
 	Target     string `json:"target"`
 	HostSyncID string `json:"host_sync_id,omitempty"`
+	Rows       int    `json:"rows,omitempty"`
+	Cols       int    `json:"cols,omitempty"`
 }
 
 type wsHello struct {
@@ -251,18 +253,25 @@ func openTarget(rt *runtimeConfig, payload []byte) (*internalssh.InteractiveSess
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return nil, err
 	}
+	rows, cols := req.Rows, req.Cols
+	if cols < 40 {
+		cols = 80
+	}
+	if rows < 5 {
+		rows = 24
+	}
 	switch req.Target {
 	case "local":
 		configured, _ := db.GetSetting(rt.db, localterm.SettingShell)
-		return localterm.NewSession(localterm.DefaultShell(configured), 24, 80)
+		return localterm.NewSession(localterm.DefaultShell(configured), rows, cols)
 	case "host":
-		return openHost(rt, req.HostSyncID)
+		return openHost(rt, req.HostSyncID, rows, cols)
 	default:
 		return nil, fmt.Errorf("unknown target %q", req.Target)
 	}
 }
 
-func openHost(rt *runtimeConfig, syncID string) (*internalssh.InteractiveSession, error) {
+func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
 	var host db.Host
 	if err := rt.db.Preload("Key").Where("sync_id = ?", syncID).First(&host).Error; err != nil {
 		return nil, err
@@ -296,7 +305,7 @@ func openHost(rt *runtimeConfig, syncID string) (*internalssh.InteractiveSession
 	if err != nil {
 		return nil, err
 	}
-	is, err := internalssh.NewInteractiveSession(res.Client, 24, 80, host.ForwardAgent)
+	is, err := internalssh.NewInteractiveSession(res.Client, rows, cols, host.ForwardAgent)
 	if err != nil {
 		res.Close()
 		return nil, err

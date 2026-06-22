@@ -22,6 +22,8 @@ type openPayload struct {
 	PeerID     string `json:"peer_id"`
 	Target     string `json:"target"`
 	HostSyncID string `json:"host_sync_id,omitempty"`
+	Rows       int    `json:"rows,omitempty"`
+	Cols       int    `json:"cols,omitempty"`
 }
 
 type wsStdin struct {
@@ -49,7 +51,7 @@ func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS boo
 		return nil, err
 	}
 	streamID := randomStreamID()
-	payload, _ := json.Marshal(openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID})
+	payload, _ := json.Marshal(openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols})
 	if err := conn.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload})); err != nil {
 		conn.CloseNow()
 		return nil, err

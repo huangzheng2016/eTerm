@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,7 @@ func TestOpenWritesDataFrames(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	is, err := Open(ctx, server.URL, "token", "tenant-a", false, "peer-a", "local", "", 24, 80)
+	is, err := Open(ctx, server.URL, "token", "tenant-a", false, "peer-a", "local", "", 33, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +78,16 @@ func TestOpenWritesDataFrames(t *testing.T) {
 	open := <-got
 	if open.Type != relay.FrameOpen {
 		t.Fatalf("got %v want OPEN", open.Type)
+	}
+	var payload struct {
+		Rows int `json:"rows"`
+		Cols int `json:"cols"`
+	}
+	if err := json.Unmarshal(open.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Rows != 33 || payload.Cols != 120 {
+		t.Fatalf("open payload pty = %dx%d, want 33x120", payload.Rows, payload.Cols)
 	}
 	data := <-got
 	if data.Type != relay.FrameData || string(data.Payload) != "echo ok\n" {

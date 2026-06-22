@@ -43,7 +43,7 @@ func NewSession(shell string, rows, cols int) (*internalssh.InteractiveSession, 
 		rows = 24
 	}
 	cmd := exec.Command(shell)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = internalssh.TerminalEnv(os.Environ())
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	if err != nil {
 		return nil, err
