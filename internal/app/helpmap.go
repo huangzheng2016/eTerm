@@ -8,11 +8,15 @@ import (
 )
 
 // statusBarShortcutParts builds the bottom status line.
-func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, sshSession bool) []string {
+func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, sshSession bool, activeShell bool) []string {
+	closeLabel := " close tab"
+	if activeShell {
+		closeLabel = " detach"
+	}
 	parts := []string{
 		km.QuitApp.Help().Key + " quit",
 		km.LocalTerminal.Help().Key + " local",
-		km.CloseTabSafe.Help().Key + " close tab",
+		km.CloseTabSafe.Help().Key + closeLabel,
 		km.NextTab.Help().Key + " next",
 		km.PrevTab.Help().Key + " prev",
 	}
@@ -29,20 +33,20 @@ func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected boo
 	return parts
 }
 
-func sshStatusBarHint(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool) string {
-	return strings.Join(statusBarShortcutParts(km, cfg, sshDisconnected, true), " · ")
+func sshStatusBarHint(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, activeShell bool) string {
+	return strings.Join(statusBarShortcutParts(km, cfg, sshDisconnected, true, activeShell), " · ")
 }
 
-func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, sshDisconnected bool) string {
+func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, sshDisconnected bool, activeShell bool) string {
 	switch tabType {
 	case SSHTab, LocalTab:
-		return sshStatusBarHint(km, cfg, sshDisconnected)
+		return sshStatusBarHint(km, cfg, sshDisconnected, activeShell)
 	case HomeTab:
 		return homeStatusBarHint(km, cfg)
 	case SnippetTab:
 		return snippetStatusBarHint(km, cfg)
 	}
-	return strings.Join(statusBarShortcutParts(km, cfg, false, false), " · ") + " · " + helpLabel(cfg.Help) + " all keys"
+	return strings.Join(statusBarShortcutParts(km, cfg, false, false, false), " · ") + " · " + helpLabel(cfg.Help) + " all keys"
 }
 
 // homeStatusBarHint shows the host-list shortcuts inline so they are visible without opening full help.

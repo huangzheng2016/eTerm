@@ -72,7 +72,8 @@ func (a App) View() tea.View {
 					disc = sm.Disconnected()
 				}
 			}
-			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc))
+			activeShell := strings.HasPrefix(tab.Title, "[A]")
+			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, activeShell))
 		}
 		statusView := statusBar.View()
 
