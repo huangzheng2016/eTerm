@@ -119,7 +119,8 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 	send := make(chan relay.Frame, 64)
 	ctx := r.Context()
 	done := make(chan struct{})
-	go writeWS(ctx, c, send, done)
+	stop := make(chan struct{})
+	go writeWS(ctx, c, send, stop, done)
 
 	var tenant, peerID string
 	defer func() {
@@ -127,7 +128,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 			h.peers.Unregister(tenant, peerID)
 		}
 		h.closeDaemonSessions(send)
-		close(send)
+		close(stop)
 		<-done
 	}()
 
@@ -175,10 +176,11 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 	send := make(chan relay.Frame, 64)
 	ctx := r.Context()
 	done := make(chan struct{})
-	go writeWS(ctx, c, send, done)
+	stop := make(chan struct{})
+	go writeWS(ctx, c, send, stop, done)
 	defer func() {
 		h.closeClientSessions(send)
-		close(send)
+		close(stop)
 		<-done
 	}()
 
@@ -232,13 +234,20 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeWS(ctx context.Context, c *websocket.Conn, ch <-chan relay.Frame, done chan<- struct{}) {
+func writeWS(ctx context.Context, c *websocket.Conn, ch <-chan relay.Frame, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
-	for f := range ch {
-		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := c.Write(wctx, websocket.MessageBinary, relay.Encode(f))
-		cancel()
-		if err != nil {
+	for {
+		select {
+		case f := <-ch:
+			wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := c.Write(wctx, websocket.MessageBinary, relay.Encode(f))
+			cancel()
+			if err != nil {
+				return
+			}
+		case <-stop:
+			return
+		case <-ctx.Done():
 			return
 		}
 	}
