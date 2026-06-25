@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -173,37 +172,7 @@ func (a App) lockSession() (App, tea.Cmd) {
 }
 
 func (a *App) syncTabBar() {
-	items := make([]components.TabItem, len(a.tabs))
-	for i, tab := range a.tabs {
-		title := tab.Title
-		switch tab.Type {
-		case SSHTab:
-			if strings.HasPrefix(tab.Title, "[R]") || strings.HasPrefix(tab.Title, "[A]") {
-				title = tab.Title
-			} else {
-				title = fmt.Sprintf("[S] %s", tab.Title)
-			}
-		case LocalTab:
-			if strings.HasPrefix(tab.Title, "[R]") || strings.HasPrefix(tab.Title, "[A]") {
-				title = tab.Title
-			} else {
-				title = fmt.Sprintf("[L] %s", tab.Title)
-			}
-		case SFTPTab:
-			title = fmt.Sprintf("[F] %s", tab.Title)
-		case ForwardTab:
-			title = fmt.Sprintf("[P] %s", tab.Title)
-		case SnippetTab:
-			title = fmt.Sprintf("[B] %s", tab.Title)
-		case SessionHistoryTab:
-			title = fmt.Sprintf("[L] %s", tab.Title)
-		}
-		if i < 9 {
-			title = fmt.Sprintf("%d:%s", i+1, title)
-		}
-		items[i] = components.TabItem{Title: title, ID: string(tab.Type)}
-	}
-	a.tabBar = components.NewTabs(items)
+	a.tabBar = components.NewTabs(a.tabStripItems())
 	if len(a.tabs) > 0 {
 		if a.activeTab < 0 {
 			a.activeTab = 0
