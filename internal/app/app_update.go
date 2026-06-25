@@ -572,7 +572,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.RemotePeerMenuMsg:
 		a.remoteMenu = remotemenu.New(msg.Peer, msg.Hosts)
+		return a, a.loadActiveShells(msg.Peer)
+
+	case types.RemoteActiveShellsLoadedMsg:
+		if a.remoteMenu != nil && msg.Err == nil {
+			a.remoteMenu.SetShells(msg.Shells)
+		}
 		return a, nil
+
+	case types.RemoteShellKillMsg:
+		return a, a.killActiveShell(msg)
 
 	case types.RemoteShellOpenMsg:
 		return a.openRemoteShell(msg)

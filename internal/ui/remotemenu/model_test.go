@@ -6,11 +6,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/relay"
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func TestRemoteMenuDoesNotUseTabPrefixesOrListTags(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, []types.RemoteHost{{Alias: "prod", Hostname: "prod.example", Username: "root", Port: 22, Tags: "web", Group: "Prod"}})
+	m.Update(keyMsg("tab"))
 
 	view := m.View()
 
@@ -31,6 +33,7 @@ func TestRemoteMenuSearchFiltersHosts(t *testing.T) {
 		{Alias: "prod", Hostname: "prod.example", Username: "root", Port: 22, Tags: "web"},
 		{Alias: "db", Hostname: "db.example", Username: "root", Port: 22, Tags: "data"},
 	})
+	m.Update(keyMsg("tab"))
 
 	m.Update(keyMsg("/"))
 	m.Update(keyText("d"))
@@ -53,6 +56,7 @@ func TestRemoteMenuPaginatesHosts(t *testing.T) {
 		hosts = append(hosts, types.RemoteHost{Alias: fmt.Sprintf("host-%02d", i), Hostname: "example", Username: "root", Port: 22})
 	}
 	m := New(types.RemotePeer{Name: "peer"}, hosts)
+	m.Update(keyMsg("tab"))
 
 	first := m.View()
 	m.Update(keyMsg("pgdown"))
@@ -66,9 +70,74 @@ func TestRemoteMenuPaginatesHosts(t *testing.T) {
 	}
 }
 
+func TestTabDefaultsToActive(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	if m.tab != tabActive {
+		t.Fatal("default tab should be Active")
+	}
+	if !strings.Contains(m.View(), "+ New shell") {
+		t.Fatalf("active view missing new shell:\n%s", m.View())
+	}
+}
+
+func TestTabToggle(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.Update(keyMsg("tab"))
+	if m.tab != tabRelay {
+		t.Fatal("tab key should switch to Relay")
+	}
+	m.Update(keyMsg("tab"))
+	if m.tab != tabActive {
+		t.Fatal("tab key should switch back to Active")
+	}
+}
+
+func TestActiveNewEmitsOpen(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
+	m.cursor = 0
+	done, cmd := m.Update(keyMsg("enter"))
+	if !done || cmd == nil {
+		t.Fatal("enter on new should close menu and emit cmd")
+	}
+	msg := cmd().(types.RemoteShellOpenMsg)
+	if msg.Target != relay.TargetActiveNew || !msg.Active {
+		t.Fatalf("bad new msg %+v", msg)
+	}
+}
+
+func TestActiveAttachEmitsOpen(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
+	m.cursor = 1
+	_, cmd := m.Update(keyMsg("enter"))
+	msg := cmd().(types.RemoteShellOpenMsg)
+	if msg.Target != relay.TargetActiveAttach || msg.ShellID != "ab" || !msg.Active {
+		t.Fatalf("bad attach msg %+v", msg)
+	}
+}
+
+func TestActiveKillEmitsAndKeepsMenu(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
+	m.cursor = 1
+	done, cmd := m.Update(keyText("d"))
+	if done {
+		t.Fatal("kill should keep menu open")
+	}
+	if _, ok := cmd().(types.RemoteShellKillMsg); !ok {
+		t.Fatal("d should emit kill msg")
+	}
+}
+
 func keyMsg(s string) tea.KeyPressMsg {
-	if s == "pgdown" {
+	switch s {
+	case "pgdown":
 		return tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown})
+	case "tab":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyTab})
+	case "enter":
+		return tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	}
 	return tea.KeyPressMsg(tea.Key{Text: s})
 }

@@ -21,6 +21,22 @@ const (
 	FramePong     FrameType = 0x31
 )
 
+const (
+	TargetLocal        = "local"
+	TargetHost         = "host"
+	TargetActiveList   = "active-list"
+	TargetActiveNew    = "active-new"
+	TargetActiveAttach = "active-attach"
+	TargetActiveKill   = "active-kill"
+)
+
+type ActiveShellInfo struct {
+	ID          string `json:"id"`
+	Shell       string `json:"shell"`
+	CreatedUnix int64  `json:"created_unix"`
+	Busy        bool   `json:"busy"`
+}
+
 const HeaderLen = 10
 
 type Frame struct {

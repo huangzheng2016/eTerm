@@ -22,6 +22,7 @@ type openPayload struct {
 	PeerID     string `json:"peer_id"`
 	Target     string `json:"target"`
 	HostSyncID string `json:"host_sync_id,omitempty"`
+	ShellID    string `json:"shell_id,omitempty"`
 	Rows       int    `json:"rows,omitempty"`
 	Cols       int    `json:"cols,omitempty"`
 }
@@ -39,6 +40,57 @@ const (
 )
 
 func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
+	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols})
+	if err != nil {
+		return nil, err
+	}
+	return sessionFromConn(ctx, conn, streamID, rows, cols), nil
+}
+
+// OpenActiveShell attaches to an existing daemon shell (target active-attach) or
+// creates one (target active-new). For active-new the assigned shell id is
+// returned in the second value.
+func OpenActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, shellID string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
+	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, ShellID: shellID, Rows: rows, Cols: cols})
+	if err != nil {
+		return nil, "", err
+	}
+	return sessionFromConn(ctx, conn, streamID, rows, cols), string(okPayload), nil
+}
+
+// ListActiveShells issues a one-shot active-list request.
+func ListActiveShells(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.ActiveShellInfo, error) {
+	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveList})
+	if err != nil {
+		return nil, err
+	}
+	conn.Close(websocket.StatusNormalClosure, "")
+	return ParseShellList(okPayload)
+}
+
+// KillActiveShell issues a one-shot active-kill request.
+func KillActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, shellID string) error {
+	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveKill, ShellID: shellID})
+	if err != nil {
+		return err
+	}
+	conn.Close(websocket.StatusNormalClosure, "")
+	return nil
+}
+
+// ParseShellList decodes an active-list OpenOK payload.
+func ParseShellList(payload []byte) ([]relay.ActiveShellInfo, error) {
+	var out []relay.ActiveShellInfo
+	if len(payload) == 0 {
+		return out, nil
+	}
+	if err := json.Unmarshal(payload, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op openPayload) (*websocket.Conn, uint32, []byte, error) {
 	header := http.Header{}
 	if apiKey != "" {
 		header.Set("Authorization", "Bearer "+apiKey)
@@ -48,19 +100,19 @@ func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS boo
 	}
 	conn, err := dial(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/client"), header, insecureTLS)
 	if err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
 	streamID := randomStreamID()
-	payload, _ := json.Marshal(openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols})
+	payload, _ := json.Marshal(op)
 	if err := conn.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload})); err != nil {
 		conn.CloseNow()
-		return nil, err
+		return nil, 0, nil, err
 	}
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
 			conn.CloseNow()
-			return nil, err
+			return nil, 0, nil, err
 		}
 		if typ != websocket.MessageBinary {
 			continue
@@ -71,10 +123,10 @@ func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS boo
 		}
 		if f.Type == relay.FrameOpenErr {
 			conn.CloseNow()
-			return nil, errors.New(string(f.Payload))
+			return nil, 0, nil, errors.New(string(f.Payload))
 		}
 		if f.Type == relay.FrameOpenOK {
-			return sessionFromConn(ctx, conn, streamID, rows, cols), nil
+			return conn, streamID, f.Payload, nil
 		}
 	}
 }

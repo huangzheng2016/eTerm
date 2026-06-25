@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	"github.com/huangzheng2016/eTerm/internal/relay"
+)
 
 type SwitchTabMsg struct {
 	Index int
@@ -108,6 +112,19 @@ type RemoteShellOpenMsg struct {
 	Target     string
 	HostSyncID string
 	HostLabel  string
+	Active     bool
+	ShellID    string
+}
+
+type RemoteActiveShellsLoadedMsg struct {
+	Peer   RemotePeer
+	Shells []relay.ActiveShellInfo
+	Err    error
+}
+
+type RemoteShellKillMsg struct {
+	Peer    RemotePeer
+	ShellID string
 }
 
 type MasterKeyUnlockedMsg struct {

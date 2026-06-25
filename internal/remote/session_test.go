@@ -135,3 +135,53 @@ func TestOpenReadsDataFrames(t *testing.T) {
 		t.Fatalf("got %q want remote", string(buf))
 	}
 }
+
+func TestParseShellList(t *testing.T) {
+	got, err := ParseShellList([]byte(`[{"id":"ab","shell":"zsh","created_unix":5,"busy":true}]`))
+	if err != nil || len(got) != 1 || got[0].ID != "ab" || !got[0].Busy {
+		t.Fatalf("got %+v err %v", got, err)
+	}
+	empty, err := ParseShellList(nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty parse: %+v %v", empty, err)
+	}
+}
+
+func TestListActiveShells(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var op openPayload
+		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetActiveList {
+			t.Errorf("bad list request: %v target=%s", err, op.Target)
+		}
+		list, _ := json.Marshal([]relay.ActiveShellInfo{{ID: "x1", Shell: "bash", CreatedUnix: 9, Busy: false}})
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: list}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	shells, err := ListActiveShells(ctx, server.URL, "", "", false, "peer-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shells) != 1 || shells[0].ID != "x1" || shells[0].Shell != "bash" {
+		t.Fatalf("got %+v", shells)
+	}
+}

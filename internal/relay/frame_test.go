@@ -46,3 +46,14 @@ func TestDecodeRejectsLengthMismatch(t *testing.T) {
 		t.Fatal("expected length mismatch error")
 	}
 }
+
+func TestOpenOKCarriesPayload(t *testing.T) {
+	in := Frame{Type: FrameOpenOK, StreamID: 7, Payload: []byte("ab12cd")}
+	out, err := Decode(Encode(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Type != FrameOpenOK || out.StreamID != 7 || string(out.Payload) != "ab12cd" {
+		t.Fatalf("round-trip mismatch: %+v", out)
+	}
+}

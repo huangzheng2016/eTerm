@@ -38,12 +38,14 @@ type runtimeConfig struct {
 	name     string
 	peerID   string
 	tenantID string
+	shells   *shellManager
 }
 
 type wsOpen struct {
 	PeerID     string `json:"peer_id"`
 	Target     string `json:"target"`
 	HostSyncID string `json:"host_sync_id,omitempty"`
+	ShellID    string `json:"shell_id,omitempty"`
 	Rows       int    `json:"rows,omitempty"`
 	Cols       int    `json:"cols,omitempty"`
 }
@@ -107,14 +109,25 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 		peerID = uuid.New().String()
 		_ = db.SetSetting(database, "remote_peer_id", peerID)
 	}
-	return &runtimeConfig{
+	rt := &runtimeConfig{
 		db:       database,
 		mk:       mk,
 		sync:     sc,
 		name:     name,
 		peerID:   peerID,
 		tenantID: sc.TenantID(),
-	}, nil
+	}
+	rt.shells = newShellManager(
+		func(rows, cols int) (*internalssh.InteractiveSession, error) {
+			configured, _ := db.GetSetting(database, localterm.SettingShell)
+			return localterm.NewSession(localterm.DefaultShell(configured), rows, cols)
+		},
+		func() string {
+			configured, _ := db.GetSetting(database, localterm.SettingShell)
+			return localterm.DefaultShell(configured)
+		},
+	)
+	return rt, nil
 }
 
 func unlock(database *gorm.DB, password string) (*security.MasterKeyManager, error) {
@@ -183,6 +196,8 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 
 	var mu sync.Mutex
 	sessions := map[uint32]*internalssh.InteractiveSession{}
+	activeStreams := map[uint32]string{}
+	rt.shells.detachAll()
 	writeFrame := func(f relay.Frame) error {
 		mu.Lock()
 		defer mu.Unlock()
@@ -203,31 +218,87 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 		}
 		switch f.Type {
 		case relay.FrameOpen:
-			is, err := openTarget(rt, f.Payload)
-			if err != nil {
-				_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
-				continue
-			}
-			sessions[f.StreamID] = is
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
-			go pumpSession(ctx, f.StreamID, is, writeFrame)
+			handleOpen(rt, f, sessions, activeStreams, writeFrame, ctx)
 		case relay.FrameData:
-			if is := sessions[f.StreamID]; is != nil && is.Stdin != nil {
+			if shellID, ok := activeStreams[f.StreamID]; ok {
+				if s := rt.shells.get(shellID); s != nil && s.is.Stdin != nil {
+					_, _ = s.is.Stdin.Write(f.Payload)
+				}
+			} else if is := sessions[f.StreamID]; is != nil && is.Stdin != nil {
 				_, _ = is.Stdin.Write(f.Payload)
 			}
 		case relay.FrameResize:
 			rows, cols, err := relay.ParseResize(f.Payload)
 			if err == nil {
-				if is := sessions[f.StreamID]; is != nil && is.Resize != nil {
+				if shellID, ok := activeStreams[f.StreamID]; ok {
+					if s := rt.shells.get(shellID); s != nil && s.is.Resize != nil {
+						_ = s.is.Resize(rows, cols)
+					}
+				} else if is := sessions[f.StreamID]; is != nil && is.Resize != nil {
 					_ = is.Resize(rows, cols)
 				}
 			}
 		case relay.FrameClose:
-			if is := sessions[f.StreamID]; is != nil {
+			if _, ok := activeStreams[f.StreamID]; ok {
+				rt.shells.detachStream(f.StreamID)
+				delete(activeStreams, f.StreamID)
+			} else if is := sessions[f.StreamID]; is != nil {
 				_ = is.Close()
 				delete(sessions, f.StreamID)
 			}
 		}
+	}
+}
+
+func handleOpen(rt *runtimeConfig, f relay.Frame, sessions map[uint32]*internalssh.InteractiveSession, activeStreams map[uint32]string, writeFrame func(relay.Frame) error, ctx context.Context) {
+	var req wsOpen
+	if err := json.Unmarshal(f.Payload, &req); err != nil {
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+		return
+	}
+	rows, cols := req.Rows, req.Cols
+	if cols < 40 {
+		cols = 80
+	}
+	if rows < 5 {
+		rows = 24
+	}
+	switch req.Target {
+	case relay.TargetActiveList:
+		payload, _ := json.Marshal(rt.shells.list())
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: payload})
+	case relay.TargetActiveNew:
+		s, err := rt.shells.create(f.StreamID, rows, cols, writeFrame)
+		if err != nil {
+			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			return
+		}
+		activeStreams[f.StreamID] = s.id
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: []byte(s.id)})
+		s.start()
+	case relay.TargetActiveAttach:
+		s, displaced, err := rt.shells.attach(req.ShellID, f.StreamID, rows, cols, writeFrame)
+		if err != nil {
+			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			return
+		}
+		if displaced != 0 {
+			delete(activeStreams, displaced)
+		}
+		activeStreams[f.StreamID] = s.id
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
+	case relay.TargetActiveKill:
+		rt.shells.kill(req.ShellID)
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
+	default:
+		is, err := openTarget(rt, f.Payload)
+		if err != nil {
+			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			return
+		}
+		sessions[f.StreamID] = is
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
+		go pumpSession(ctx, f.StreamID, is, writeFrame)
 	}
 }
 
