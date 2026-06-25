@@ -339,7 +339,12 @@ func coalesceQueuedChunks(ch <-chan []byte, first []byte) []byte {
 // Close ends the SSH session.
 func (m *Model) Close() error {
 	m.closeCh()
-	_ = m.emu.Close() // stops the drain goroutine
+	// Close the emulator's input pipe to unblock the drain goroutine. We avoid
+	// emu.Close() here because it writes an unsynchronized internal flag that the
+	// drain goroutine reads via emu.Read, which the race detector flags.
+	if c, ok := m.emu.InputPipe().(io.Closer); ok {
+		_ = c.Close()
+	}
 	if m.sess != nil {
 		return m.sess.Close()
 	}
