@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/huangzheng2016/eTerm/internal/sftp"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 type openSSHUITabMsg struct {
@@ -20,7 +21,9 @@ type sftpOpenedMsg struct {
 }
 
 type remoteTerminalOpenedMsg struct {
-	is      *internalssh.InteractiveSession
-	title   string
-	tabType TabType
+	is           *internalssh.InteractiveSession
+	title        string
+	tabType      TabType
+	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
+	reconnect    *types.RemoteReconnect
 }

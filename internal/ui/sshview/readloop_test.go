@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/relay"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
@@ -135,6 +137,36 @@ func TestRemoteLocalShellAbnormalStreamDoneShowsConnectionError(t *testing.T) {
 	}
 	if got.Retry != nil {
 		t.Fatalf("retry = %#v, want nil for remote local shell", got.Retry)
+	}
+}
+
+func TestRemoteShellReconnectOffersRemoteRetry(t *testing.T) {
+	m := New(nil, "[A]remote", 0, viewkeys.SSHKeys{Reconnect: []string{"r"}})
+	t.Cleanup(func() { _ = m.Close() })
+	m.SetRemoteReconnect(&types.RemoteReconnect{Peer: types.RemotePeer{ID: "p1"}, Active: true, Target: relay.TargetActiveAttach, ShellID: "sh1"})
+
+	_, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	if cmd == nil {
+		t.Fatal("expected connection error command")
+	}
+	got, ok := cmd().(types.ConnErrorMsg)
+	if !ok {
+		t.Fatalf("got %T want types.ConnErrorMsg", got)
+	}
+	rc, ok := got.Retry.(types.RemoteShellReconnectMsg)
+	if !ok {
+		t.Fatalf("retry = %T want types.RemoteShellReconnectMsg", got.Retry)
+	}
+	if rc.Spec.ShellID != "sh1" || !rc.Spec.Active || rc.StreamID != m.StreamID() {
+		t.Fatalf("bad reconnect spec %+v stream %d", rc.Spec, rc.StreamID)
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Text: "r"}))
+	if cmd == nil {
+		t.Fatal("r should emit a reconnect command")
+	}
+	if _, ok := cmd().(types.RemoteShellReconnectMsg); !ok {
+		t.Fatalf("r emitted %T want types.RemoteShellReconnectMsg", cmd())
 	}
 }
 

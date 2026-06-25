@@ -583,6 +583,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.RemoteShellKillMsg:
 		return a, a.killActiveShell(msg)
 
+	case types.RemoteShellReconnectMsg:
+		return a.applyRemoteShellReconnect(msg)
+
 	case types.RemoteShellOpenMsg:
 		return a.openRemoteShell(msg)
 

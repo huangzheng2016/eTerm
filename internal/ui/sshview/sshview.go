@@ -61,6 +61,9 @@ type Model struct {
 	width     int
 	height    int
 
+	// remote, when set, reconnects this session over the relay (hostID is 0).
+	remote *types.RemoteReconnect
+
 	ch     chan []byte
 	mu     sync.Mutex
 	closed bool
@@ -93,6 +96,10 @@ type Model struct {
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
+
+// SetRemoteReconnect marks this session as relay-backed so "r" reconnects over
+// the relay instead of redialing a DB host.
+func (m *Model) SetRemoteReconnect(r *types.RemoteReconnect) { m.remote = r }
 
 // New creates a model; call SetSize or rely on WindowSizeMsg. hostID is used to reconnect after a network drop.
 func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
@@ -377,7 +384,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			alias := m.alias
 			retry := tea.Msg(nil)
-			if m.hostID != 0 {
+			if m.remote != nil {
+				retry = types.RemoteShellReconnectMsg{StreamID: m.streamID, Spec: *m.remote}
+			} else if m.hostID != 0 {
 				retry = types.SSHReconnectMsg{HostID: m.hostID, StreamID: m.streamID}
 			}
 			return m, func() tea.Msg {
@@ -390,11 +399,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.disconnected {
-			if viewkeys.MatchKey(msg, m.vk.Reconnect) && m.hostID != 0 {
-				hid := m.hostID
+			if viewkeys.MatchKey(msg, m.vk.Reconnect) {
 				sid := m.streamID
-				return m, func() tea.Msg {
-					return types.SSHReconnectMsg{HostID: hid, StreamID: sid}
+				if m.remote != nil {
+					spec := *m.remote
+					return m, func() tea.Msg {
+						return types.RemoteShellReconnectMsg{StreamID: sid, Spec: spec}
+					}
+				}
+				if m.hostID != 0 {
+					hid := m.hostID
+					return m, func() tea.Msg {
+						return types.SSHReconnectMsg{HostID: hid, StreamID: sid}
+					}
 				}
 			}
 			return m, nil
