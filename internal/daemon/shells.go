@@ -140,6 +140,11 @@ func (m *shellManager) attach(id string, stream uint32, rows, cols int, write fu
 	}
 	s.mu.Unlock()
 	if s.is.Resize != nil {
+		// Force a SIGWINCH even when the size is unchanged so full-screen
+		// programs and the shell prompt repaint immediately after re-attach.
+		if rows > 1 {
+			_ = s.is.Resize(rows-1, cols)
+		}
 		_ = s.is.Resize(rows, cols)
 	}
 	return s, displaced, nil
