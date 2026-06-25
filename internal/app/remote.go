@@ -25,18 +25,18 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	a.toast, toastCmd = a.toast.Show("Opening remote shell...", components.ToastInfo, 30*time.Second)
 
 	if msg.Active {
-		title := "[A]" + msg.Peer.Name + "-" + msg.HostLabel
 		peer := msg.Peer
 		target, shellID := msg.Target, msg.ShellID
 		return a, tea.Batch(toastCmd, func() tea.Msg {
 			is, newID, err := remote.OpenActiveShell(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, shellID, rows, cols)
 			if err != nil {
-				return types.ConnErrorMsg{Err: err, Target: title}
+				return types.ConnErrorMsg{Err: err, Target: "[A]" + peer.Name}
 			}
 			reShellID := shellID
 			if target == relay.TargetActiveNew {
 				reShellID = newID
 			}
+			title := "[A]" + peer.Name + "-" + reShellID
 			spec := &types.RemoteReconnect{Peer: peer, Active: true, Target: relay.TargetActiveAttach, ShellID: reShellID}
 			return remoteTerminalOpenedMsg{is: is, title: title, tabType: SSHTab, replaceTabAt: -1, reconnect: spec}
 		})
