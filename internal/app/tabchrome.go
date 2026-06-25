@@ -24,13 +24,13 @@ func (a App) tabStripItems() []components.TabItem {
 		title := tab.Title
 		switch tab.Type {
 		case SSHTab:
-			if strings.HasPrefix(tab.Title, "[R]") {
+			if strings.HasPrefix(tab.Title, "[R]") || strings.HasPrefix(tab.Title, "[A]") {
 				title = tab.Title
 			} else {
 				title = fmt.Sprintf("[S] %s", tab.Title)
 			}
 		case LocalTab:
-			if strings.HasPrefix(tab.Title, "[R]") {
+			if strings.HasPrefix(tab.Title, "[R]") || strings.HasPrefix(tab.Title, "[A]") {
 				title = tab.Title
 			} else {
 				title = fmt.Sprintf("[L] %s", tab.Title)
