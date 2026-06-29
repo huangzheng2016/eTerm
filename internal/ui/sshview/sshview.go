@@ -101,6 +101,14 @@ func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
 // the relay instead of redialing a DB host.
 func (m *Model) SetRemoteReconnect(r *types.RemoteReconnect) { m.remote = r }
 
+func (m *Model) RemoteReconnect() *types.RemoteReconnect {
+	if m.remote == nil {
+		return nil
+	}
+	r := *m.remote
+	return &r
+}
+
 // New creates a model; call SetSize or rely on WindowSizeMsg. hostID is used to reconnect after a network drop.
 func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
 	emu := vt.NewEmulator(80, 24)
@@ -338,7 +346,6 @@ func coalesceQueuedChunks(ch <-chan []byte, first []byte) []byte {
 
 // Close ends the SSH session.
 func (m *Model) Close() error {
-	m.closeCh()
 	// Close the emulator's input pipe to unblock the drain goroutine. We avoid
 	// emu.Close() here because it writes an unsynchronized internal flag that the
 	// drain goroutine reads via emu.Read, which the race detector flags.

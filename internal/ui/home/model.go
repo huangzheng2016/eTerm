@@ -153,6 +153,7 @@ type HomeKeyConfig struct {
 	ToggleSelect   []string
 	BatchTag       []string
 	BatchActions   []string
+	Tmux           []string
 }
 
 func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyConfig) Model {

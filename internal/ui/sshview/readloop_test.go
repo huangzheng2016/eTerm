@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,6 +29,35 @@ func (r *oneByteReader) Read(p []byte) (int, error) {
 	return 1, nil
 }
 
+type unblockOnCloseReader struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newUnblockOnCloseReader() *unblockOnCloseReader {
+	return &unblockOnCloseReader{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (r *unblockOnCloseReader) Read(p []byte) (int, error) {
+	close(r.started)
+	<-r.release
+	p[0] = 'x'
+	return 1, io.EOF
+}
+
+func (r *unblockOnCloseReader) Close() error {
+	r.once.Do(func() { close(r.release) })
+	return nil
+}
+
+func (r *unblockOnCloseReader) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
 func TestReadLoopDoesNotDropChunksWhenChannelIsFull(t *testing.T) {
 	m := &Model{
 		sess: &internalssh.InteractiveSession{Stdout: &oneByteReader{data: []byte("abc")}},
@@ -48,6 +78,34 @@ func TestReadLoopDoesNotDropChunksWhenChannelIsFull(t *testing.T) {
 
 	if string(got) != "abc" {
 		t.Fatalf("got %q want %q", got, "abc")
+	}
+}
+
+func TestCloseWhileReadLoopHasPendingDataDoesNotPanic(t *testing.T) {
+	stdio := newUnblockOnCloseReader()
+	doneSession := make(chan error)
+	m := New(&internalssh.InteractiveSession{Stdin: stdio, Stdout: stdio, Done: doneSession}, "tmux", 0, viewkeys.SSHKeys{})
+
+	panicCh := make(chan any, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				panicCh <- r
+			}
+		}()
+		m.readLoop()
+	}()
+
+	<-stdio.started
+	_ = m.Close()
+	<-done
+
+	select {
+	case p := <-panicCh:
+		t.Fatalf("readLoop panic = %v", p)
+	default:
 	}
 }
 

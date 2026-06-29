@@ -8,6 +8,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
+	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 
 	bubbleshelp "charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
@@ -72,6 +73,7 @@ type App struct {
 	pendingFingerprint     *types.FingerprintConfirmMsg
 	pendingQuit            bool
 	pendingRemoteShellKill *types.RemoteShellKillMsg
+	pendingTmuxKill        *types.TmuxKillMsg
 
 	// Quick connect overlay
 	quickConnect *quickConnectModel
@@ -114,6 +116,9 @@ type App struct {
 	connError *connErrorModel
 
 	remoteMenu *remotemenu.Model
+	tmuxMenu   *tmuxmenu.Model
+
+	renamePrompt *sessionRenameModel
 
 	connectProgressSeq uint64
 

@@ -101,14 +101,25 @@ func (m *Model) updateActive(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			}
 		}
 		sh := m.shells[m.cursor-1]
+		label := ""
+		if strings.TrimSpace(sh.Name) != "" {
+			label = sh.Name
+		}
 		return true, func() tea.Msg {
-			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetActiveAttach, Active: true, ShellID: sh.ID, HostLabel: activeLabel(sh)}
+			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetActiveAttach, Active: true, ShellID: sh.ID, HostLabel: label}
 		}
 	case "d", "delete":
 		if m.cursor > 0 {
 			sh := m.shells[m.cursor-1]
 			return false, func() tea.Msg {
 				return types.RemoteShellKillRequestMsg{Peer: m.Peer, ShellID: sh.ID}
+			}
+		}
+	case "r":
+		if m.cursor > 0 {
+			sh := m.shells[m.cursor-1]
+			return false, func() tea.Msg {
+				return types.RemoteShellRenameRequestMsg{Peer: m.Peer, ShellID: sh.ID, CurrentName: activeDisplayName(sh)}
 			}
 		}
 	case "esc", "escape":
@@ -171,7 +182,7 @@ func (m *Model) View() string {
 		for i, sh := range m.shells {
 			rows = append(rows, m.row(i+1, activeLabel(sh), activeDesc(sh)))
 		}
-		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · enter open · d kill · esc close"))
+		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · enter open · r rename · d kill · esc close"))
 	} else {
 		if m.searching || m.query != "" {
 			prompt := "/" + m.query
@@ -217,15 +228,28 @@ func (m *Model) tabHeader() string {
 }
 
 func activeLabel(sh relay.ActiveShellInfo) string {
+	if strings.TrimSpace(sh.Name) != "" {
+		return sh.Name
+	}
 	return sh.ID + " " + sh.Shell
 }
 
 func activeDesc(sh relay.ActiveShellInfo) string {
 	d := time.Unix(sh.CreatedUnix, 0).Format("15:04:05")
+	if strings.TrimSpace(sh.Name) != "" {
+		d = sh.ID + " " + sh.Shell + " " + d
+	}
 	if sh.Busy {
 		d += " busy"
 	}
 	return d
+}
+
+func activeDisplayName(sh relay.ActiveShellInfo) string {
+	if strings.TrimSpace(sh.Name) != "" {
+		return sh.Name
+	}
+	return sh.ID
 }
 
 func (m *Model) row(idx int, title, desc string) string {

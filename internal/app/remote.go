@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/relay"
@@ -40,7 +41,7 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 			if target == relay.TargetActiveNew {
 				reShellID = newID
 			}
-			title := "[A]" + peer.Name + "-" + reShellID
+			title := activeShellTabTitle(peer.Name, reShellID, msg.HostLabel)
 			spec := &types.RemoteReconnect{Peer: peer, Active: true, Target: relay.TargetActiveAttach, ShellID: reShellID}
 			return remoteTerminalOpenedMsg{is: is, title: title, tabType: SSHTab, replaceTabAt: -1, reconnect: spec}
 		})
@@ -140,6 +141,50 @@ func (a App) killActiveShell(msg types.RemoteShellKillMsg) tea.Cmd {
 		shells, err := remote.ListActiveShells(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
 		return types.RemoteActiveShellsLoadedMsg{Peer: peer, Shells: shells, Err: err}
 	}
+}
+
+func (a App) renameActiveShell(msg types.RemoteShellRenameMsg) (App, tea.Cmd) {
+	name := strings.TrimSpace(msg.Name)
+	if name == "" {
+		return a, nil
+	}
+	a.renameActiveShellTabs(msg.Peer.ID, msg.ShellID, name)
+	cfg := esync.LoadConfig(a.db, a.masterKey)
+	if cfg.Mode != "http" {
+		return a, nil
+	}
+	peer := msg.Peer
+	shellID := msg.ShellID
+	return a, func() tea.Msg {
+		if err := remote.RenameActiveShell(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, shellID, name); err != nil {
+			return types.ErrorMsg{Err: err}
+		}
+		shells, err := remote.ListActiveShells(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
+		return types.RemoteActiveShellsLoadedMsg{Peer: peer, Shells: shells, Err: err}
+	}
+}
+
+func (a *App) renameActiveShellTabs(peerID, shellID, name string) {
+	for i := range a.tabs {
+		sm, ok := a.tabs[i].Model.(*sshview.Model)
+		if !ok {
+			continue
+		}
+		spec := sm.RemoteReconnect()
+		if spec == nil || !spec.Active || spec.Peer.ID != peerID || spec.ShellID != shellID {
+			continue
+		}
+		a.tabs[i].Title = activeShellTabTitle(spec.Peer.Name, shellID, name)
+	}
+	a.syncTabBar()
+}
+
+func activeShellTabTitle(peerName, shellID, label string) string {
+	suffix := shellID
+	if strings.TrimSpace(label) != "" {
+		suffix = strings.TrimSpace(label)
+	}
+	return "[A]" + peerName + "-" + suffix
 }
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {

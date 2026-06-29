@@ -179,6 +179,10 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		m.SetSize(m.width, m.height)
 		return m, nil, true
 
+	case key.Matches(msg, m.keys.Tmux):
+		logKeyDispatch("TmuxMenu")
+		return m, func() tea.Msg { return types.TmuxMenuMsg{} }, true
+
 	case m.kmCfg.MatchConnect(msg) || key.Matches(msg, m.keys.SSHConnect):
 		logKeyDispatch("SSHConnect")
 		if p := m.SelectedPeer(); p != nil {

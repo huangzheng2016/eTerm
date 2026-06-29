@@ -72,7 +72,7 @@ func (a App) View() tea.View {
 					disc = sm.Disconnected()
 				}
 			}
-			activeShell := strings.HasPrefix(tab.Title, "[A]")
+			activeShell := strings.HasPrefix(tab.Title, "[A]") || strings.HasPrefix(tab.Title, "[T]")
 			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, activeShell))
 		}
 		statusView := statusBar.View()
@@ -96,8 +96,14 @@ func (a App) View() tea.View {
 		} else if a.commandPalette != nil {
 			overlay := a.commandPalette.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.renamePrompt != nil {
+			overlay := a.renamePrompt.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.remoteMenu != nil {
 			overlay := a.remoteMenu.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.tmuxMenu != nil {
+			overlay := a.tmuxMenu.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.snippetPicker != nil {
 			overlay := a.snippetPicker.View()

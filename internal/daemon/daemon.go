@@ -46,6 +46,7 @@ type wsOpen struct {
 	Target     string `json:"target"`
 	HostSyncID string `json:"host_sync_id,omitempty"`
 	ShellID    string `json:"shell_id,omitempty"`
+	Name       string `json:"name,omitempty"`
 	Rows       int    `json:"rows,omitempty"`
 	Cols       int    `json:"cols,omitempty"`
 }
@@ -290,6 +291,12 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessions map[uint32]*internals
 		_ = writeReplay(f.StreamID, replay, writeFrame)
 	case relay.TargetActiveKill:
 		rt.shells.kill(req.ShellID)
+		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
+	case relay.TargetActiveRename:
+		if err := rt.shells.rename(req.ShellID, req.Name); err != nil {
+			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			return
+		}
 		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
 	default:
 		is, err := openTarget(rt, f.Payload)

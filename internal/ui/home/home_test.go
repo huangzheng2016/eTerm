@@ -136,6 +136,17 @@ func TestHomeShortcut_NewHost(t *testing.T) {
 	}
 }
 
+func TestHomeShortcut_TmuxMenu(t *testing.T) {
+	m, _ := loadedModel(t)
+
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}))
+	_ = out
+	msg := firstMsg(cmd)
+	if _, ok := msg.(types.TmuxMenuMsg); !ok {
+		t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
+	}
+}
+
 func TestHomeShortcut_FilteringEnterNotSSH(t *testing.T) {
 	m, _ := loadedModel(t)
 

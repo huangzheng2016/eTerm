@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ var errShellNotFound = errors.New("active shell not found")
 type activeShell struct {
 	id      string
 	shell   string
+	name    string
 	created time.Time
 	is      *internalssh.InteractiveSession
 
@@ -85,10 +87,12 @@ func (m *shellManager) list() []relay.ActiveShellInfo {
 	for _, s := range m.shells {
 		s.mu.Lock()
 		busy := s.stream != 0
+		name := s.name
 		s.mu.Unlock()
 		out = append(out, relay.ActiveShellInfo{
 			ID:          s.id,
 			Shell:       s.shell,
+			Name:        name,
 			CreatedUnix: s.created.Unix(),
 			Busy:        busy,
 		})
@@ -173,6 +177,19 @@ func (m *shellManager) kill(id string) {
 	}
 	close(s.stopPump)
 	_ = s.is.Close()
+}
+
+func (m *shellManager) rename(id, name string) error {
+	m.mu.Lock()
+	s := m.shells[id]
+	m.mu.Unlock()
+	if s == nil {
+		return errShellNotFound
+	}
+	s.mu.Lock()
+	s.name = strings.TrimSpace(name)
+	s.mu.Unlock()
+	return nil
 }
 
 func (m *shellManager) removeExited(s *activeShell) {

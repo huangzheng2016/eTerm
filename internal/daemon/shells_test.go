@@ -92,6 +92,22 @@ func TestShellManagerNewListKill(t *testing.T) {
 	}
 }
 
+func TestShellManagerRename(t *testing.T) {
+	m := newTestManager()
+	sink := newSink()
+	s, err := m.create(10, 24, 80, sink.write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.rename(s.id, "work"); err != nil {
+		t.Fatal(err)
+	}
+	list := m.list()
+	if len(list) != 1 || list[0].Name != "work" {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+}
+
 func TestShellManagerPumpForwardsAndReplays(t *testing.T) {
 	m := newTestManager()
 	sink := newSink()

@@ -117,6 +117,27 @@ func TestActiveAttachEmitsOpen(t *testing.T) {
 	}
 }
 
+func TestActiveLabelPrefersName(t *testing.T) {
+	got := activeLabel(relay.ActiveShellInfo{ID: "ab", Shell: "zsh", Name: "work"})
+	if got != "work" {
+		t.Fatalf("label = %q", got)
+	}
+}
+
+func TestActiveRenameRequestsPrompt(t *testing.T) {
+	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh", Name: "work"}})
+	m.cursor = 1
+	done, cmd := m.Update(keyText("r"))
+	if done || cmd == nil {
+		t.Fatal("rename request should keep menu open")
+	}
+	msg := cmd().(types.RemoteShellRenameRequestMsg)
+	if msg.Peer.ID != "p1" || msg.ShellID != "ab" || msg.CurrentName != "work" {
+		t.Fatalf("bad rename msg %+v", msg)
+	}
+}
+
 func TestActiveKillRequestsConfirmationAndKeepsMenu(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
 	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})

@@ -57,6 +57,7 @@ func homeStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
 		km.EditHost.Help().Key + " edit",
 		km.DeleteHost.Help().Key + " delete",
 		km.Search.Help().Key + " search",
+		helpLabel(cfg.TmuxMenu) + " tmux",
 		helpLabel(cfg.ShowHidden) + " show hidden",
 		helpLabel(cfg.HideHost) + " hide",
 		helpLabel(cfg.Help) + " all keys",
@@ -91,7 +92,7 @@ func (h homeAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{h.km.QuitApp, h.km.LocalTerminal, h.km.NewTab, h.km.CloseTabSafe},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.NextTab, h.km.PrevTab},
-		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet"), dynamicBinding(h.cfg.ToggleView, "group/tag")},
+		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet"), dynamicBinding(h.cfg.ToggleView, "group/tag"), dynamicBinding(h.cfg.TmuxMenu, "tmux")},
 		{h.km.SSHConnect, h.km.SFTPOpen, h.km.NewHost},
 		{h.km.EditHost, h.km.DeleteHost, h.km.Search},
 		{dynamicBinding(h.cfg.CopySSH, "copy"), dynamicBinding(h.cfg.CloneHost, "clone"), dynamicBinding(h.cfg.QuickConnect, "quick"), dynamicBinding(h.cfg.ImportSSH, "import .ssh")},

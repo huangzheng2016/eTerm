@@ -53,6 +53,7 @@ type KeyBindingConfig struct {
 	ToggleSelect   []string `json:"toggle_select"`
 	BatchTag       []string `json:"batch_tag"`
 	BatchActions   []string `json:"batch_actions"`
+	TmuxMenu       []string `json:"tmux_menu"`
 
 	// SFTP
 	SFTPUpload      []string `json:"sftp_upload"`
@@ -127,6 +128,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		ToggleSelect:   []string{"ctrl+space"},
 		BatchTag:       []string{"ctrl+shift+g"},
 		BatchActions:   []string{"ctrl+shift+m"},
+		TmuxMenu:       []string{"m"},
 
 		// SFTP
 		SFTPUpload:      []string{"u"},
@@ -339,7 +341,7 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 	return home.HomeKeyConfig{
 		KmCfg: BuildKeymatchConfig(cfg),
 		Keys: home.BuildListKeyMap(cfg.SSHConnect, cfg.SFTPOpen, cfg.NewHost, cfg.EditHost,
-			cfg.DeleteHost, cfg.CopySSH, cfg.CloneHost, cfg.Search, cfg.ToggleView),
+			cfg.DeleteHost, cfg.CopySSH, cfg.CloneHost, cfg.Search, cfg.ToggleView, cfg.TmuxMenu),
 		Help:           cfg.Help,
 		QuickConnect:   cfg.QuickConnect,
 		ImportSSH:      cfg.ImportSSH,
@@ -350,6 +352,7 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 		ToggleSelect:   cfg.ToggleSelect,
 		BatchTag:       cfg.BatchTag,
 		BatchActions:   cfg.BatchActions,
+		Tmux:           cfg.TmuxMenu,
 	}
 }
 

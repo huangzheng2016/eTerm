@@ -132,6 +132,18 @@ type RemoteShellKillRequestMsg struct {
 	ShellID string
 }
 
+type RemoteShellRenameRequestMsg struct {
+	Peer        RemotePeer
+	ShellID     string
+	CurrentName string
+}
+
+type RemoteShellRenameMsg struct {
+	Peer    RemotePeer
+	ShellID string
+	Name    string
+}
+
 // RemoteReconnect describes how to re-open a remote shell over the relay after a
 // network drop. Active shells re-attach to the same ShellID (output replays);
 // relay shells spawn a fresh session.
@@ -181,6 +193,41 @@ type SuccessMsg struct {
 }
 
 type RefreshListMsg struct{}
+
+type TmuxSession struct {
+	Name        string
+	CreatedUnix int64
+	Attached    bool
+}
+
+type TmuxMenuMsg struct{}
+
+type TmuxSessionsLoadedMsg struct {
+	Sessions []TmuxSession
+	Err      error
+}
+
+type TmuxOpenMsg struct {
+	Name string
+	New  bool
+}
+
+type TmuxKillRequestMsg struct {
+	Name string
+}
+
+type TmuxKillMsg struct {
+	Name string
+}
+
+type TmuxRenameRequestMsg struct {
+	Name string
+}
+
+type TmuxRenameMsg struct {
+	OldName string
+	NewName string
+}
 
 type HostDeletedMsg struct {
 	ID uint

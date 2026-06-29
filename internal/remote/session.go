@@ -23,6 +23,7 @@ type openPayload struct {
 	Target     string `json:"target"`
 	HostSyncID string `json:"host_sync_id,omitempty"`
 	ShellID    string `json:"shell_id,omitempty"`
+	Name       string `json:"name,omitempty"`
 	Rows       int    `json:"rows,omitempty"`
 	Cols       int    `json:"cols,omitempty"`
 }
@@ -89,6 +90,16 @@ func ListActiveShells(ctx context.Context, serverURL, apiKey, tenant string, ins
 // KillActiveShell issues a one-shot active-kill request.
 func KillActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, shellID string) error {
 	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveKill, ShellID: shellID}, nil)
+	if err != nil {
+		return err
+	}
+	conn.Close(websocket.StatusNormalClosure, "")
+	return nil
+}
+
+// RenameActiveShell issues a one-shot active-rename request.
+func RenameActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, shellID, name string) error {
+	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveRename, ShellID: shellID, Name: name}, nil)
 	if err != nil {
 		return err
 	}

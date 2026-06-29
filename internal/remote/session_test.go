@@ -232,13 +232,47 @@ func TestOpenTimeoutContextAddsDeadline(t *testing.T) {
 }
 
 func TestParseShellList(t *testing.T) {
-	got, err := ParseShellList([]byte(`[{"id":"ab","shell":"zsh","created_unix":5,"busy":true}]`))
-	if err != nil || len(got) != 1 || got[0].ID != "ab" || !got[0].Busy {
+	got, err := ParseShellList([]byte(`[{"id":"ab","shell":"zsh","name":"work","created_unix":5,"busy":true}]`))
+	if err != nil || len(got) != 1 || got[0].ID != "ab" || got[0].Name != "work" || !got[0].Busy {
 		t.Fatalf("got %+v err %v", got, err)
 	}
 	empty, err := ParseShellList(nil)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty parse: %+v %v", empty, err)
+	}
+}
+
+func TestRenameActiveShell(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var op openPayload
+		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetActiveRename || op.ShellID != "x1" || op.Name != "work" {
+			t.Errorf("bad rename request: %+v err=%v", op, err)
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := RenameActiveShell(ctx, server.URL, "", "", false, "peer-a", "x1", "work"); err != nil {
+		t.Fatal(err)
 	}
 }
 

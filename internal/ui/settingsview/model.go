@@ -145,6 +145,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Home", "Toggle Select", "toggle_select"},
 		{"Home", "Batch Tag", "batch_tag"},
 		{"Home", "Batch Actions", "batch_actions"},
+		{"Home", "tmux Menu", "tmux_menu"},
 		// SFTP
 		{"SFTP", "Upload", "sftp_upload"},
 		{"SFTP", "Download", "sftp_download"},

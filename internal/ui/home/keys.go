@@ -13,6 +13,7 @@ type listKeyMap struct {
 	CloneHost  key.Binding
 	Search     key.Binding
 	ToggleView key.Binding
+	Tmux       key.Binding
 }
 
 func defaultListKeyMap() listKeyMap {
@@ -53,6 +54,10 @@ func defaultListKeyMap() listKeyMap {
 			key.WithKeys("t"),
 			key.WithHelp("t", "group/tag"),
 		),
+		Tmux: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "tmux"),
+		),
 	}
 }
 
@@ -67,7 +72,7 @@ func helpLabel(keys []string) string {
 }
 
 // BuildListKeyMap constructs a listKeyMap from configurable key slices.
-func BuildListKeyMap(sshConnect, sftpOpen, newHost, editHost, deleteHost, copySSH, cloneHost, search, toggleView []string) listKeyMap {
+func BuildListKeyMap(sshConnect, sftpOpen, newHost, editHost, deleteHost, copySSH, cloneHost, search, toggleView, tmux []string) listKeyMap {
 	return listKeyMap{
 		SSHConnect: key.NewBinding(key.WithKeys(sshConnect...), key.WithHelp(helpLabel(sshConnect), "connect")),
 		SFTPOpen:   key.NewBinding(key.WithKeys(sftpOpen...), key.WithHelp(helpLabel(sftpOpen), "sftp")),
@@ -78,5 +83,6 @@ func BuildListKeyMap(sshConnect, sftpOpen, newHost, editHost, deleteHost, copySS
 		CloneHost:  key.NewBinding(key.WithKeys(cloneHost...), key.WithHelp(helpLabel(cloneHost), "clone")),
 		Search:     key.NewBinding(key.WithKeys(search...), key.WithHelp(helpLabel(search), "search")),
 		ToggleView: key.NewBinding(key.WithKeys(toggleView...), key.WithHelp(helpLabel(toggleView), "group/tag")),
+		Tmux:       key.NewBinding(key.WithKeys(tmux...), key.WithHelp(helpLabel(tmux), "tmux")),
 	}
 }

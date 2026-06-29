@@ -30,7 +30,7 @@ func (a App) tabStripItems() []components.TabItem {
 				title = fmt.Sprintf("[S] %s", tab.Title)
 			}
 		case LocalTab:
-			if strings.HasPrefix(tab.Title, "[R]") || strings.HasPrefix(tab.Title, "[A]") {
+			if strings.HasPrefix(tab.Title, "[R]") || strings.HasPrefix(tab.Title, "[A]") || strings.HasPrefix(tab.Title, "[T]") {
 				title = tab.Title
 			} else {
 				title = fmt.Sprintf("[L] %s", tab.Title)

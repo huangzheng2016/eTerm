@@ -28,6 +28,7 @@ const (
 	TargetActiveNew    = "active-new"
 	TargetActiveAttach = "active-attach"
 	TargetActiveKill   = "active-kill"
+	TargetActiveRename = "active-rename"
 )
 
 const CloseDaemonDisconnected = "daemon disconnected"
@@ -35,6 +36,7 @@ const CloseDaemonDisconnected = "daemon disconnected"
 type ActiveShellInfo struct {
 	ID          string `json:"id"`
 	Shell       string `json:"shell"`
+	Name        string `json:"name,omitempty"`
 	CreatedUnix int64  `json:"created_unix"`
 	Busy        bool   `json:"busy"`
 }

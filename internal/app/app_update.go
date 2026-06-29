@@ -21,10 +21,12 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/sftpview"
 	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 	"github.com/huangzheng2016/eTerm/internal/version"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -45,6 +47,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.batchActions != nil {
 			a.batchActions.syncWidth(a.width)
+		}
+		if a.renamePrompt != nil {
+			a.renamePrompt.syncWidth(a.width)
 		}
 		if a.importHostList != nil {
 			a.importHostList.setPageSize(a.height)
@@ -168,10 +173,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.commandPalette.Update(msg)
 		}
 
+		if a.renamePrompt != nil {
+			closed, cmd := a.renamePrompt.Update(msg)
+			if closed {
+				a.renamePrompt = nil
+			}
+			return a, cmd
+		}
+
 		if a.remoteMenu != nil {
 			closed, cmd := a.remoteMenu.Update(msg)
 			if closed {
 				a.remoteMenu = nil
+			}
+			return a, cmd
+		}
+
+		if a.tmuxMenu != nil {
+			closed, cmd := a.tmuxMenu.Update(msg)
+			if closed {
+				a.tmuxMenu = nil
 			}
 			return a, cmd
 		}
@@ -393,6 +414,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.commandPalette.paste(msg)
 			return a, nil
 		}
+		if a.renamePrompt != nil {
+			a.renamePrompt.paste(msg)
+			return a, nil
+		}
 		if a.batchTag != nil {
 			a.batchTag.paste(msg)
 			return a, nil
@@ -440,6 +465,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.commandPalette != nil {
 				return a.handleOverlayMouse(msg, a.commandPalette.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
 					return a.commandPaletteMouse(lx, ly)
+				})
+			}
+			if a.renamePrompt != nil {
+				return a.handleOverlayMouse(msg, a.renamePrompt.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
+					if ly == 4 {
+						return a, a.renamePrompt.input.Focus()
+					}
+					return a, nil
 				})
 			}
 			if a.batchTag != nil {
@@ -574,6 +607,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case localTerminalOpenedMsg:
 		return a.applyLocalTerminalOpened(msg)
 
+	case tmuxTerminalOpenedMsg:
+		return a.applyTmuxTerminalOpened(msg)
+
 	case types.RemotePeerMenuMsg:
 		a.remoteMenu = remotemenu.New(msg.Peer, msg.Hosts)
 		return a, a.loadActiveShells(msg.Peer)
@@ -593,6 +629,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.RemoteShellKillMsg:
 		return a, a.killActiveShell(msg)
 
+	case types.RemoteShellRenameRequestMsg:
+		a.renamePrompt = newRemoteShellRenamePrompt(msg)
+		a.renamePrompt.syncWidth(a.width)
+		return a, textinput.Blink
+
+	case types.RemoteShellRenameMsg:
+		return a.renameActiveShell(msg)
+
 	case types.RemoteShellReconnectMsg:
 		return a.applyRemoteShellReconnect(msg)
 
@@ -601,6 +645,39 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case remoteTerminalOpenedMsg:
 		return a.applyRemoteTerminalOpened(msg)
+
+	case types.TmuxMenuMsg:
+		a.tmuxMenu = tmuxmenu.New(nil)
+		return a, a.loadTmuxSessions()
+
+	case types.TmuxSessionsLoadedMsg:
+		if msg.Err != nil {
+			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
+		}
+		if a.tmuxMenu != nil {
+			a.tmuxMenu.SetSessions(msg.Sessions)
+		}
+		return a, nil
+
+	case types.TmuxOpenMsg:
+		return a.openTmux(msg)
+
+	case types.TmuxKillRequestMsg:
+		kill := types.TmuxKillMsg{Name: msg.Name}
+		a.pendingTmuxKill = &kill
+		a.confirm = components.NewConfirm("Kill tmux Session", fmt.Sprintf("Kill tmux session %s?", msg.Name)).Show()
+		return a, nil
+
+	case types.TmuxKillMsg:
+		return a, a.killTmuxSession(msg)
+
+	case types.TmuxRenameRequestMsg:
+		a.renamePrompt = newTmuxRenamePrompt(msg)
+		a.renamePrompt.syncWidth(a.width)
+		return a, textinput.Blink
+
+	case types.TmuxRenameMsg:
+		return a.renameTmuxSession(msg)
 
 	case types.SSHDisconnectMsg:
 		return a.applySSHDisconnect(msg)
