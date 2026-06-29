@@ -92,7 +92,7 @@ func (h *RelayHub) closeDaemonSessions(daemon chan relay.Frame) {
 	var frames []closeFrame
 	for id, s := range h.sessions {
 		if s.daemon == daemon {
-			frames = append(frames, closeFrame{ch: s.client, f: relay.Frame{Type: relay.FrameClose, StreamID: id}})
+			frames = append(frames, closeFrame{ch: s.client, f: relay.Frame{Type: relay.FrameClose, StreamID: id, Payload: []byte(relay.CloseDaemonDisconnected)}})
 			delete(h.sessions, id)
 		}
 	}

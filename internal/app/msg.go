@@ -20,6 +20,12 @@ type sftpOpenedMsg struct {
 	hostAlias string
 }
 
+type connectProgressMsg struct {
+	Seq  uint64
+	Text string
+	Next <-chan string
+}
+
 type remoteTerminalOpenedMsg struct {
 	is           *internalssh.InteractiveSession
 	title        string

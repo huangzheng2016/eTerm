@@ -132,11 +132,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case quickConnectFingerprintMsg:
+		a = a.stopConnectProgress()
 		a.pendingQuickConnect = &msg.info
 		a.pendingFingerprint = &msg.confirmInfo
 		fp := msg.confirmInfo
 		a.confirm = components.NewConfirm(fingerprintConfirmTitle(fp), fingerprintConfirmBody(fp)).Show()
 		return a, nil
+
+	case connectProgressMsg:
+		return a.applyConnectProgress(msg)
 
 	case tea.KeyPressMsg:
 		// Quick connect overlay intercepts all keys when active
@@ -580,6 +584,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case types.RemoteShellKillRequestMsg:
+		kill := types.RemoteShellKillMsg{Peer: msg.Peer, ShellID: msg.ShellID}
+		a.pendingRemoteShellKill = &kill
+		a.confirm = components.NewConfirm("Kill Active Shell", fmt.Sprintf("Kill active shell %s on %s?", msg.ShellID, msg.Peer.Name)).Show()
+		return a, nil
+
 	case types.RemoteShellKillMsg:
 		return a, a.killActiveShell(msg)
 
@@ -801,7 +811,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.ConnErrorMsg:
 		appDebugf("ConnErrorMsg: %v", msg.Err)
-		a.toast = a.toast.Dismiss()
+		a = a.stopConnectProgress()
 		a.connError = newConnErrorModel(internalssh.Classify(msg.Err), msg.Target, msg.Retry)
 		return a, reflowWindow(a)
 
@@ -1119,6 +1129,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, func() tea.Msg { return types.RefreshListMsg{} }
 
 	case types.FingerprintConfirmMsg:
+		a = a.stopConnectProgress()
 		a.pendingFingerprint = &msg
 		a.confirm = components.NewConfirm(fingerprintConfirmTitle(msg), fingerprintConfirmBody(msg)).Show()
 		return a, nil

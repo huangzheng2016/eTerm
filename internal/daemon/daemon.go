@@ -277,7 +277,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessions map[uint32]*internals
 		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: []byte(s.id)})
 		s.start()
 	case relay.TargetActiveAttach:
-		s, displaced, err := rt.shells.attach(req.ShellID, f.StreamID, rows, cols, writeFrame)
+		s, displaced, replay, err := rt.shells.attach(req.ShellID, f.StreamID, rows, cols, writeFrame)
 		if err != nil {
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
@@ -287,6 +287,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessions map[uint32]*internals
 		}
 		activeStreams[f.StreamID] = s.id
 		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
+		_ = writeReplay(f.StreamID, replay, writeFrame)
 	case relay.TargetActiveKill:
 		rt.shells.kill(req.ShellID)
 		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
@@ -300,6 +301,22 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessions map[uint32]*internals
 		_ = writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
 		go pumpSession(ctx, f.StreamID, is, writeFrame)
 	}
+}
+
+const activeReplayChunkSize = 16 * 1024
+
+func writeReplay(streamID uint32, replay []byte, writeFrame func(relay.Frame) error) error {
+	for len(replay) > 0 {
+		n := activeReplayChunkSize
+		if len(replay) < n {
+			n = len(replay)
+		}
+		if err := writeFrame(relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: replay[:n]}); err != nil {
+			return err
+		}
+		replay = replay[n:]
+	}
+	return nil
 }
 
 func dialDaemon(ctx context.Context, urls []string, header http.Header, insecureTLS bool) (*websocket.Conn, error) {

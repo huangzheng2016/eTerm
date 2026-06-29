@@ -273,6 +273,15 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
+	if a.pendingRemoteShellKill != nil {
+		msg := *a.pendingRemoteShellKill
+		a.pendingRemoteShellKill = nil
+		if confirmed {
+			return func() tea.Msg { return msg }
+		}
+		return nil
+	}
+
 	// Handle pending fingerprint
 	if a.pendingFingerprint != nil {
 		fp := a.pendingFingerprint

@@ -30,20 +30,23 @@ func (f fileItem) FilterValue() string {
 }
 
 type Model struct {
-	localList    list.Model
-	remoteList   list.Model
-	sftpClient   *sftp.Client
-	localPath    string
-	remotePath   string
-	focusedPanel panelSide
-	width        int
-	height       int
-	listInnerH   int // list viewport height passed to bubbles list (for mouse hit-testing)
-	transferring bool
-	progress     sftp.TransferProgress
-	progressCh   chan sftp.TransferProgress
-	err          string
-	hostAlias    string
+	localList       list.Model
+	remoteList      list.Model
+	sftpClient      *sftp.Client
+	localPath       string
+	remotePath      string
+	localPathInput  textinput.Model
+	remotePathInput textinput.Model
+	pathInputActive bool
+	focusedPanel    panelSide
+	width           int
+	height          int
+	listInnerH      int // list viewport height passed to bubbles list (for mouse hit-testing)
+	transferring    bool
+	progress        sftp.TransferProgress
+	progressCh      chan sftp.TransferProgress
+	err             string
+	hostAlias       string
 
 	// Confirmation state for delete/rename
 	confirmMsg        string         // non-empty = waiting for y/n
@@ -84,6 +87,15 @@ func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 		home = "/"
 	}
 
+	localPathInput := textinput.New()
+	localPathInput.Prompt = "Local: "
+	localPathInput.SetValue(home)
+	localPathInput.Blur()
+	remotePathInput := textinput.New()
+	remotePathInput.Prompt = "Remote: "
+	remotePathInput.SetValue("/")
+	remotePathInput.Blur()
+
 	chmodInput := textinput.New()
 	chmodInput.Placeholder = "0644"
 	chmodInput.CharLimit = 4
@@ -92,17 +104,19 @@ func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 	nameInput.CharLimit = 255
 
 	return Model{
-		localList:    localList,
-		remoteList:   remoteList,
-		sftpClient:   client,
-		localPath:    home,
-		remotePath:   "/",
-		focusedPanel: leftPanel,
-		hostAlias:    hostAlias,
-		progressCh:   make(chan sftp.TransferProgress, 64),
-		chmodInput:   chmodInput,
-		nameInput:    nameInput,
-		vk:           vk,
+		localList:       localList,
+		remoteList:      remoteList,
+		sftpClient:      client,
+		localPath:       home,
+		remotePath:      "/",
+		localPathInput:  localPathInput,
+		remotePathInput: remotePathInput,
+		focusedPanel:    leftPanel,
+		hostAlias:       hostAlias,
+		progressCh:      make(chan sftp.TransferProgress, 64),
+		chmodInput:      chmodInput,
+		nameInput:       nameInput,
+		vk:              vk,
 	}
 }
 
@@ -129,6 +143,8 @@ func (m *Model) SetSize(w, h int) {
 	m.listInnerH = innerH
 	m.localList.SetSize(innerW, innerH)
 	m.remoteList.SetSize(innerW, innerH)
+	m.localPathInput.SetWidth(innerW)
+	m.remotePathInput.SetWidth(innerW)
 	cw := w - 16
 	if cw < 12 {
 		cw = 12
@@ -138,6 +154,7 @@ func (m *Model) SetSize(w, h int) {
 	}
 	m.chmodInput.SetWidth(cw)
 	m.nameInput.SetWidth(cw)
+	m.updatePathTitles()
 }
 
 func formatSize(bytes int64) string {

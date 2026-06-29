@@ -92,6 +92,27 @@ func TestWebSocketRelayData(t *testing.T) {
 	}
 }
 
+func TestCloseDaemonSessionsMarksCloseAsAbnormal(t *testing.T) {
+	h := NewRelayHub(nil)
+	client := make(chan relay.Frame, 1)
+	daemon := make(chan relay.Frame, 1)
+	h.sessions[7] = relaySession{client: client, daemon: daemon}
+
+	h.closeDaemonSessions(daemon)
+
+	select {
+	case f := <-client:
+		if f.Type != relay.FrameClose || f.StreamID != 7 {
+			t.Fatalf("got frame %#v, want close stream 7", f)
+		}
+		if len(f.Payload) == 0 {
+			t.Fatal("expected abnormal close payload")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for close frame")
+	}
+}
+
 func waitPeer(t *testing.T, baseURL string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

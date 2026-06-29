@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"testing"
 	"time"
@@ -46,6 +48,17 @@ func newSink() *frameSink {
 func (s *frameSink) write(f relay.Frame) error {
 	s.frames <- f
 	return nil
+}
+
+func waitAnyFrame(t *testing.T, s *frameSink) relay.Frame {
+	t.Helper()
+	select {
+	case f := <-s.frames:
+		return f
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for frame")
+	}
+	return relay.Frame{}
 }
 
 func waitFrame(t *testing.T, s *frameSink, typ relay.FrameType) relay.Frame {
@@ -98,12 +111,69 @@ func TestShellManagerPumpForwardsAndReplays(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	sink2 := newSink()
-	if _, _, err := m.attach(s.id, 11, 30, 100, sink2.write); err != nil {
+	_, _, replay, err := m.attach(s.id, 11, 30, 100, sink2.write)
+	if err != nil {
 		t.Fatal(err)
 	}
-	replay := waitFrame(t, sink2, relay.FrameData)
-	if string(replay.Payload) != "livebuffered" || replay.StreamID != 11 {
-		t.Fatalf("replay = %q stream %d", replay.Payload, replay.StreamID)
+	if string(replay) != "livebuffered" {
+		t.Fatalf("replay = %q", replay)
+	}
+}
+
+func TestHandleOpenActiveAttachAcknowledgesBeforeReplay(t *testing.T) {
+	m := newTestManager()
+	sink := newSink()
+	s, err := m.create(10, 24, 80, sink.write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.detachStream(10)
+	s.ring.Write([]byte("replay"))
+
+	rt := &runtimeConfig{shells: m}
+	payload, _ := json.Marshal(wsOpen{Target: relay.TargetActiveAttach, ShellID: s.id, Rows: 24, Cols: 80})
+	out := newSink()
+	handleOpen(rt, relay.Frame{Type: relay.FrameOpen, StreamID: 11, Payload: payload}, map[uint32]*internalssh.InteractiveSession{}, map[uint32]string{}, out.write, nil)
+
+	first := waitAnyFrame(t, out)
+	if first.Type != relay.FrameOpenOK {
+		t.Fatalf("first frame type = 0x%02x, want OpenOK", first.Type)
+	}
+	second := waitFrame(t, out, relay.FrameData)
+	if string(second.Payload) != "replay" {
+		t.Fatalf("replay = %q", second.Payload)
+	}
+}
+
+func TestHandleOpenActiveAttachChunksReplay(t *testing.T) {
+	m := newTestManager()
+	sink := newSink()
+	s, err := m.create(10, 24, 80, sink.write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.detachStream(10)
+	want := bytes.Repeat([]byte("x"), 40*1024)
+	s.ring.Write(want)
+
+	rt := &runtimeConfig{shells: m}
+	payload, _ := json.Marshal(wsOpen{Target: relay.TargetActiveAttach, ShellID: s.id, Rows: 24, Cols: 80})
+	out := newSink()
+	handleOpen(rt, relay.Frame{Type: relay.FrameOpen, StreamID: 11, Payload: payload}, map[uint32]*internalssh.InteractiveSession{}, map[uint32]string{}, out.write, nil)
+
+	if first := waitAnyFrame(t, out); first.Type != relay.FrameOpenOK {
+		t.Fatalf("first frame type = 0x%02x, want OpenOK", first.Type)
+	}
+	var got []byte
+	for len(got) < len(want) {
+		f := waitFrame(t, out, relay.FrameData)
+		if len(f.Payload) > 16*1024 {
+			t.Fatalf("replay chunk len = %d, want <= %d", len(f.Payload), 16*1024)
+		}
+		got = append(got, f.Payload...)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("replay bytes mismatch")
 	}
 }
 
@@ -115,7 +185,7 @@ func TestShellManagerTakeover(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink2 := newSink()
-	_, displaced, err := m.attach(s.id, 11, 24, 80, sink2.write)
+	_, displaced, _, err := m.attach(s.id, 11, 24, 80, sink2.write)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +217,30 @@ func TestShellManagerKillNotifiesAttached(t *testing.T) {
 	}
 }
 
+func TestShellManagerExitedShellIsRemovedAndNotifiesAttached(t *testing.T) {
+	m := newTestManager()
+	sink := newSink()
+	s, err := m.create(10, 24, 80, sink.write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.start()
+	_ = s.is.Stdin.Close()
+
+	closed := waitFrame(t, sink, relay.FrameClose)
+	if closed.StreamID != 10 {
+		t.Fatalf("expected close on stream 10, got %d", closed.StreamID)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if len(m.list()) == 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("shell not removed after exit: %+v", m.list())
+}
+
 func TestShellManagerAttachResize(t *testing.T) {
 	m := newTestManager()
 	is, fake := newFakeSession()
@@ -158,7 +252,7 @@ func TestShellManagerAttachResize(t *testing.T) {
 	}
 	m.detachStream(10)
 	sink2 := newSink()
-	if _, _, err := m.attach(s.id, 11, 40, 120, sink2.write); err != nil {
+	if _, _, _, err := m.attach(s.id, 11, 40, 120, sink2.write); err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.resizes) == 0 || fake.resizes[len(fake.resizes)-1] != [2]int{40, 120} {
@@ -168,7 +262,7 @@ func TestShellManagerAttachResize(t *testing.T) {
 
 func TestShellManagerAttachNotFound(t *testing.T) {
 	m := newTestManager()
-	if _, _, err := m.attach("nope", 1, 24, 80, newSink().write); err != errShellNotFound {
+	if _, _, _, err := m.attach("nope", 1, 24, 80, newSink().write); err != errShellNotFound {
 		t.Fatalf("got %v", err)
 	}
 }

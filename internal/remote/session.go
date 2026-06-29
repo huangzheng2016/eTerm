@@ -27,6 +27,16 @@ type openPayload struct {
 	Cols       int    `json:"cols,omitempty"`
 }
 
+type OpenStage string
+
+const (
+	OpenStageConnect OpenStage = "connect"
+	OpenStageRequest OpenStage = "request"
+	OpenStageReply   OpenStage = "reply"
+)
+
+type ProgressFunc func(OpenStage)
+
 type wsStdin struct {
 	ctx      context.Context
 	conn     *websocket.Conn
@@ -40,7 +50,11 @@ const (
 )
 
 func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
-	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols})
+	return OpenWithProgress(ctx, serverURL, apiKey, tenant, insecureTLS, peerID, target, hostSyncID, rows, cols, nil)
+}
+
+func OpenWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, error) {
+	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols}, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +65,11 @@ func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS boo
 // creates one (target active-new). For active-new the assigned shell id is
 // returned in the second value.
 func OpenActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, shellID string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
-	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, ShellID: shellID, Rows: rows, Cols: cols})
+	return OpenActiveShellWithProgress(ctx, serverURL, apiKey, tenant, insecureTLS, peerID, target, shellID, rows, cols, nil)
+}
+
+func OpenActiveShellWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, shellID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, ShellID: shellID, Rows: rows, Cols: cols}, progress)
 	if err != nil {
 		return nil, "", err
 	}
@@ -60,7 +78,7 @@ func OpenActiveShell(ctx context.Context, serverURL, apiKey, tenant string, inse
 
 // ListActiveShells issues a one-shot active-list request.
 func ListActiveShells(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.ActiveShellInfo, error) {
-	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveList})
+	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveList}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +88,7 @@ func ListActiveShells(ctx context.Context, serverURL, apiKey, tenant string, ins
 
 // KillActiveShell issues a one-shot active-kill request.
 func KillActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, shellID string) error {
-	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveKill, ShellID: shellID})
+	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveKill, ShellID: shellID}, nil)
 	if err != nil {
 		return err
 	}
@@ -90,7 +108,10 @@ func ParseShellList(payload []byte) ([]relay.ActiveShellInfo, error) {
 	return out, nil
 }
 
-func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op openPayload) (*websocket.Conn, uint32, []byte, error) {
+func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op openPayload, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
+	ctx, cancel := openTimeoutContext(ctx)
+	defer cancel()
+
 	header := http.Header{}
 	if apiKey != "" {
 		header.Set("Authorization", "Bearer "+apiKey)
@@ -98,16 +119,19 @@ func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureT
 	if tenant != "" {
 		header.Set("X-ETerm-Tenant", tenant)
 	}
+	reportOpenProgress(progress, OpenStageConnect)
 	conn, err := dial(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/client"), header, insecureTLS)
 	if err != nil {
 		return nil, 0, nil, err
 	}
 	streamID := randomStreamID()
 	payload, _ := json.Marshal(op)
+	reportOpenProgress(progress, OpenStageRequest)
 	if err := conn.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload})); err != nil {
 		conn.CloseNow()
 		return nil, 0, nil, err
 	}
+	reportOpenProgress(progress, OpenStageReply)
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
@@ -131,6 +155,12 @@ func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureT
 	}
 }
 
+func reportOpenProgress(progress ProgressFunc, stage OpenStage) {
+	if progress != nil {
+		progress(stage)
+	}
+}
+
 func dial(ctx context.Context, urls []string, header http.Header, insecureTLS bool) (*websocket.Conn, error) {
 	var lastErr error
 	client := esync.HTTPClient(30*time.Second, insecureTLS)
@@ -146,6 +176,15 @@ func dial(ctx context.Context, urls []string, header http.Header, insecureTLS bo
 		return nil, lastErr
 	}
 	return nil, errors.New("server URL is required")
+}
+
+var defaultOpenTimeout = 30 * time.Second
+
+func openTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, defaultOpenTimeout)
 }
 
 func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int) *internalssh.InteractiveSession {
@@ -187,7 +226,11 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 					return
 				}
 			case relay.FrameClose:
-				done <- nil
+				if len(f.Payload) > 0 {
+					done <- errors.New(string(f.Payload))
+				} else {
+					done <- nil
+				}
 				return
 			}
 		}

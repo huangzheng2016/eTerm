@@ -3,6 +3,7 @@ package sftpview
 import (
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -75,6 +76,8 @@ func (m *Model) enterDirectory() tea.Cmd {
 			return nil
 		}
 		m.localPath = filepath.Join(m.localPath, fi.info.Name)
+		m.localPathInput.SetValue(m.localPath)
+		m.updatePathTitles()
 		return m.loadLocalFiles()
 	}
 	item := m.remoteList.SelectedItem()
@@ -86,6 +89,8 @@ func (m *Model) enterDirectory() tea.Cmd {
 		return nil
 	}
 	m.remotePath = remoteJoin(m.remotePath, fi.info.Name)
+	m.remotePathInput.SetValue(m.remotePath)
+	m.updatePathTitles()
 	return m.loadRemoteFiles()
 }
 
@@ -94,6 +99,8 @@ func (m *Model) goParentDir() tea.Cmd {
 		parent := filepath.Dir(m.localPath)
 		if parent != m.localPath {
 			m.localPath = parent
+			m.localPathInput.SetValue(m.localPath)
+			m.updatePathTitles()
 			return m.loadLocalFiles()
 		}
 		return nil
@@ -110,7 +117,80 @@ func (m *Model) goParentDir() tea.Cmd {
 	} else {
 		m.remotePath = m.remotePath[:idx]
 	}
+	m.remotePathInput.SetValue(m.remotePath)
+	m.updatePathTitles()
 	return m.loadRemoteFiles()
+}
+
+func (m *Model) beginPathInput(side panelSide) tea.Cmd {
+	m.focusedPanel = side
+	m.pathInputActive = true
+	if side == leftPanel {
+		m.localPathInput.SetValue(m.localPath)
+		m.remotePathInput.Blur()
+		cmd := m.localPathInput.Focus()
+		m.updatePathTitles()
+		return cmd
+	}
+	m.remotePathInput.SetValue(m.remotePath)
+	m.localPathInput.Blur()
+	cmd := m.remotePathInput.Focus()
+	m.updatePathTitles()
+	return cmd
+}
+
+func (m *Model) cancelPathInput() {
+	m.pathInputActive = false
+	m.localPathInput.SetValue(m.localPath)
+	m.remotePathInput.SetValue(m.remotePath)
+	m.localPathInput.Blur()
+	m.remotePathInput.Blur()
+	m.updatePathTitles()
+}
+
+func (m *Model) applyPathInput() tea.Cmd {
+	if m.focusedPanel == leftPanel {
+		path := strings.TrimSpace(m.localPathInput.Value())
+		if path == "" {
+			m.err = "Local path is required"
+			return nil
+		}
+		m.localPath = filepath.Clean(path)
+		m.cancelPathInput()
+		return m.loadLocalFiles()
+	}
+	path := cleanRemoteInputPath(m.remotePathInput.Value())
+	if path == "" {
+		m.err = "Remote path is required"
+		return nil
+	}
+	m.remotePath = path
+	m.cancelPathInput()
+	return m.loadRemoteFiles()
+}
+
+func cleanRemoteInputPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return pathpkg.Clean(path)
+}
+
+func (m *Model) updatePathTitles() {
+	if m.pathInputActive && m.focusedPanel == leftPanel {
+		m.localList.Title = m.localPathInput.View()
+	} else {
+		m.localList.Title = "Local: " + m.localPath
+	}
+	if m.pathInputActive && m.focusedPanel == rightPanel {
+		m.remoteList.Title = m.remotePathInput.View()
+	} else {
+		m.remoteList.Title = "Remote: " + m.remotePath
+	}
 }
 
 func (m *Model) uploadSelected() tea.Cmd {

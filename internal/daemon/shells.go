@@ -23,6 +23,7 @@ type activeShell struct {
 	stream   uint32
 	write    func(relay.Frame) error
 	stopPump chan struct{}
+	onExit   func(*activeShell)
 }
 
 func (s *activeShell) detach() {
@@ -33,6 +34,11 @@ func (s *activeShell) detach() {
 }
 
 func (s *activeShell) pump() {
+	defer func() {
+		if s.onExit != nil {
+			s.onExit(s)
+		}
+	}()
 	buf := make([]byte, 8192)
 	for {
 		n, err := s.is.Stdout.Read(buf)
@@ -104,6 +110,7 @@ func (m *shellManager) create(stream uint32, rows, cols int, write func(relay.Fr
 		stream:   stream,
 		write:    write,
 		stopPump: make(chan struct{}),
+		onExit:   m.removeExited,
 	}
 	m.mu.Lock()
 	m.shells[s.id] = s
@@ -121,10 +128,10 @@ func (m *shellManager) get(id string) *activeShell {
 	return m.shells[id]
 }
 
-func (m *shellManager) attach(id string, stream uint32, rows, cols int, write func(relay.Frame) error) (*activeShell, uint32, error) {
+func (m *shellManager) attach(id string, stream uint32, rows, cols int, write func(relay.Frame) error) (*activeShell, uint32, []byte, error) {
 	s := m.get(id)
 	if s == nil {
-		return nil, 0, errShellNotFound
+		return nil, 0, nil, errShellNotFound
 	}
 	s.mu.Lock()
 	var displaced uint32
@@ -135,9 +142,6 @@ func (m *shellManager) attach(id string, stream uint32, rows, cols int, write fu
 	s.stream = stream
 	s.write = write
 	replay := s.ring.Bytes()
-	if len(replay) > 0 {
-		_ = write(relay.Frame{Type: relay.FrameData, StreamID: stream, Payload: replay})
-	}
 	s.mu.Unlock()
 	if s.is.Resize != nil {
 		// Force a SIGWINCH even when the size is unchanged so full-screen
@@ -147,7 +151,7 @@ func (m *shellManager) attach(id string, stream uint32, rows, cols int, write fu
 		}
 		_ = s.is.Resize(rows, cols)
 	}
-	return s, displaced, nil
+	return s, displaced, replay, nil
 }
 
 func (m *shellManager) kill(id string) {
@@ -159,11 +163,36 @@ func (m *shellManager) kill(id string) {
 		return
 	}
 	s.mu.Lock()
-	if s.stream != 0 && s.write != nil {
-		_ = s.write(relay.Frame{Type: relay.FrameClose, StreamID: s.stream})
-	}
+	stream := s.stream
+	write := s.write
+	s.stream = 0
+	s.write = nil
 	s.mu.Unlock()
+	if stream != 0 && write != nil {
+		_ = write(relay.Frame{Type: relay.FrameClose, StreamID: stream})
+	}
 	close(s.stopPump)
+	_ = s.is.Close()
+}
+
+func (m *shellManager) removeExited(s *activeShell) {
+	m.mu.Lock()
+	if m.shells[s.id] != s {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.shells, s.id)
+	m.mu.Unlock()
+
+	s.mu.Lock()
+	stream := s.stream
+	write := s.write
+	s.stream = 0
+	s.write = nil
+	s.mu.Unlock()
+	if stream != 0 && write != nil {
+		_ = write(relay.Frame{Type: relay.FrameClose, StreamID: stream})
+	}
 	_ = s.is.Close()
 }
 

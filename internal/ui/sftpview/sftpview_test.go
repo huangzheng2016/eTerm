@@ -111,3 +111,87 @@ func TestFooterAndHelpStaySingleLineWithinWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestMouseClickMapsToRightPanelFirstRenderedRow(t *testing.T) {
+	m := New(nil, "host", viewkeys.SFTPKeys{})
+	m.SetSize(80, 20)
+	_ = m.remoteList.SetItems([]list.Item{
+		fileItem{info: sftp.FileInfo{Name: "one"}},
+		fileItem{info: sftp.FileInfo{Name: "two"}},
+		fileItem{info: sftp.FileInfo{Name: "three"}},
+	})
+
+	next, _ := m.Update(tea.MouseClickMsg(tea.Mouse{
+		X:      45,
+		Y:      3,
+		Button: tea.MouseLeft,
+	}))
+	updated := next.(Model)
+
+	if updated.focusedPanel != rightPanel {
+		t.Fatal("expected right panel focus")
+	}
+	item := updated.remoteList.SelectedItem().(fileItem)
+	if item.info.Name != "one" {
+		t.Fatalf("selected %q want one", item.info.Name)
+	}
+}
+
+func TestLocalPathInputChangesPath(t *testing.T) {
+	dir := t.TempDir()
+	m := New(nil, "host", viewkeys.SFTPKeys{})
+	m.SetSize(80, 20)
+
+	next, _ := m.Update(tea.MouseClickMsg(tea.Mouse{
+		X:      3,
+		Y:      1,
+		Button: tea.MouseLeft,
+	}))
+	m = next.(Model)
+	if !m.pathInputActive || m.focusedPanel != leftPanel {
+		t.Fatal("expected left path input focus")
+	}
+
+	m.localPathInput.SetValue(dir)
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected load command")
+	}
+	if m.localPath != dir {
+		t.Fatalf("localPath = %q want %q", m.localPath, dir)
+	}
+	if m.pathInputActive {
+		t.Fatal("expected path input to close")
+	}
+}
+
+func TestRemotePathInputChangesPath(t *testing.T) {
+	m := New(nil, "host", viewkeys.SFTPKeys{})
+	m.SetSize(80, 20)
+
+	next, _ := m.Update(tea.MouseClickMsg(tea.Mouse{
+		X:      43,
+		Y:      1,
+		Button: tea.MouseLeft,
+	}))
+	m = next.(Model)
+	if !m.pathInputActive || m.focusedPanel != rightPanel {
+		t.Fatal("expected right path input focus")
+	}
+
+	m.remotePathInput.SetValue("var/log")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected load command")
+	}
+	if m.remotePath != "/var/log" {
+		t.Fatalf("remotePath = %q want /var/log", m.remotePath)
+	}
+	if m.pathInputActive {
+		t.Fatal("expected path input to close")
+	}
+}

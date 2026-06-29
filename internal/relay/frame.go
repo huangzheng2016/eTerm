@@ -30,6 +30,8 @@ const (
 	TargetActiveKill   = "active-kill"
 )
 
+const CloseDaemonDisconnected = "daemon disconnected"
+
 type ActiveShellInfo struct {
 	ID          string `json:"id"`
 	Shell       string `json:"shell"`

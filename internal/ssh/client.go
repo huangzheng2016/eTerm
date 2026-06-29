@@ -20,7 +20,20 @@ type ConnectConfig struct {
 	MasterKey           *security.MasterKeyManager
 	DB                  *gorm.DB
 	FingerprintCallback FingerprintCallback
+	Progress            func(ConnectStage)
 }
+
+type ConnectStage string
+
+const (
+	ConnectStageAuth          ConnectStage = "auth"
+	ConnectStageJumpAuth      ConnectStage = "jump auth"
+	ConnectStageJumpConnect   ConnectStage = "jump connect"
+	ConnectStageJumpHandshake ConnectStage = "jump handshake"
+	ConnectStageJumpChannel   ConnectStage = "jump channel"
+	ConnectStageConnect       ConnectStage = "connect"
+	ConnectStageHandshake     ConnectStage = "handshake"
+)
 
 // ConnectResult holds the SSH client and resources that must be closed when done.
 type ConnectResult struct {
@@ -29,6 +42,7 @@ type ConnectResult struct {
 }
 
 func Connect(cfg ConnectConfig) (*ConnectResult, error) {
+	reportConnectProgress(cfg, ConnectStageAuth)
 	authMethods, authClosers, err := BuildAuthMethods(cfg.Host, cfg.Key, cfg.MasterKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build auth methods: %w", err)
@@ -50,6 +64,7 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 	addr := fmt.Sprintf("%s:%d", hostname, port)
 
 	if cfg.JumpHost != nil {
+		reportConnectProgress(cfg, ConnectStageJumpAuth)
 		jumpAuth, jumpClosers, err := BuildAuthMethods(cfg.JumpHost, cfg.JumpKey, cfg.MasterKey)
 		if err != nil {
 			closeAll(closers)
@@ -70,12 +85,14 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 		}
 
 		jumpAddr := fmt.Sprintf("%s:%d", jumpHostname, jumpPort)
+		reportConnectProgress(cfg, ConnectStageJumpConnect)
 		jumpConn, err := dialWithProxy(cfg.Host, jumpAddr, cfg.MasterKey)
 		if err != nil {
 			closeAll(closers)
 			return nil, fmt.Errorf("failed to connect to jump host: %w", err)
 		}
 		setNoDelay(jumpConn)
+		reportConnectProgress(cfg, ConnectStageJumpHandshake)
 		jumpNcc, jumpChans, jumpReqs, err := ssh.NewClientConn(jumpConn, jumpAddr, jumpConfig)
 		if err != nil {
 			_ = jumpConn.Close()
@@ -84,6 +101,7 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 		}
 		jumpClient := ssh.NewClient(jumpNcc, jumpChans, jumpReqs)
 
+		reportConnectProgress(cfg, ConnectStageJumpChannel)
 		conn, err := jumpClient.Dial("tcp", addr)
 		if err != nil {
 			jumpClient.Close()
@@ -91,6 +109,7 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 			return nil, fmt.Errorf("failed to dial through jump host: %w", err)
 		}
 
+		reportConnectProgress(cfg, ConnectStageHandshake)
 		ncc, chans, reqs, err := ssh.NewClientConn(conn, addr, clientConfig)
 		if err != nil {
 			conn.Close()
@@ -107,12 +126,14 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 		}, nil
 	}
 
+	reportConnectProgress(cfg, ConnectStageConnect)
 	tcpConn, err := dialWithProxy(cfg.Host, addr, cfg.MasterKey)
 	if err != nil {
 		closeAll(closers)
 		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
 	setNoDelay(tcpConn)
+	reportConnectProgress(cfg, ConnectStageHandshake)
 	ncc, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, clientConfig)
 	if err != nil {
 		_ = tcpConn.Close()
@@ -125,6 +146,12 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 		Client:  client,
 		Closers: closers,
 	}, nil
+}
+
+func reportConnectProgress(cfg ConnectConfig, stage ConnectStage) {
+	if cfg.Progress != nil {
+		cfg.Progress(stage)
+	}
 }
 
 func closeAll(closers []io.Closer) {

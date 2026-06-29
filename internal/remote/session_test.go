@@ -136,6 +136,101 @@ func TestOpenReadsDataFrames(t *testing.T) {
 	}
 }
 
+func TestOpenWithProgressReportsStages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+	}))
+	defer server.Close()
+
+	var got []OpenStage
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is, err := OpenWithProgress(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80, func(stage OpenStage) {
+		got = append(got, stage)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	want := []OpenStage{OpenStageConnect, OpenStageRequest, OpenStageReply}
+	if len(got) != len(want) {
+		t.Fatalf("stages = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("stages = %+v, want %+v", got, want)
+		}
+	}
+}
+
+func TestFrameClosePayloadEndsSessionWithError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID, Payload: []byte("daemon disconnected")}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	select {
+	case err := <-is.Done:
+		if err == nil || err.Error() != "daemon disconnected" {
+			t.Fatalf("done err = %v, want daemon disconnected", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for done")
+	}
+}
+
+func TestOpenTimeoutContextAddsDeadline(t *testing.T) {
+	ctx, cancel := openTimeoutContext(context.Background())
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("expected deadline")
+	}
+}
+
 func TestParseShellList(t *testing.T) {
 	got, err := ParseShellList([]byte(`[{"id":"ab","shell":"zsh","created_unix":5,"busy":true}]`))
 	if err != nil || len(got) != 1 || got[0].ID != "ab" || !got[0].Busy {

@@ -108,7 +108,7 @@ func (m *Model) updateActive(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		if m.cursor > 0 {
 			sh := m.shells[m.cursor-1]
 			return false, func() tea.Msg {
-				return types.RemoteShellKillMsg{Peer: m.Peer, ShellID: sh.ID}
+				return types.RemoteShellKillRequestMsg{Peer: m.Peer, ShellID: sh.ID}
 			}
 		}
 	case "esc", "escape":

@@ -71,6 +71,7 @@ type App struct {
 	pendingFwdDeleteID     uint
 	pendingFingerprint     *types.FingerprintConfirmMsg
 	pendingQuit            bool
+	pendingRemoteShellKill *types.RemoteShellKillMsg
 
 	// Quick connect overlay
 	quickConnect *quickConnectModel
@@ -113,6 +114,8 @@ type App struct {
 	connError *connErrorModel
 
 	remoteMenu *remotemenu.Model
+
+	connectProgressSeq uint64
 
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint

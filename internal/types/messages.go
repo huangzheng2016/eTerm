@@ -127,6 +127,11 @@ type RemoteShellKillMsg struct {
 	ShellID string
 }
 
+type RemoteShellKillRequestMsg struct {
+	Peer    RemotePeer
+	ShellID string
+}
+
 // RemoteReconnect describes how to re-open a remote shell over the relay after a
 // network drop. Active shells re-attach to the same ShellID (output replays);
 // relay shells spawn a fresh session.

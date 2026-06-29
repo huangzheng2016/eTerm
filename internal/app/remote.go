@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/relay"
@@ -11,7 +10,6 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
 	"github.com/huangzheng2016/eTerm/internal/types"
-	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
@@ -21,14 +19,20 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 		return a, func() tea.Msg { return types.ErrorMsg{Err: fmt.Errorf("remote shell requires HTTP sync mode")} }
 	}
 	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
-	var toastCmd tea.Cmd
-	a.toast, toastCmd = a.toast.Show("Opening remote shell...", components.ToastInfo, 30*time.Second)
 
 	if msg.Active {
 		peer := msg.Peer
 		target, shellID := msg.Target, msg.ShellID
-		return a, tea.Batch(toastCmd, func() tea.Msg {
-			is, newID, err := remote.OpenActiveShell(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, shellID, rows, cols)
+		prefix := "Open active shell"
+		var progress func(string)
+		var progressCh chan string
+		var progressCmd tea.Cmd
+		a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
+		return a, tea.Batch(progressCmd, func() tea.Msg {
+			defer close(progressCh)
+			is, newID, err := remote.OpenActiveShellWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, shellID, rows, cols, func(stage remote.OpenStage) {
+				progress(connectStageText(prefix, string(stage)))
+			})
 			if err != nil {
 				return types.ConnErrorMsg{Err: err, Target: "[A]" + peer.Name}
 			}
@@ -50,8 +54,16 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	}
 	peer := msg.Peer
 	target, hostSyncID := msg.Target, msg.HostSyncID
-	return a, tea.Batch(toastCmd, func() tea.Msg {
-		is, err := remote.Open(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, hostSyncID, rows, cols)
+	prefix := "Open relay shell"
+	var progress func(string)
+	var progressCh chan string
+	var progressCmd tea.Cmd
+	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
+	return a, tea.Batch(progressCmd, func() tea.Msg {
+		defer close(progressCh)
+		is, err := remote.OpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, hostSyncID, rows, cols, func(stage remote.OpenStage) {
+			progress(connectStageText(prefix, string(stage)))
+		})
 		if err != nil {
 			return types.ConnErrorMsg{Err: err, Target: title}
 		}
@@ -79,15 +91,23 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
 	spec := msg.Spec
 	streamID := msg.StreamID
-	var toastCmd tea.Cmd
-	a.toast, toastCmd = a.toast.Show("Reconnecting...", components.ToastInfo, 30*time.Second)
-	return a, tea.Batch(toastCmd, func() tea.Msg {
+	prefix := "Remote reconnect"
+	var progress func(string)
+	var progressCh chan string
+	var progressCmd tea.Cmd
+	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
+	return a, tea.Batch(progressCmd, func() tea.Msg {
+		defer close(progressCh)
 		var is *internalssh.InteractiveSession
 		var err error
 		if spec.Active {
-			is, _, err = remote.OpenActiveShell(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.ShellID, rows, cols)
+			is, _, err = remote.OpenActiveShellWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.ShellID, rows, cols, func(stage remote.OpenStage) {
+				progress(connectStageText(prefix, string(stage)))
+			})
 		} else {
-			is, err = remote.Open(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols)
+			is, err = remote.OpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
+				progress(connectStageText(prefix, string(stage)))
+			})
 		}
 		if err != nil {
 			return types.ConnErrorMsg{Err: err, Target: title, Retry: types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec}}
@@ -123,7 +143,7 @@ func (a App) killActiveShell(msg types.RemoteShellKillMsg) tea.Cmd {
 }
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {
-	a.toast = a.toast.Dismiss()
+	a = a.stopConnectProgress()
 	sv := sshview.New(msg.is, msg.title, 0, BuildSSHKeys(a.kbConfig))
 	if msg.reconnect != nil {
 		sv.SetRemoteReconnect(msg.reconnect)

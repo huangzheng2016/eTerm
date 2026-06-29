@@ -43,23 +43,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case localFilesMsg:
+		m.localPathInput.SetValue(m.localPath)
+		m.updatePathTitles()
 		if msg.err != nil {
 			m.err = msg.err.Error()
 			return m, nil
 		}
 		items := filesToItems(msg.files)
 		cmd := m.localList.SetItems(items)
-		m.localList.Title = "Local: " + m.localPath
 		return m, cmd
 
 	case remoteFilesMsg:
+		m.remotePathInput.SetValue(m.remotePath)
+		m.updatePathTitles()
 		if msg.err != nil {
 			m.err = msg.err.Error()
 			return m, nil
 		}
 		items := filesToItems(msg.files)
 		cmd := m.remoteList.SetItems(items)
-		m.remoteList.Title = "Remote: " + m.remotePath
 		return m, cmd
 
 	case transferProgressMsg:
@@ -123,6 +125,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if m.pathInputActive {
+			switch msg.String() {
+			case "esc":
+				m.cancelPathInput()
+				return m, nil
+			case "enter":
+				return m, m.applyPathInput()
+			}
+			var cmd tea.Cmd
+			if m.focusedPanel == leftPanel {
+				m.localPathInput, cmd = m.localPathInput.Update(msg)
+			} else {
+				m.remotePathInput, cmd = m.remotePathInput.Update(msg)
+			}
+			m.updatePathTitles()
+			return m, cmd
+		}
+
 		if m.focusedPanel == leftPanel && m.localList.FilterState() == list.Filtering {
 			break
 		}
@@ -176,6 +196,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chmodInput = inputpaste.TextInput(m.chmodInput, msg)
 			return m, nil
 		}
+		if m.pathInputActive {
+			if m.focusedPanel == leftPanel {
+				m.localPathInput = inputpaste.TextInput(m.localPathInput, msg)
+			} else {
+				m.remotePathInput = inputpaste.TextInput(m.remotePathInput, msg)
+			}
+			m.updatePathTitles()
+			return m, nil
+		}
 
 	case tea.MouseClickMsg:
 		if m.namePromptActive {
@@ -200,11 +229,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if msg.Button == tea.MouseLeft && m.width > 0 && m.listInnerH > 0 {
-			if msg.Y >= 1 && msg.Y <= m.listInnerH {
-				innerY := msg.Y - 1
-				const titleLines = 1
-				if innerY >= titleLines {
-					row := innerY - titleLines
+			side, row, pathLine, ok := m.mouseTarget(msg.X, msg.Y)
+			if ok {
+				m.focusedPanel = side
+				if pathLine {
+					return m, m.beginPathInput(side)
+				}
+				if m.pathInputActive {
+					m.cancelPathInput()
+				}
+				if row >= 0 {
 					var lst list.Model
 					if m.focusedPanel == leftPanel {
 						lst = m.localList
@@ -256,6 +290,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) mouseTarget(x, y int) (panelSide, int, bool, bool) {
+	if m.width <= 0 || m.listInnerH <= 0 || x < 0 || y <= 0 {
+		return leftPanel, -1, false, false
+	}
+	panelW := m.width / 2
+	if panelW <= 0 {
+		return leftPanel, -1, false, false
+	}
+	side := leftPanel
+	localX := x
+	if x >= panelW {
+		side = rightPanel
+		localX = x - panelW
+	}
+	if localX <= 0 || localX >= panelW-1 {
+		return side, -1, false, false
+	}
+	contentY := y - 1
+	if contentY < 0 || contentY >= m.listInnerH {
+		return side, -1, false, false
+	}
+	const titleLines = 2
+	if contentY < titleLines {
+		return side, -1, true, true
+	}
+	return side, contentY - titleLines, false, true
 }
 
 func (m Model) handleChmodMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {

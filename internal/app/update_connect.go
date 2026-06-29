@@ -20,17 +20,22 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 	database := a.db
 	mk := a.masterKey
 	hostID := msg.HostID
-	var toastCmd tea.Cmd
-	a.toast, toastCmd = a.toast.Show("Connecting...", components.ToastInfo, 30*time.Second)
+	prefix := "SSH connect"
+	var progress func(string)
+	var progressCh chan string
+	var progressCmd tea.Cmd
+	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "load"))
 	ptyCols, ptyRows := ptyFromAppSizeForTab(a, SSHTab)
 	appDebugf("SSHConnectMsg hostID=%d pty=%dx%d (from terminal size)", hostID, ptyCols, ptyRows)
 	dial := func() tea.Msg {
+		defer close(progressCh)
 		var host db.Host
 		if err := database.Preload("Key").First(&host, hostID).Error; err != nil {
 			appDebugf("SSH connect aborted: load host: %v", err)
 			return types.ErrorMsg{Err: fmt.Errorf("host not found: %w", err)}
 		}
 
+		progress(connectStageText(prefix, "verify"))
 		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "ssh", 0, 0); bm != nil {
 			return bm
 		}
@@ -62,6 +67,9 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 			FingerprintCallback: func(hostname string, port int, algorithm string, fingerprint string) bool {
 				return true
 			},
+			Progress: func(stage internalssh.ConnectStage) {
+				progress(connectStageText(prefix, string(stage)))
+			},
 		})
 		if err != nil {
 			appDebugf("SSH dial failed: %v", err)
@@ -79,6 +87,7 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 		}
 		database.Create(&history)
 
+		progress(connectStageText(prefix, "shell"))
 		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, host.ForwardAgent)
 		if err != nil {
 			client.Client.Close()
@@ -96,7 +105,7 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 		initialCommands := initialSSHCommandsForHost(&host, "")
 		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: -1, initialCommands: initialCommands}
 	}
-	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
+	return a, tea.Batch(progressCmd, dial)
 }
 
 func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
@@ -119,17 +128,22 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 	mk := a.masterKey
 	hostID := msg.HostID
 	idx := replaceAt
-	var toastCmd tea.Cmd
-	a.toast, toastCmd = a.toast.Show("Reconnecting...", components.ToastInfo, 30*time.Second)
+	prefix := "SSH reconnect"
+	var progress func(string)
+	var progressCh chan string
+	var progressCmd tea.Cmd
+	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "load"))
 	ptyCols, ptyRows := ptyFromAppSizeForTab(a, SSHTab)
 	appDebugf("SSHReconnectMsg hostID=%d replaceTab=%d", hostID, idx)
 	dial := func() tea.Msg {
+		defer close(progressCh)
 		var host db.Host
 		if err := database.Preload("Key").First(&host, hostID).Error; err != nil {
 			appDebugf("SSH reconnect aborted: load host: %v", err)
 			return types.ErrorMsg{Err: fmt.Errorf("host not found: %w", err)}
 		}
 
+		progress(connectStageText(prefix, "verify"))
 		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "reconnect", msg.StreamID, 0); bm != nil {
 			return bm
 		}
@@ -161,6 +175,9 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 			FingerprintCallback: func(hostname string, port int, algorithm string, fingerprint string) bool {
 				return true
 			},
+			Progress: func(stage internalssh.ConnectStage) {
+				progress(connectStageText(prefix, string(stage)))
+			},
 		})
 		if err != nil {
 			appDebugf("SSH reconnect dial failed: %v", err)
@@ -177,6 +194,7 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 		}
 		database.Create(&history)
 
+		progress(connectStageText(prefix, "shell"))
 		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, host.ForwardAgent)
 		if err != nil {
 			client.Client.Close()
@@ -194,12 +212,12 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 		initialCommands := initialSSHCommandsForHost(&host, "")
 		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx, initialCommands: initialCommands}
 	}
-	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
+	return a, tea.Batch(progressCmd, dial)
 }
 
 func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {
 	appDebugf("openSSHUITabMsg host=%q replaceTabAt=%d", msg.alias, msg.replaceTabAt)
-	a.toast = a.toast.Dismiss()
+	a = a.stopConnectProgress()
 	sv := sshview.New(msg.is, msg.alias, msg.hostID, BuildSSHKeys(a.kbConfig))
 	sv.SetHistoryID(msg.historyID)
 	if a.width > 0 {
@@ -279,15 +297,20 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 	mk := a.masterKey
 	hostID := msg.HostID
 	appDebugf("SFTPOpenMsg hostID=%d", hostID)
-	var toastCmd tea.Cmd
-	a.toast, toastCmd = a.toast.Show("Opening SFTP...", components.ToastInfo, 60*time.Second)
+	prefix := "Open SFTP"
+	var progress func(string)
+	var progressCh chan string
+	var progressCmd tea.Cmd
+	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "load"))
 	sftpAsync := func() tea.Msg {
+		defer close(progressCh)
 		var host db.Host
 		if err := database.Preload("Key").First(&host, hostID).Error; err != nil {
 			appDebugf("SFTP aborted: load host: %v", err)
 			return types.ErrorMsg{Err: fmt.Errorf("host not found: %w", err)}
 		}
 
+		progress(connectStageText(prefix, "verify"))
 		if bm := hostFingerprintDialBlock(database, hostID, host.Hostname, host.Port, "sftp", 0, 0); bm != nil {
 			return bm
 		}
@@ -319,6 +342,9 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 			FingerprintCallback: func(hostname string, port int, algorithm string, fingerprint string) bool {
 				return true
 			},
+			Progress: func(stage internalssh.ConnectStage) {
+				progress(connectStageText(prefix, string(stage)))
+			},
 		})
 		if err != nil {
 			appDebugf("SFTP SSH dial failed: %v", err)
@@ -326,6 +352,7 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 		}
 		appDebugf("SFTP SSH dial OK, creating SFTP layer")
 
+		progress(connectStageText(prefix, "sftp"))
 		sftpClient, err := sftp.NewClient(client.Client)
 		if err != nil {
 			client.Client.Close()
@@ -339,12 +366,12 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 		appDebugf("SFTP ready, opening tab for %q", hostDisplayName(host))
 		return sftpOpenedMsg{client: sftpClient, hostAlias: hostDisplayName(host)}
 	}
-	return a, tea.Batch(toastCmd, reflowWindow(a), sftpAsync)
+	return a, tea.Batch(progressCmd, sftpAsync)
 }
 
 func (a App) applySftpOpened(msg sftpOpenedMsg) (App, tea.Cmd) {
 	appDebugf("sftpOpenedMsg: new tab SFTP: %s", msg.hostAlias)
-	a.toast = a.toast.Dismiss()
+	a = a.stopConnectProgress()
 	sv := sftpview.New(msg.client, msg.hostAlias, BuildSFTPKeys(a.kbConfig))
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(SFTPTab))

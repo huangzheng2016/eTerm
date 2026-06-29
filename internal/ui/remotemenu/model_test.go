@@ -117,16 +117,16 @@ func TestActiveAttachEmitsOpen(t *testing.T) {
 	}
 }
 
-func TestActiveKillEmitsAndKeepsMenu(t *testing.T) {
+func TestActiveKillRequestsConfirmationAndKeepsMenu(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
 	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
 	m.cursor = 1
 	done, cmd := m.Update(keyText("d"))
 	if done {
-		t.Fatal("kill should keep menu open")
+		t.Fatal("kill request should keep menu open")
 	}
-	if _, ok := cmd().(types.RemoteShellKillMsg); !ok {
-		t.Fatal("d should emit kill msg")
+	if _, ok := cmd().(types.RemoteShellKillRequestMsg); !ok {
+		t.Fatal("d should emit kill confirmation request")
 	}
 }
 

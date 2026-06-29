@@ -15,7 +15,6 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
-	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
 
 	"gorm.io/gorm"
@@ -111,8 +110,11 @@ func parseQuickConnect(raw string) (hostname string, port int, username string) 
 func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 	database := a.db
 	mk := a.masterKey
-	var toastCmd tea.Cmd
-	a.toast, toastCmd = a.toast.Show("Quick connecting...", components.ToastInfo, 30*time.Second)
+	prefix := "Quick connect"
+	var progress func(string)
+	var progressCh chan string
+	var progressCmd tea.Cmd
+	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "verify"))
 	ptyCols, ptyRows := ptyFromAppSizeForTab(a, SSHTab)
 
 	host := &db.Host{
@@ -123,6 +125,7 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 	}
 
 	dial := func() tea.Msg {
+		defer close(progressCh)
 		if bm := hostFingerprintDialBlock(database, 0, host.Hostname, host.Port, "quick", 0, 0); bm != nil {
 			if fp, ok := bm.(types.FingerprintConfirmMsg); ok {
 				return quickConnectFingerprintMsg{info: msg, confirmInfo: fp}
@@ -137,11 +140,15 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 			FingerprintCallback: func(hostname string, port int, algorithm string, fingerprint string) bool {
 				return true
 			},
+			Progress: func(stage internalssh.ConnectStage) {
+				progress(connectStageText(prefix, string(stage)))
+			},
 		})
 		if err != nil {
 			return types.ConnErrorMsg{Err: err, Target: fmt.Sprintf("%s@%s:%d", msg.Username, msg.Hostname, msg.Port), Retry: msg}
 		}
 
+		progress(connectStageText(prefix, "shell"))
 		is, err := internalssh.NewInteractiveSession(client.Client, ptyRows, ptyCols, false)
 		if err != nil {
 			client.Client.Close()
@@ -155,6 +162,7 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 		alias := fmt.Sprintf("%s@%s:%d", msg.Username, msg.Hostname, msg.Port)
 		now := time.Now()
 		var savedHost db.Host
+		progress(connectStageText(prefix, "save"))
 		err = database.Where("hostname = ? AND port = ? AND username = ?", msg.Hostname, msg.Port, msg.Username).First(&savedHost).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			savedHost = *host
@@ -180,5 +188,5 @@ func (a App) handleQuickConnect(msg types.QuickConnectMsg) (App, tea.Cmd) {
 		}
 		return openSSHUITabMsg{is: is, alias: alias, hostID: savedHost.ID, historyID: history.ID, replaceTabAt: -1}
 	}
-	return a, tea.Batch(toastCmd, reflowWindow(a), dial)
+	return a, tea.Batch(progressCmd, dial)
 }
