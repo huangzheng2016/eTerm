@@ -125,6 +125,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Snippets Tab", "snippets_tab"},
 		{"Global", "Command Palette", "command_palette"},
 		{"Global", "Local Terminal", "local_terminal"},
+		{"Global", "Rename Tab", "rename_tab"},
 		// Home
 		{"Home", "SSH Connect", "ssh_connect"},
 		{"Home", "SFTP Open", "sftp_open"},

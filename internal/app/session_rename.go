@@ -10,6 +10,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/inputpaste"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
 type sessionRenameKind int
@@ -17,6 +18,7 @@ type sessionRenameKind int
 const (
 	renameRemoteShell sessionRenameKind = iota
 	renameTmuxSession
+	renameTab
 )
 
 type sessionRenameModel struct {
@@ -25,6 +27,12 @@ type sessionRenameModel struct {
 	peer    types.RemotePeer
 	shellID string
 	oldName string
+	tab     int
+}
+
+type tabRenameMsg struct {
+	Index int
+	Title string
 }
 
 func newRemoteShellRenamePrompt(msg types.RemoteShellRenameRequestMsg) *sessionRenameModel {
@@ -35,6 +43,11 @@ func newRemoteShellRenamePrompt(msg types.RemoteShellRenameRequestMsg) *sessionR
 func newTmuxRenamePrompt(msg types.TmuxRenameRequestMsg) *sessionRenameModel {
 	ti := newSessionRenameInput(msg.Name)
 	return &sessionRenameModel{kind: renameTmuxSession, input: ti, oldName: msg.Name}
+}
+
+func newTabRenamePrompt(index int, title string) *sessionRenameModel {
+	ti := newSessionRenameInput(title)
+	return &sessionRenameModel{kind: renameTab, input: ti, tab: index}
 }
 
 func newSessionRenameInput(value string) textinput.Model {
@@ -76,6 +89,9 @@ func (m *sessionRenameModel) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		case renameTmuxSession:
 			oldName := m.oldName
 			return true, func() tea.Msg { return types.TmuxRenameMsg{OldName: oldName, NewName: name} }
+		case renameTab:
+			idx := m.tab
+			return true, func() tea.Msg { return tabRenameMsg{Index: idx, Title: name} }
 		}
 	}
 	var cmd tea.Cmd
@@ -91,6 +107,8 @@ func (m *sessionRenameModel) View() string {
 	title := "Rename session"
 	if m.kind == renameRemoteShell {
 		title = "Rename active shell"
+	} else if m.kind == renameTab {
+		title = "Rename tab"
 	}
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("Enter apply · Esc cancel")
 	content := lipgloss.JoinVertical(lipgloss.Left, ui.TitleStyle.Render(title), "", m.input.View(), "", hint)
@@ -99,4 +117,51 @@ func (m *sessionRenameModel) View() string {
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(1, 2).
 		Render(content)
+}
+
+func (a App) openActiveTabRenamePrompt() (App, tea.Cmd) {
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return a, nil
+	}
+	tab := a.tabs[a.activeTab]
+	if sm, ok := tab.Model.(*sshview.Model); ok {
+		if spec := sm.RemoteReconnect(); spec != nil && spec.Active {
+			a.renamePrompt = newRemoteShellRenamePrompt(types.RemoteShellRenameRequestMsg{
+				Peer:        spec.Peer,
+				ShellID:     spec.ShellID,
+				CurrentName: activeShellPromptName(tab.Title, spec.Peer.Name, spec.ShellID),
+			})
+			a.renamePrompt.syncWidth(a.width)
+			return a, textinput.Blink
+		}
+	}
+	if strings.HasPrefix(tab.Title, "[T]") {
+		name := strings.TrimPrefix(tab.Title, "[T]")
+		a.renamePrompt = newTmuxRenamePrompt(types.TmuxRenameRequestMsg{Name: name})
+		a.renamePrompt.syncWidth(a.width)
+		return a, textinput.Blink
+	}
+	a.renamePrompt = newTabRenamePrompt(a.activeTab, tab.Title)
+	a.renamePrompt.syncWidth(a.width)
+	return a, textinput.Blink
+}
+
+func activeShellPromptName(title, peerName, shellID string) string {
+	prefix := "[A]" + peerName + "-"
+	if strings.HasPrefix(title, prefix) {
+		if name := strings.TrimSpace(strings.TrimPrefix(title, prefix)); name != "" {
+			return name
+		}
+	}
+	return shellID
+}
+
+func (a App) renameTab(msg tabRenameMsg) (App, tea.Cmd) {
+	title := strings.TrimSpace(msg.Title)
+	if title == "" || msg.Index < 0 || msg.Index >= len(a.tabs) {
+		return a, nil
+	}
+	a.tabs[msg.Index].Title = title
+	a.syncTabBar()
+	return a, nil
 }

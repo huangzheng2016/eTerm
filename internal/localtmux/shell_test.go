@@ -2,6 +2,7 @@ package localtmux
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,13 @@ func TestTmuxCommandErrorForMissingBinary(t *testing.T) {
 	err := tmuxCommandError("list-sessions", exec.ErrNotFound, nil)
 	if err == nil || err.Error() != "tmux not found in PATH" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDefaultSessionNameUsesShortTmuxPrefix(t *testing.T) {
+	name := defaultSessionName()
+	if !regexp.MustCompile(`^tmux-[a-z0-9]{6}$`).MatchString(name) {
+		t.Fatalf("name = %q", name)
 	}
 }
 

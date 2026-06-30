@@ -31,6 +31,7 @@ type KeyBindingConfig struct {
 	SnippetsTab    []string `json:"snippets_tab"`
 	CommandPalette []string `json:"command_palette"`
 	LocalTerminal  []string `json:"local_terminal"`
+	RenameTab      []string `json:"rename_tab"`
 	PasteImageURL  []string `json:"paste_image_url"`
 
 	// Home
@@ -106,6 +107,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		SnippetsTab:    []string{"ctrl+shift+b"},
 		CommandPalette: []string{"ctrl+k"},
 		LocalTerminal:  []string{"ctrl+shift+t"},
+		RenameTab:      []string{"ctrl+shift+r"},
 		PasteImageURL:  []string{"ctrl+shift+i"},
 
 		// Home
@@ -302,6 +304,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		LocalTerminal: key.NewBinding(
 			key.WithKeys(cfg.LocalTerminal...),
 			key.WithHelp(helpLabel(cfg.LocalTerminal), "local shell"),
+		),
+		RenameTab: key.NewBinding(
+			key.WithKeys(cfg.RenameTab...),
+			key.WithHelp(helpLabel(cfg.RenameTab), "rename tab"),
 		),
 		PasteImageURL: key.NewBinding(
 			key.WithKeys(cfg.PasteImageURL...),

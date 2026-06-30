@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/creack/pty"
+	"github.com/google/uuid"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
@@ -30,7 +30,7 @@ func ListSessions(ctx context.Context) ([]types.TmuxSession, error) {
 }
 
 func NewSession(ctx context.Context, rows, cols int) (*internalssh.InteractiveSession, string, error) {
-	name := fmt.Sprintf("eterm-%d", time.Now().UnixNano())
+	name := defaultSessionName()
 	if err := runTmux(ctx, "new-session", newSessionDetachedArgs(name)); err != nil {
 		return nil, "", err
 	}
@@ -57,6 +57,10 @@ func KillSession(ctx context.Context, name string) error {
 		return tmuxCommandError("kill-session", err, out)
 	}
 	return nil
+}
+
+func defaultSessionName() string {
+	return "tmux-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:6]
 }
 
 func runTmux(ctx context.Context, op string, args []string) error {

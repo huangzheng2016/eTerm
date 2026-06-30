@@ -325,6 +325,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, layoutCmd
 		case matchCtrlShiftAnyOf(msg, a.keyMap.LocalTerminal) || key.Matches(msg, a.keyMap.LocalTerminal):
 			return a.openLocalTerminal()
+		case matchCtrlShiftAnyOf(msg, a.keyMap.RenameTab) || key.Matches(msg, a.keyMap.RenameTab):
+			return a.openActiveTabRenamePrompt()
 		case matchCtrlShiftAnyOf(msg, a.keyMap.QuitApp) || key.Matches(msg, a.keyMap.QuitApp):
 			return a.quitWithCheck()
 		case key.Matches(msg, a.keyMap.Quit):
@@ -678,6 +680,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.TmuxRenameMsg:
 		return a.renameTmuxSession(msg)
+
+	case tabRenameMsg:
+		return a.renameTab(msg)
 
 	case types.SSHDisconnectMsg:
 		return a.applySSHDisconnect(msg)
