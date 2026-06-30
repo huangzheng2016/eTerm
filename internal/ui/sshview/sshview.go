@@ -33,6 +33,8 @@ const selectionAutoScrollEdgePercent = 20
 
 const maxCoalescedChunkBytes = 64 * 1024
 
+const scrollIndicatorDuration = 3 * time.Second
+
 // ChunkMsg carries PTY stdout for one embedded session; StreamID routes it in App.Update.
 type ChunkMsg struct {
 	StreamID uint64
@@ -47,6 +49,11 @@ type StreamDoneMsg struct {
 
 type selectionAutoScrollMsg struct {
 	StreamID uint64
+}
+
+type scrollIndicatorTimeoutMsg struct {
+	StreamID uint64
+	Seq      uint64
 }
 
 // Model streams PTY output through a virtual terminal and forwards keys to the SSH session.
@@ -80,6 +87,9 @@ type Model struct {
 	// bottomPad > 0 lets the user scroll past the live bottom, pushing the
 	// newest line up and showing empty rows below it (0..bottomPadMax).
 	bottomPad int
+
+	scrollIndicatorUntil time.Time
+	scrollIndicatorSeq   uint64
 
 	// Mouse drag text selection over the visible screen + scrollback.
 	sel selection
@@ -435,6 +445,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Any keypress snaps back to live view and clears any text selection.
 		m.scrollOffset = 0
 		m.bottomPad = 0
+		m.clearScrollIndicator()
 		m.sel.active = false
 		if b := m.encodeKey(msg); len(b) > 0 && m.sess != nil && m.sess.Stdin != nil {
 			_, _ = m.sess.Stdin.Write(b)
@@ -566,6 +577,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if m.scrollOffset > 0 {
+			return m, m.showScrollIndicator()
+		}
+		m.clearScrollIndicator()
+		return m, nil
+
+	case scrollIndicatorTimeoutMsg:
+		if msg.StreamID != m.streamID || msg.Seq != m.scrollIndicatorSeq {
+			return m, nil
+		}
+		if !m.scrollIndicatorUntil.IsZero() && !time.Now().Before(m.scrollIndicatorUntil) {
+			m.clearScrollIndicator()
+		}
 		return m, nil
 
 	case selectionAutoScrollMsg:
@@ -585,6 +609,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *Model) showScrollIndicator() tea.Cmd {
+	m.scrollIndicatorSeq++
+	m.scrollIndicatorUntil = time.Now().Add(scrollIndicatorDuration)
+	streamID := m.streamID
+	seq := m.scrollIndicatorSeq
+	return tea.Tick(scrollIndicatorDuration, func(time.Time) tea.Msg {
+		return scrollIndicatorTimeoutMsg{StreamID: streamID, Seq: seq}
+	})
+}
+
+func (m *Model) clearScrollIndicator() {
+	m.scrollIndicatorUntil = time.Time{}
+}
+
+func (m *Model) scrollIndicatorVisible(now time.Time) bool {
+	return m.scrollOffset > 0 && !m.scrollIndicatorUntil.IsZero() && now.Before(m.scrollIndicatorUntil)
 }
 
 func (m *Model) updateSelectionAutoScroll(y int) tea.Cmd {

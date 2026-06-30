@@ -2,6 +2,7 @@ package sshview
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -162,6 +163,52 @@ func TestScrollbackRenderDoesNotSpaceCJK(t *testing.T) {
 	}
 	if !strings.Contains(got, "这是中文") {
 		t.Fatalf("expected contiguous CJK text, got %q", got)
+	}
+}
+
+func TestScrollbackViewShowsCompactTopRightPosition(t *testing.T) {
+	e := mkEmu(20, 5, "L0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\n")
+	m := &Model{emu: e, scrollOffset: 2, scrollIndicatorUntil: time.Now().Add(time.Second)}
+
+	view := m.View().Content
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("line count = %d want 5:\n%s", len(lines), view)
+	}
+	want := fmt.Sprintf("[%d/%d]", m.scrollOffset, e.ScrollbackLen())
+	if !strings.Contains(lines[0], want) {
+		t.Fatalf("top line missing %q:\n%s", want, lines[0])
+	}
+	if strings.Contains(view, "scrollback") || strings.Contains(view, "lines up") {
+		t.Fatalf("view contains old scrollback banner:\n%s", view)
+	}
+}
+
+func TestScrollbackViewHidesExpiredPosition(t *testing.T) {
+	e := mkEmu(20, 5, "L0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\n")
+	m := &Model{emu: e, scrollOffset: 2, scrollIndicatorUntil: time.Now().Add(-time.Second)}
+
+	view := m.View().Content
+	want := fmt.Sprintf("[%d/%d]", m.scrollOffset, e.ScrollbackLen())
+	if strings.Contains(view, want) {
+		t.Fatalf("view contains expired indicator %q:\n%s", want, view)
+	}
+}
+
+func TestWheelScrollbackShowsPositionTemporarily(t *testing.T) {
+	e := mkEmu(20, 5, "L0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\n")
+	m := &Model{emu: e}
+
+	_, cmd := m.Update(wheel(tea.MouseWheelUp))
+
+	if m.scrollOffset == 0 {
+		t.Fatal("expected scrollOffset > 0")
+	}
+	if cmd == nil {
+		t.Fatal("expected timeout command")
+	}
+	if !m.scrollIndicatorUntil.After(time.Now()) {
+		t.Fatalf("scrollIndicatorUntil = %v", m.scrollIndicatorUntil)
 	}
 }
 

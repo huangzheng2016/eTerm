@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
@@ -30,8 +32,6 @@ func (m *Model) View() tea.View {
 		screen = m.renderWithSelection()
 	case m.scrollOffset > 0 && !m.emu.IsAltScreen():
 		screen = m.renderScrollback()
-		indicator := scrollIndicatorStyle.Render(fmt.Sprintf(" ↑ scrollback [%d lines up] — type to return ", m.scrollOffset))
-		screen = strings.TrimRight(screen, "\n") + "\n" + indicator
 	case m.bottomPad > 0 && !m.emu.IsAltScreen():
 		screen = m.renderBottomPad()
 	default:
@@ -192,7 +192,25 @@ func (m *Model) renderScrollback() string {
 		lines = append(lines, renderScreenLine(m, w, y))
 	}
 
+	if len(lines) > 0 && m.scrollIndicatorVisible(time.Now()) {
+		indicator := scrollIndicatorStyle.Render(fmt.Sprintf("[%d/%d]", offset, sbLen))
+		lines[0] = overlayRight(lines[0], w, indicator)
+	}
+
 	return strings.Join(lines, "\n")
+}
+
+func overlayRight(line string, width int, overlay string) string {
+	overlayW := lipgloss.Width(overlay)
+	if width <= 0 || overlayW >= width {
+		return ansi.Cut(overlay, 0, width)
+	}
+	baseW := width - overlayW
+	base := ansi.Cut(line, 0, baseW)
+	if pad := baseW - lipgloss.Width(base); pad > 0 {
+		base += strings.Repeat(" ", pad)
+	}
+	return base + overlay
 }
 
 func renderScrollbackLine(m *Model, w, idx int) string {
