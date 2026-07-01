@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"regexp"
 	"testing"
 	"time"
 
@@ -89,6 +90,22 @@ func TestShellManagerNewListKill(t *testing.T) {
 	m.kill(s.id)
 	if len(m.list()) != 0 {
 		t.Fatalf("shell not removed after kill")
+	}
+}
+
+func TestShellManagerCreateSetsDefaultName(t *testing.T) {
+	m := newTestManager()
+	sink := newSink()
+	_, err := m.create(10, 24, 80, sink.write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := m.list()
+	if len(list) != 1 {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+	if !regexp.MustCompile(`^active-[a-z0-9]{6}$`).MatchString(list[0].Name) {
+		t.Fatalf("name = %q", list[0].Name)
 	}
 }
 

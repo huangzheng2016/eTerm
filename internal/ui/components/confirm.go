@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -15,6 +16,11 @@ type ConfirmModel struct {
 	active      bool
 	yesSelected bool
 }
+
+const (
+	confirmYesButton = "  Yes  "
+	confirmNoButton  = "  No   "
+)
 
 func NewConfirm(title, message string) ConfirmModel {
 	return ConfirmModel{
@@ -64,14 +70,9 @@ func (c ConfirmModel) Update(msg tea.Msg) (ConfirmModel, tea.Cmd) {
 		}
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
-			if msg.Y >= 4 && msg.Y <= 4 {
-				if msg.X >= 2 && msg.X < 10 {
-					c.confirmed = true
-					c.active = false
-				} else if msg.X >= 12 && msg.X < 20 {
-					c.confirmed = false
-					c.active = false
-				}
+			if hit, yes := c.mouseButton(msg.X, msg.Y); hit {
+				c.confirmed = yes
+				c.active = false
 			}
 		}
 	}
@@ -87,8 +88,8 @@ func (c ConfirmModel) View() string {
 	titleStr := ui.TitleStyle.Render(c.title)
 	msgStr := c.message
 
-	yesBtn := "  Yes  "
-	noBtn := "  No   "
+	yesBtn := confirmYesButton
+	noBtn := confirmNoButton
 	if c.yesSelected {
 		yesBtn = ui.SelectedStyle.Render(yesBtn)
 		noBtn = ui.DimStyle.Render(noBtn)
@@ -108,4 +109,23 @@ func (c ConfirmModel) View() string {
 		Render(content)
 
 	return dialog
+}
+
+func (c ConfirmModel) mouseButton(x, y int) (bool, bool) {
+	buttonY := 6 + strings.Count(c.message, "\n")
+	if y != buttonY {
+		return false, false
+	}
+	yesStart := 3
+	yesEnd := yesStart + len(confirmYesButton)
+	noStart := yesEnd + 4
+	noEnd := noStart + len(confirmNoButton)
+	switch {
+	case x >= yesStart && x < yesEnd:
+		return true, true
+	case x >= noStart && x < noEnd:
+		return true, false
+	default:
+		return false, false
+	}
 }

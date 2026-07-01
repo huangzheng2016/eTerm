@@ -8,7 +8,10 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
@@ -87,6 +90,14 @@ func TestRenameActiveShellUpdatesOpenTabTitle(t *testing.T) {
 	}
 }
 
+func TestActiveShellTabTitleDefaultsToActiveName(t *testing.T) {
+	title := activeShellTabTitle("peer", "abcdef", "")
+
+	if title != "[A]peer-active-abcdef" {
+		t.Fatalf("title = %q", title)
+	}
+}
+
 func TestTmuxKillRequestRequiresConfirm(t *testing.T) {
 	a := App{}
 	next, cmd := a.Update(types.TmuxKillRequestMsg{Name: "work"})
@@ -107,6 +118,67 @@ func TestTmuxKillRequestRequiresConfirm(t *testing.T) {
 	}
 	if msg.Name != "work" {
 		t.Fatalf("bad kill msg %+v", msg)
+	}
+}
+
+func TestConfirmKeysTakePriorityOverRemoteMenu(t *testing.T) {
+	peer := types.RemotePeer{ID: "p1", Name: "peer"}
+	a := App{
+		viewState:              MainView,
+		remoteMenu:             remotemenu.New(peer, nil),
+		confirm:                components.NewConfirm("Kill Active Shell", "Kill?").Show(),
+		pendingRemoteShellKill: &types.RemoteShellKillMsg{Peer: peer, ShellID: "ab"},
+	}
+
+	next, cmd := a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	a = next.(App)
+	if cmd != nil {
+		t.Fatal("left should only select yes")
+	}
+	next, cmd = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	a = next.(App)
+	if cmd == nil {
+		t.Fatal("expected confirmed kill command")
+	}
+	msg, ok := cmd().(types.RemoteShellKillMsg)
+	if !ok {
+		t.Fatalf("got %T want RemoteShellKillMsg", cmd())
+	}
+	if msg.ShellID != "ab" {
+		t.Fatalf("bad kill msg %+v", msg)
+	}
+	if a.remoteMenu == nil {
+		t.Fatal("remote menu should stay open after delete confirmation")
+	}
+}
+
+func TestConfirmKeysTakePriorityOverTmuxMenu(t *testing.T) {
+	a := App{
+		viewState:       MainView,
+		tmuxMenu:        tmuxmenu.New([]types.TmuxSession{{Name: "work"}}),
+		confirm:         components.NewConfirm("Kill tmux Session", "Kill?").Show(),
+		pendingTmuxKill: &types.TmuxKillMsg{Name: "work"},
+	}
+
+	next, cmd := a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	a = next.(App)
+	if cmd != nil {
+		t.Fatal("left should only select yes")
+	}
+	next, cmd = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	a = next.(App)
+	if cmd == nil {
+		t.Fatal("expected confirmed kill command")
+	}
+	msg, ok := cmd().(types.TmuxKillMsg)
+	if !ok {
+		t.Fatalf("got %T want TmuxKillMsg", cmd())
+	}
+	if msg.Name != "work" {
+		t.Fatalf("bad kill msg %+v", msg)
+	}
+	if a.tmuxMenu == nil {
+		t.Fatal("tmux menu should stay open after delete confirmation")
 	}
 }
 

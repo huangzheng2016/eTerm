@@ -105,9 +105,11 @@ func (m *shellManager) create(stream uint32, rows, cols int, write func(relay.Fr
 	if err != nil {
 		return nil, err
 	}
+	id := uuid.New().String()[:6]
 	s := &activeShell{
-		id:       uuid.New().String()[:6],
+		id:       id,
 		shell:    m.shellName(),
+		name:     defaultActiveShellName(id),
 		created:  time.Now(),
 		is:       is,
 		ring:     newRingBuffer(),
@@ -120,6 +122,10 @@ func (m *shellManager) create(stream uint32, rows, cols int, write func(relay.Fr
 	m.shells[s.id] = s
 	m.mu.Unlock()
 	return s, nil
+}
+
+func defaultActiveShellName(id string) string {
+	return "active-" + id
 }
 
 func (s *activeShell) start() {

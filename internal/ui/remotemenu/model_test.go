@@ -101,7 +101,7 @@ func TestActiveNewEmitsOpen(t *testing.T) {
 		t.Fatal("enter on new should close menu and emit cmd")
 	}
 	msg := cmd().(types.RemoteShellOpenMsg)
-	if msg.Target != relay.TargetActiveNew || !msg.Active {
+	if msg.Target != relay.TargetActiveNew || !msg.Active || msg.HostLabel != "" {
 		t.Fatalf("bad new msg %+v", msg)
 	}
 }

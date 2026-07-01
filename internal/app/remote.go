@@ -180,11 +180,21 @@ func (a *App) renameActiveShellTabs(peerID, shellID, name string) {
 }
 
 func activeShellTabTitle(peerName, shellID, label string) string {
-	suffix := shellID
-	if strings.TrimSpace(label) != "" {
-		suffix = strings.TrimSpace(label)
+	suffix := strings.TrimSpace(label)
+	if suffix == "" {
+		suffix = defaultActiveShellName(shellID)
+	}
+	if suffix == "" {
+		suffix = shellID
 	}
 	return "[A]" + peerName + "-" + suffix
+}
+
+func defaultActiveShellName(shellID string) string {
+	if shellID == "" {
+		return ""
+	}
+	return "active-" + shellID
 }
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {

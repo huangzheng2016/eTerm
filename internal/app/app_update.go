@@ -148,6 +148,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.applyConnectProgress(msg)
 
 	case tea.KeyPressMsg:
+		if a.confirm.IsActive() {
+			wasActive := true
+			var cmd tea.Cmd
+			a.confirm, cmd = a.confirm.Update(msg)
+			cmds = append(cmds, cmd)
+			if wasActive && !a.confirm.IsActive() {
+				actionCmd := a.processConfirmResult()
+				if actionCmd != nil {
+					cmds = append(cmds, actionCmd)
+				}
+			}
+			return a, tea.Batch(cmds...)
+		}
+
 		// Quick connect overlay intercepts all keys when active
 		if a.quickConnect != nil {
 			return a.handleQuickConnectKey(msg)
@@ -269,21 +283,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if a.helpOverlay {
 			return a.handleHelpOverlayKey(msg)
-		}
-
-		if a.confirm.IsActive() {
-			wasActive := true
-			var cmd tea.Cmd
-			a.confirm, cmd = a.confirm.Update(msg)
-			cmds = append(cmds, cmd)
-			// Check if confirm just closed — process pending action
-			if wasActive && !a.confirm.IsActive() {
-				actionCmd := a.processConfirmResult()
-				if actionCmd != nil {
-					cmds = append(cmds, actionCmd)
-				}
-			}
-			return a, tea.Batch(cmds...)
 		}
 
 		// Touch activity for auto-lock

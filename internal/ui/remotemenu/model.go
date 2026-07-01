@@ -97,7 +97,7 @@ func (m *Model) updateActive(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		peer := m.Peer
 		if m.cursor == 0 {
 			return true, func() tea.Msg {
-				return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetActiveNew, Active: true, HostLabel: "Active Shell"}
+				return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetActiveNew, Active: true}
 			}
 		}
 		sh := m.shells[m.cursor-1]
