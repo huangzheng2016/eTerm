@@ -273,9 +273,9 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
-	if a.pendingRemoteShellKill != nil {
-		msg := *a.pendingRemoteShellKill
-		a.pendingRemoteShellKill = nil
+	if a.pendingRemoteTmuxKill != nil {
+		msg := *a.pendingRemoteTmuxKill
+		a.pendingRemoteTmuxKill = nil
 		if confirmed {
 			return func() tea.Msg { return msg }
 		}

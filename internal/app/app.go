@@ -43,9 +43,10 @@ const (
 )
 
 type Tab struct {
-	Type  TabType
-	Title string
-	Model tea.Model
+	Type        TabType
+	Title       string
+	Model       tea.Model
+	TmuxSession string
 }
 
 type App struct {
@@ -72,7 +73,7 @@ type App struct {
 	pendingFwdDeleteID     uint
 	pendingFingerprint     *types.FingerprintConfirmMsg
 	pendingQuit            bool
-	pendingRemoteShellKill *types.RemoteShellKillMsg
+	pendingRemoteTmuxKill  *types.RemoteTmuxKillMsg
 	pendingTmuxKill        *types.TmuxKillMsg
 
 	// Quick connect overlay

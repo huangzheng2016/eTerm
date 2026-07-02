@@ -223,6 +223,37 @@ func TestFrameClosePayloadEndsSessionWithError(t *testing.T) {
 	}
 }
 
+func TestOpenErrReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("tmux not found in PATH")}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err == nil || err.Error() != "tmux not found in PATH" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestOpenTimeoutContextAddsDeadline(t *testing.T) {
 	ctx, cancel := openTimeoutContext(context.Background())
 	defer cancel()
@@ -231,18 +262,80 @@ func TestOpenTimeoutContextAddsDeadline(t *testing.T) {
 	}
 }
 
-func TestParseShellList(t *testing.T) {
-	got, err := ParseShellList([]byte(`[{"id":"ab","shell":"zsh","name":"work","created_unix":5,"busy":true}]`))
-	if err != nil || len(got) != 1 || got[0].ID != "ab" || got[0].Name != "work" || !got[0].Busy {
+func TestWriteTimeoutContextAddsDeadline(t *testing.T) {
+	ctx, cancel := writeTimeoutContext(context.Background())
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("expected deadline")
+	}
+}
+
+func TestParseTmuxSessionList(t *testing.T) {
+	got, err := ParseTmuxSessionList([]byte(`[{"name":"work","created_unix":5,"attached":true}]`))
+	if err != nil || len(got) != 1 || got[0].Name != "work" || got[0].CreatedUnix != 5 || !got[0].Attached {
 		t.Fatalf("got %+v err %v", got, err)
 	}
-	empty, err := ParseShellList(nil)
+	empty, err := ParseTmuxSessionList(nil)
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty parse: %+v %v", empty, err)
 	}
 }
 
-func TestRenameActiveShell(t *testing.T) {
+func TestOpenTmuxSession(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		sessionID  string
+		okPayload  string
+		wantTarget string
+		wantID     string
+	}{
+		{name: "new", target: relay.TargetTmuxNew, okPayload: "tmux-abc123", wantTarget: relay.TargetTmuxNew},
+		{name: "attach", target: relay.TargetTmuxAttach, sessionID: "work", wantTarget: relay.TargetTmuxAttach, wantID: "work"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				c, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer c.CloseNow()
+				ctx := r.Context()
+				_, data, err := c.Read(ctx)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				f, err := relay.Decode(data)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				var op relay.OpenRequest
+				if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != tt.wantTarget || op.SessionID != tt.wantID || op.Rows != 31 || op.Cols != 111 {
+					t.Errorf("bad open request: %+v err=%v", op, err)
+				}
+				_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: []byte(tt.okPayload)}))
+			}))
+			defer server.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			is, sessionID, err := OpenTmuxSession(ctx, server.URL, "", "", false, "peer-a", tt.target, tt.sessionID, 31, 111)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer is.Close()
+			if sessionID != tt.okPayload {
+				t.Fatalf("sessionID = %q", sessionID)
+			}
+		})
+	}
+}
+
+func TestKillTmuxSession(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -261,8 +354,42 @@ func TestRenameActiveShell(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		var op openPayload
-		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetActiveRename || op.ShellID != "x1" || op.Name != "work" {
+		var op relay.OpenRequest
+		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetTmuxKill || op.SessionID != "work" {
+			t.Errorf("bad kill request: %+v err=%v", op, err)
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := KillTmuxSession(ctx, server.URL, "", "", false, "peer-a", "work"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRenameTmuxSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var op relay.OpenRequest
+		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetTmuxRename || op.SessionID != "x1" || op.Name != "work" {
 			t.Errorf("bad rename request: %+v err=%v", op, err)
 		}
 		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
@@ -271,12 +398,12 @@ func TestRenameActiveShell(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := RenameActiveShell(ctx, server.URL, "", "", false, "peer-a", "x1", "work"); err != nil {
+	if err := RenameTmuxSession(ctx, server.URL, "", "", false, "peer-a", "x1", "work"); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestListActiveShells(t *testing.T) {
+func TestListTmuxSessions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -295,22 +422,22 @@ func TestListActiveShells(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		var op openPayload
-		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetActiveList {
+		var op relay.OpenRequest
+		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetTmuxList {
 			t.Errorf("bad list request: %v target=%s", err, op.Target)
 		}
-		list, _ := json.Marshal([]relay.ActiveShellInfo{{ID: "x1", Shell: "bash", CreatedUnix: 9, Busy: false}})
+		list, _ := json.Marshal([]relay.TmuxSessionInfo{{Name: "x1", CreatedUnix: 9, Attached: true}})
 		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: list}))
 	}))
 	defer server.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	shells, err := ListActiveShells(ctx, server.URL, "", "", false, "peer-a")
+	sessions, err := ListTmuxSessions(ctx, server.URL, "", "", false, "peer-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(shells) != 1 || shells[0].ID != "x1" || shells[0].Shell != "bash" {
-		t.Fatalf("got %+v", shells)
+	if len(sessions) != 1 || sessions[0].Name != "x1" || !sessions[0].Attached {
+		t.Fatalf("got %+v", sessions)
 	}
 }

@@ -14,7 +14,12 @@ import (
 type Model struct {
 	sessions []types.TmuxSession
 	cursor   int
+	page     int
+	loading  bool
+	err      string
 }
+
+const pageSize = 8
 
 func New(sessions []types.TmuxSession) *Model {
 	return &Model{sessions: sessions}
@@ -22,9 +27,21 @@ func New(sessions []types.TmuxSession) *Model {
 
 func (m *Model) SetSessions(s []types.TmuxSession) {
 	m.sessions = s
-	if m.cursor > len(s) {
-		m.cursor = 0
+	m.loading = false
+	m.err = ""
+	m.clamp()
+}
+
+func (m *Model) SetLoading(loading bool) {
+	m.loading = loading
+	if loading {
+		m.err = ""
 	}
+}
+
+func (m *Model) SetError(err string) {
+	m.err = strings.TrimSpace(err)
+	m.loading = false
 }
 
 func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
@@ -33,10 +50,12 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
+			m.syncPage()
 		}
 	case "down", "j":
 		if m.cursor < max {
 			m.cursor++
+			m.syncPage()
 		}
 	case "enter":
 		if m.cursor == 0 {
@@ -57,16 +76,36 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "esc", "escape":
 		return true, nil
 	}
+	if msg.Text == "R" {
+		m.SetLoading(true)
+		return false, func() tea.Msg { return types.TmuxMenuMsg{} }
+	}
 	return false, nil
 }
 
 func (m *Model) View() string {
 	rows := []string{ui.TitleStyle.Render("tmux"), ""}
 	rows = append(rows, m.row(0, "+ New session", "start a local tmux session"))
-	for i, s := range m.sessions {
-		rows = append(rows, m.row(i+1, s.Name, tmuxDesc(s)))
+	if m.loading {
+		rows = append(rows, ui.DimStyle.Render("Loading tmux sessions..."))
+	} else if m.err != "" {
+		rows = append(rows, ui.DimStyle.Render(m.err))
+	} else if len(m.sessions) == 0 {
+		rows = append(rows, ui.DimStyle.Render("No tmux sessions"))
+	} else {
+		start := m.page * pageSize
+		end := start + pageSize
+		if end > len(m.sessions) {
+			end = len(m.sessions)
+		}
+		for i, s := range m.sessions[start:end] {
+			rows = append(rows, m.row(start+i+1, s.Name, tmuxDesc(s)))
+		}
+		if len(m.sessions) > pageSize {
+			rows = append(rows, "", ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, (len(m.sessions)+pageSize-1)/pageSize)))
+		}
 	}
-	rows = append(rows, "", ui.DimStyle.Render("up/down navigate · enter open · r rename · d kill · esc close"))
+	rows = append(rows, "", ui.DimStyle.Render("up/down navigate · enter open · r rename · d kill · R refresh · esc close"))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
@@ -100,4 +139,28 @@ func (m *Model) row(idx int, title, desc string) string {
 		style = ui.SelectedStyle
 	}
 	return strings.TrimRight(cursor+style.Render(title)+" "+ui.DimStyle.Render(desc), " ")
+}
+
+func (m *Model) clamp() {
+	if m.cursor > len(m.sessions) {
+		m.cursor = len(m.sessions)
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	m.syncPage()
+}
+
+func (m *Model) syncPage() {
+	if m.cursor == 0 {
+		m.page = 0
+		return
+	}
+	sessionIdx := m.cursor - 1
+	if sessionIdx < m.page*pageSize {
+		m.page = sessionIdx / pageSize
+	}
+	if sessionIdx >= (m.page+1)*pageSize {
+		m.page = sessionIdx / pageSize
+	}
 }

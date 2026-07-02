@@ -2,6 +2,7 @@ package app
 
 import (
 	tea "charm.land/bubbletea/v2"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
@@ -148,12 +149,7 @@ func clampContentMouse(w, h, x, y int) (int, int) {
 
 func ptyFromAppSizeForTab(a App, tabType TabType) (cols, rows int) {
 	cols = a.width
-	if cols < 40 {
-		cols = 80
-	}
 	rows = a.mainContentHeightForType(tabType)
-	if rows < 5 {
-		rows = 24
-	}
+	rows, cols = internalssh.NormalizePTYSize(rows, cols)
 	return cols, rows
 }

@@ -22,23 +22,39 @@ const (
 )
 
 const (
-	TargetLocal        = "local"
-	TargetHost         = "host"
-	TargetActiveList   = "active-list"
-	TargetActiveNew    = "active-new"
-	TargetActiveAttach = "active-attach"
-	TargetActiveKill   = "active-kill"
-	TargetActiveRename = "active-rename"
+	TargetLocal      = "local"
+	TargetHost       = "host"
+	TargetTmuxList   = "tmux-list"
+	TargetTmuxNew    = "tmux-new"
+	TargetTmuxAttach = "tmux-attach"
+	TargetTmuxKill   = "tmux-kill"
+	TargetTmuxRename = "tmux-rename"
 )
 
 const CloseDaemonDisconnected = "daemon disconnected"
 
-type ActiveShellInfo struct {
-	ID          string `json:"id"`
-	Shell       string `json:"shell"`
-	Name        string `json:"name,omitempty"`
+type TmuxSessionInfo struct {
+	Name        string `json:"name"`
 	CreatedUnix int64  `json:"created_unix"`
-	Busy        bool   `json:"busy"`
+	Attached    bool   `json:"attached"`
+}
+
+type HelloPayload struct {
+	Role    string `json:"role"`
+	Tenant  string `json:"tenant"`
+	PeerID  string `json:"peer_id"`
+	Name    string `json:"name"`
+	Version int    `json:"version"`
+}
+
+type OpenRequest struct {
+	PeerID     string `json:"peer_id"`
+	Target     string `json:"target"`
+	HostSyncID string `json:"host_sync_id,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Rows       int    `json:"rows,omitempty"`
+	Cols       int    `json:"cols,omitempty"`
 }
 
 const HeaderLen = 10

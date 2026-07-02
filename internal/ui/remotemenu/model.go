@@ -15,17 +15,19 @@ import (
 type tab int
 
 const (
-	tabActive tab = iota
+	tabTmux tab = iota
 	tabRelay
 )
 
 type Model struct {
 	Peer      types.RemotePeer
 	Hosts     []types.RemoteHost
-	shells    []relay.ActiveShellInfo
+	sessions  []relay.TmuxSessionInfo
 	tab       tab
 	cursor    int
 	page      int
+	tmuxLoad  bool
+	tmuxErr   string
 	searching bool
 	query     string
 }
@@ -36,11 +38,25 @@ func New(peer types.RemotePeer, hosts []types.RemoteHost) *Model {
 	return &Model{Peer: peer, Hosts: hosts}
 }
 
-func (m *Model) SetShells(s []relay.ActiveShellInfo) {
-	m.shells = s
-	if m.cursor > len(s) {
-		m.cursor = 0
+func (m *Model) SetTmuxSessions(s []relay.TmuxSessionInfo) {
+	m.sessions = s
+	m.tmuxLoad = false
+	m.tmuxErr = ""
+	if m.tab == tabTmux {
+		m.clampTmux()
 	}
+}
+
+func (m *Model) SetTmuxLoading(loading bool) {
+	m.tmuxLoad = loading
+	if loading {
+		m.tmuxErr = ""
+	}
+}
+
+func (m *Model) SetTmuxError(err string) {
+	m.tmuxErr = strings.TrimSpace(err)
+	m.tmuxLoad = false
 }
 
 func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
@@ -66,64 +82,78 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	if msg.String() == "tab" {
-		if m.tab == tabActive {
+		if m.tab == tabTmux {
 			m.tab = tabRelay
 		} else {
-			m.tab = tabActive
+			m.tab = tabTmux
 		}
 		m.cursor = 0
 		m.page = 0
 		return false, nil
 	}
 
-	if m.tab == tabActive {
-		return m.updateActive(msg)
+	if m.tab == tabTmux {
+		return m.updateTmux(msg)
 	}
 	return m.updateRelay(msg)
 }
 
-func (m *Model) updateActive(msg tea.KeyPressMsg) (bool, tea.Cmd) {
-	max := len(m.shells)
+func (m *Model) updateTmux(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	max := len(m.sessions)
 	switch msg.String() {
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
+			m.syncTmuxPage()
 		}
 	case "down", "j":
 		if m.cursor < max {
 			m.cursor++
+			m.syncTmuxPage()
 		}
 	case "enter":
 		peer := m.Peer
 		if m.cursor == 0 {
 			return true, func() tea.Msg {
-				return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetActiveNew, Active: true}
+				return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetTmuxNew, Tmux: true}
 			}
 		}
-		sh := m.shells[m.cursor-1]
-		label := ""
-		if strings.TrimSpace(sh.Name) != "" {
-			label = sh.Name
-		}
+		session := m.sessions[m.cursor-1]
 		return true, func() tea.Msg {
-			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetActiveAttach, Active: true, ShellID: sh.ID, HostLabel: label}
+			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: session.Name, HostLabel: session.Name}
 		}
 	case "d", "delete":
 		if m.cursor > 0 {
-			sh := m.shells[m.cursor-1]
+			session := m.sessions[m.cursor-1]
 			return false, func() tea.Msg {
-				return types.RemoteShellKillRequestMsg{Peer: m.Peer, ShellID: sh.ID}
+				return types.RemoteTmuxKillRequestMsg{Peer: m.Peer, SessionID: session.Name}
 			}
 		}
 	case "r":
 		if m.cursor > 0 {
-			sh := m.shells[m.cursor-1]
+			session := m.sessions[m.cursor-1]
 			return false, func() tea.Msg {
-				return types.RemoteShellRenameRequestMsg{Peer: m.Peer, ShellID: sh.ID, CurrentName: activeDisplayName(sh)}
+				return types.RemoteTmuxRenameRequestMsg{Peer: m.Peer, SessionID: session.Name, CurrentName: session.Name}
 			}
+		}
+	case "pgup", "left":
+		if m.page > 0 {
+			m.page--
+			m.cursor = m.page*pageSize + 1
+		}
+	case "pgdown", "right":
+		if (m.page+1)*pageSize < max {
+			m.page++
+			m.cursor = m.page*pageSize + 1
 		}
 	case "esc", "escape":
 		return true, nil
+	}
+	if msg.Text == "R" {
+		m.SetTmuxLoading(true)
+		peer := m.Peer
+		hosts := m.Hosts
+		return false, func() tea.Msg { return types.RemotePeerMenuMsg{Peer: peer, Hosts: hosts} }
 	}
 	return false, nil
 }
@@ -161,12 +191,12 @@ func (m *Model) updateRelay(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		peer := m.Peer
 		if m.cursor == 0 {
 			return true, func() tea.Msg {
-				return types.RemoteShellOpenMsg{Peer: peer, Target: "local", HostLabel: "LocalShell"}
+				return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetLocal, HostLabel: "LocalShell"}
 			}
 		}
 		h := hosts[m.cursor-1]
 		return true, func() tea.Msg {
-			return types.RemoteShellOpenMsg{Peer: peer, Target: "host", HostSyncID: h.SyncID, HostLabel: remoteHostLabel(h)}
+			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetHost, HostSyncID: h.SyncID, HostLabel: remoteHostLabel(h)}
 		}
 	case "esc", "escape":
 		return true, nil
@@ -177,12 +207,28 @@ func (m *Model) updateRelay(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 func (m *Model) View() string {
 	var rows []string
 	rows = append(rows, ui.TitleStyle.Render(m.Peer.Name), m.tabHeader(), "")
-	if m.tab == tabActive {
-		rows = append(rows, m.row(0, "+ New shell", "start a daemon-resident shell"))
-		for i, sh := range m.shells {
-			rows = append(rows, m.row(i+1, activeLabel(sh), activeDesc(sh)))
+	if m.tab == tabTmux {
+		rows = append(rows, m.row(0, "+ New session", "start a remote tmux session"))
+		if m.tmuxLoad {
+			rows = append(rows, ui.DimStyle.Render("Loading tmux sessions..."))
+		} else if m.tmuxErr != "" {
+			rows = append(rows, ui.DimStyle.Render(m.tmuxErr))
+		} else if len(m.sessions) == 0 {
+			rows = append(rows, ui.DimStyle.Render("No tmux sessions"))
+		} else {
+			start := m.page * pageSize
+			end := start + pageSize
+			if end > len(m.sessions) {
+				end = len(m.sessions)
+			}
+			for i, session := range m.sessions[start:end] {
+				rows = append(rows, m.row(start+i+1, tmuxLabel(session), tmuxDesc(session)))
+			}
+			if len(m.sessions) > pageSize {
+				rows = append(rows, "", ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, (len(m.sessions)+pageSize-1)/pageSize)))
+			}
 		}
-		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · enter open · r rename · d kill · esc close"))
+		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · enter open · r rename · d kill · R refresh · esc close"))
 	} else {
 		if m.searching || m.query != "" {
 			prompt := "/" + m.query
@@ -216,40 +262,33 @@ func (m *Model) View() string {
 }
 
 func (m *Model) tabHeader() string {
-	active, relayTab := "Active", "Relay"
-	if m.tab == tabActive {
-		active = ui.SelectedStyle.Render(active)
+	tmuxTab, relayTab := "tmux", "Relay"
+	if m.tab == tabTmux {
+		tmuxTab = ui.SelectedStyle.Render(tmuxTab)
 		relayTab = ui.DimStyle.Render(relayTab)
 	} else {
-		active = ui.DimStyle.Render(active)
+		tmuxTab = ui.DimStyle.Render(tmuxTab)
 		relayTab = ui.SelectedStyle.Render(relayTab)
 	}
-	return active + "  " + relayTab
+	return tmuxTab + "  " + relayTab
 }
 
-func activeLabel(sh relay.ActiveShellInfo) string {
-	if strings.TrimSpace(sh.Name) != "" {
-		return sh.Name
-	}
-	return sh.ID + " " + sh.Shell
+func tmuxLabel(session relay.TmuxSessionInfo) string {
+	return session.Name
 }
 
-func activeDesc(sh relay.ActiveShellInfo) string {
-	d := time.Unix(sh.CreatedUnix, 0).Format("15:04:05")
-	if strings.TrimSpace(sh.Name) != "" {
-		d = sh.ID + " " + sh.Shell + " " + d
+func tmuxDesc(session relay.TmuxSessionInfo) string {
+	d := ""
+	if session.CreatedUnix != 0 {
+		d = time.Unix(session.CreatedUnix, 0).Format("15:04:05")
 	}
-	if sh.Busy {
-		d += " busy"
+	if session.Attached {
+		if d != "" {
+			d += " "
+		}
+		d += "attached"
 	}
 	return d
-}
-
-func activeDisplayName(sh relay.ActiveShellInfo) string {
-	if strings.TrimSpace(sh.Name) != "" {
-		return sh.Name
-	}
-	return sh.ID
 }
 
 func (m *Model) row(idx int, title, desc string) string {
@@ -335,5 +374,29 @@ func (m *Model) syncPage() {
 	}
 	if hostIdx >= (m.page+1)*pageSize {
 		m.page = hostIdx / pageSize
+	}
+}
+
+func (m *Model) clampTmux() {
+	if m.cursor > len(m.sessions) {
+		m.cursor = len(m.sessions)
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	m.syncTmuxPage()
+}
+
+func (m *Model) syncTmuxPage() {
+	if m.cursor == 0 {
+		m.page = 0
+		return
+	}
+	sessionIdx := m.cursor - 1
+	if sessionIdx < m.page*pageSize {
+		m.page = sessionIdx / pageSize
+	}
+	if sessionIdx >= (m.page+1)*pageSize {
+		m.page = sessionIdx / pageSize
 	}
 }

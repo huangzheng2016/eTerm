@@ -43,12 +43,7 @@ func (s *SSHSession) SetStderr(w io.Writer) {
 // SetPtySize sets the PTY size in terminal cells (cols x rows). Call before Run.
 // If unset, defaults to 80x24.
 func (s *SSHSession) SetPtySize(cols, rows int) {
-	if cols < 40 {
-		cols = 80
-	}
-	if rows < 5 {
-		rows = 24
-	}
+	rows, cols = NormalizePTYSize(rows, cols)
 	s.ptyCols, s.ptyRows = cols, rows
 }
 

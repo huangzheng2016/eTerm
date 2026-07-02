@@ -199,9 +199,9 @@ func TestRemoteLocalShellAbnormalStreamDoneShowsConnectionError(t *testing.T) {
 }
 
 func TestRemoteShellReconnectOffersRemoteRetry(t *testing.T) {
-	m := New(nil, "[A]remote", 0, viewkeys.SSHKeys{Reconnect: []string{"r"}})
+	m := New(nil, "[T]remote-work", 0, viewkeys.SSHKeys{Reconnect: []string{"r"}})
 	t.Cleanup(func() { _ = m.Close() })
-	m.SetRemoteReconnect(&types.RemoteReconnect{Peer: types.RemotePeer{ID: "p1"}, Active: true, Target: relay.TargetActiveAttach, ShellID: "sh1"})
+	m.SetRemoteReconnect(&types.RemoteReconnect{Peer: types.RemotePeer{ID: "p1"}, Tmux: true, Target: relay.TargetTmuxAttach, SessionID: "work"})
 
 	_, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
 	if cmd == nil {
@@ -215,7 +215,7 @@ func TestRemoteShellReconnectOffersRemoteRetry(t *testing.T) {
 	if !ok {
 		t.Fatalf("retry = %T want types.RemoteShellReconnectMsg", got.Retry)
 	}
-	if rc.Spec.ShellID != "sh1" || !rc.Spec.Active || rc.StreamID != m.StreamID() {
+	if rc.Spec.SessionID != "work" || !rc.Spec.Tmux || rc.StreamID != m.StreamID() {
 		t.Fatalf("bad reconnect spec %+v stream %d", rc.Spec, rc.StreamID)
 	}
 

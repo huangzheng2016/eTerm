@@ -37,13 +37,13 @@ func TestWebSocketRelayData(t *testing.T) {
 	}
 	defer client.CloseNow()
 
-	hello, _ := json.Marshal(wsHello{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: 1})
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: 1})
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
 		t.Fatal(err)
 	}
 	waitPeer(t, server.URL)
 
-	openPayload, _ := json.Marshal(wsOpen{PeerID: "peer-a", Target: "local"})
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
 	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 99, Payload: openPayload})); err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +110,38 @@ func TestCloseDaemonSessionsMarksCloseAsAbnormal(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for close frame")
+	}
+}
+
+func TestCloseDaemonSessionsTimesOutWhenQueueIsFull(t *testing.T) {
+	oldTimeout := relaySendTimeoutNanos.Swap(int64(10 * time.Millisecond))
+	t.Cleanup(func() { relaySendTimeoutNanos.Store(oldTimeout) })
+
+	h := NewRelayHub(nil)
+	client := make(chan relay.Frame, 1)
+	daemon := make(chan relay.Frame, 1)
+	client <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+	h.sessions[7] = relaySession{client: client, daemon: daemon}
+
+	done := make(chan struct{})
+	go func() {
+		h.closeDaemonSessions(daemon)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("close did not time out")
+	}
+}
+
+func TestTrySendReportsDroppedFrameWhenQueueIsFull(t *testing.T) {
+	ch := make(chan relay.Frame, 1)
+	ch <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+
+	if trySend(ch, relay.Frame{Type: relay.FrameData, StreamID: 2}) {
+		t.Fatal("full queue should drop non-close frame")
 	}
 }
 

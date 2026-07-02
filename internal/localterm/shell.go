@@ -36,12 +36,7 @@ func DefaultShell(configured string) string {
 }
 
 func NewSession(shell string, rows, cols int) (*internalssh.InteractiveSession, error) {
-	if cols < 40 {
-		cols = 80
-	}
-	if rows < 5 {
-		rows = 24
-	}
+	rows, cols = internalssh.NormalizePTYSize(rows, cols)
 	cmd := exec.Command(shell)
 	cmd.Env = internalssh.TerminalEnv(os.Environ())
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
@@ -49,13 +44,19 @@ func NewSession(shell string, rows, cols int) (*internalssh.InteractiveSession, 
 		return nil, err
 	}
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	return &internalssh.InteractiveSession{
+	exited := make(chan struct{})
+	go func() {
+		done <- cmd.Wait()
+		close(exited)
+	}()
+	is := &internalssh.InteractiveSession{
 		Stdin:  f,
 		Stdout: f,
 		Done:   done,
 		Resize: func(rows, cols int) error {
 			return pty.Setsize(f, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 		},
-	}, nil
+	}
+	is.AddCloser(internalssh.NewProcessExitCloser(exited, cmd.Process.Kill, internalssh.ProcessCloseKillTimeout))
+	return is, nil
 }

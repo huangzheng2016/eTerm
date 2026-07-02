@@ -72,8 +72,7 @@ func (a App) View() tea.View {
 					disc = sm.Disconnected()
 				}
 			}
-			activeShell := strings.HasPrefix(tab.Title, "[A]") || strings.HasPrefix(tab.Title, "[T]")
-			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, activeShell))
+			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, tabDetaches(tab)))
 		}
 		statusView := statusBar.View()
 
@@ -166,6 +165,17 @@ func (a App) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	return view
+}
+
+func tabDetaches(tab Tab) bool {
+	if tab.Type == LocalTab && tab.TmuxSession != "" {
+		return true
+	}
+	if sm, ok := tab.Model.(*sshview.Model); ok {
+		spec := sm.RemoteReconnect()
+		return spec != nil && spec.Tmux
+	}
+	return false
 }
 
 func (a App) handleHelpOverlayKey(msg tea.KeyPressMsg) (App, tea.Cmd) {

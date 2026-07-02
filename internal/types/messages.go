@@ -112,47 +112,44 @@ type RemoteShellOpenMsg struct {
 	Target     string
 	HostSyncID string
 	HostLabel  string
-	Active     bool
-	ShellID    string
+	Tmux       bool
+	SessionID  string
 }
 
-type RemoteActiveShellsLoadedMsg struct {
-	Peer   RemotePeer
-	Shells []relay.ActiveShellInfo
-	Err    error
+type RemoteTmuxSessionsLoadedMsg struct {
+	Peer     RemotePeer
+	Sessions []relay.TmuxSessionInfo
+	Err      error
 }
 
-type RemoteShellKillMsg struct {
-	Peer    RemotePeer
-	ShellID string
+type RemoteTmuxKillMsg struct {
+	Peer      RemotePeer
+	SessionID string
 }
 
-type RemoteShellKillRequestMsg struct {
-	Peer    RemotePeer
-	ShellID string
+type RemoteTmuxKillRequestMsg struct {
+	Peer      RemotePeer
+	SessionID string
 }
 
-type RemoteShellRenameRequestMsg struct {
+type RemoteTmuxRenameRequestMsg struct {
 	Peer        RemotePeer
-	ShellID     string
+	SessionID   string
 	CurrentName string
 }
 
-type RemoteShellRenameMsg struct {
-	Peer    RemotePeer
-	ShellID string
-	Name    string
+type RemoteTmuxRenameMsg struct {
+	Peer      RemotePeer
+	SessionID string
+	Name      string
 }
 
-// RemoteReconnect describes how to re-open a remote shell over the relay after a
-// network drop. Active shells re-attach to the same ShellID (output replays);
-// relay shells spawn a fresh session.
 type RemoteReconnect struct {
 	Peer       RemotePeer
 	Target     string
 	HostSyncID string
-	ShellID    string
-	Active     bool
+	SessionID  string
+	Tmux       bool
 }
 
 type RemoteShellReconnectMsg struct {
@@ -194,11 +191,7 @@ type SuccessMsg struct {
 
 type RefreshListMsg struct{}
 
-type TmuxSession struct {
-	Name        string
-	CreatedUnix int64
-	Attached    bool
-}
+type TmuxSession = relay.TmuxSessionInfo
 
 type TmuxMenuMsg struct{}
 
@@ -398,7 +391,7 @@ type SnippetSavedMsg struct {
 	Snippet interface{}
 }
 
-// QuitRequestMsg asks the app to quit (with active-session check).
+// QuitRequestMsg asks the app to quit with open-session checks.
 type QuitRequestMsg struct{}
 
 // CLIConnectMsg triggers a direct connection from CLI arguments.

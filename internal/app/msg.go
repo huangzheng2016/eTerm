@@ -33,3 +33,14 @@ type remoteTerminalOpenedMsg struct {
 	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
 	reconnect    *types.RemoteReconnect
 }
+
+type remoteTmuxRenameAppliedMsg struct {
+	Peer         types.RemotePeer
+	OldSessionID string
+	Name         string
+}
+
+type tmuxRenameAppliedMsg struct {
+	OldName string
+	NewName string
+}

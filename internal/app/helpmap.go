@@ -8,9 +8,9 @@ import (
 )
 
 // statusBarShortcutParts builds the bottom status line.
-func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, sshSession bool, activeShell bool) []string {
+func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, sshSession bool, detachable bool) []string {
 	closeLabel := " close tab"
-	if activeShell {
+	if detachable {
 		closeLabel = " detach"
 	}
 	parts := []string{
@@ -34,14 +34,14 @@ func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected boo
 	return parts
 }
 
-func sshStatusBarHint(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, activeShell bool) string {
-	return strings.Join(statusBarShortcutParts(km, cfg, sshDisconnected, true, activeShell), " · ")
+func sshStatusBarHint(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, detachable bool) string {
+	return strings.Join(statusBarShortcutParts(km, cfg, sshDisconnected, true, detachable), " · ")
 }
 
-func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, sshDisconnected bool, activeShell bool) string {
+func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, sshDisconnected bool, detachable bool) string {
 	switch tabType {
 	case SSHTab, LocalTab:
-		return sshStatusBarHint(km, cfg, sshDisconnected, activeShell)
+		return sshStatusBarHint(km, cfg, sshDisconnected, detachable)
 	case HomeTab:
 		return homeStatusBarHint(km, cfg)
 	case SnippetTab:

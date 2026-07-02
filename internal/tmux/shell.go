@@ -1,4 +1,4 @@
-package localtmux
+package tmux
 
 import (
 	"context"
@@ -17,6 +17,12 @@ import (
 
 const listFormat = "#{session_name}\t#{session_created}\t#{session_attached}"
 
+var (
+	runTmuxCmd        = runTmux
+	attachTmuxSession = AttachSession
+	killTmuxSession   = KillSession
+)
+
 func ListSessions(ctx context.Context) ([]types.TmuxSession, error) {
 	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", listFormat)
 	out, err := cmd.CombinedOutput()
@@ -31,11 +37,15 @@ func ListSessions(ctx context.Context) ([]types.TmuxSession, error) {
 
 func NewSession(ctx context.Context, rows, cols int) (*internalssh.InteractiveSession, string, error) {
 	name := defaultSessionName()
-	if err := runTmux(ctx, "new-session", newSessionDetachedArgs(name)); err != nil {
+	if err := runTmuxCmd(ctx, "new-session", newSessionDetachedArgs(name)); err != nil {
 		return nil, "", err
 	}
-	is, err := AttachSession(ctx, name, rows, cols)
-	return is, name, err
+	is, err := attachTmuxSession(ctx, name, rows, cols)
+	if err != nil {
+		_ = killTmuxSession(ctx, name)
+		return nil, "", err
+	}
+	return is, name, nil
 }
 
 func AttachSession(ctx context.Context, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
@@ -55,6 +65,15 @@ func KillSession(ctx context.Context, name string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return tmuxCommandError("kill-session", err, out)
+	}
+	return nil
+}
+
+func RenameSession(ctx context.Context, oldName, newName string) error {
+	cmd := exec.CommandContext(ctx, "tmux", "rename-session", "-t", oldName, newName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return tmuxCommandError("rename-session", err, out)
 	}
 	return nil
 }
@@ -81,15 +100,6 @@ func statusOffArgs(name string) []string {
 
 func attachSessionArgs(name string) []string {
 	return []string{"attach-session", "-t", name}
-}
-
-func RenameSession(ctx context.Context, oldName, newName string) error {
-	cmd := exec.CommandContext(ctx, "tmux", "rename-session", "-t", oldName, newName)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return tmuxCommandError("rename-session", err, out)
-	}
-	return nil
 }
 
 func parseSessions(out []byte) []types.TmuxSession {
@@ -130,25 +140,26 @@ func tmuxCommandError(op string, err error, out []byte) error {
 }
 
 func ptyCommand(cmd *exec.Cmd, rows, cols int) (*internalssh.InteractiveSession, error) {
-	if cols < 40 {
-		cols = 80
-	}
-	if rows < 5 {
-		rows = 24
-	}
+	rows, cols = internalssh.NormalizePTYSize(rows, cols)
 	cmd.Env = internalssh.TerminalEnv(os.Environ())
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	if err != nil {
 		return nil, err
 	}
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	return &internalssh.InteractiveSession{
+	exited := make(chan struct{})
+	go func() {
+		done <- cmd.Wait()
+		close(exited)
+	}()
+	is := &internalssh.InteractiveSession{
 		Stdin:  f,
 		Stdout: f,
 		Done:   done,
 		Resize: func(rows, cols int) error {
 			return pty.Setsize(f, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 		},
-	}, nil
+	}
+	is.AddCloser(internalssh.NewProcessExitCloser(exited, cmd.Process.Kill, internalssh.ProcessCloseKillTimeout))
+	return is, nil
 }

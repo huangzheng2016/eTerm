@@ -70,13 +70,99 @@ func TestRemoteMenuPaginatesHosts(t *testing.T) {
 	}
 }
 
-func TestTabDefaultsToActive(t *testing.T) {
+func TestTabDefaultsToTmux(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
-	if m.tab != tabActive {
-		t.Fatal("default tab should be Active")
+	if m.tab != tabTmux {
+		t.Fatal("default tab should be tmux")
 	}
-	if !strings.Contains(m.View(), "+ New shell") {
-		t.Fatalf("active view missing new shell:\n%s", m.View())
+	view := m.View()
+	for _, want := range []string{"tmux", "+ New session"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("tmux view missing %q:\n%s", want, view)
+		}
+	}
+	for _, bad := range []string{"Active", "daemon-resident shell"} {
+		if strings.Contains(view, bad) {
+			t.Fatalf("tmux view contains %q:\n%s", bad, view)
+		}
+	}
+}
+
+func TestTmuxTabShowsLoadingEmptyAndError(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.SetTmuxLoading(true)
+	if !strings.Contains(m.View(), "Loading tmux sessions") {
+		t.Fatalf("missing loading state:\n%s", m.View())
+	}
+
+	m.SetTmuxLoading(false)
+	if !strings.Contains(m.View(), "No tmux sessions") {
+		t.Fatalf("missing empty state:\n%s", m.View())
+	}
+
+	m.SetTmuxError("tmux not found in PATH")
+	if !strings.Contains(m.View(), "tmux not found in PATH") {
+		t.Fatalf("missing error state:\n%s", m.View())
+	}
+}
+
+func TestTmuxTabRefreshEmitsPeerMenuMsg(t *testing.T) {
+	peer := types.RemotePeer{ID: "p1", Name: "peer"}
+	m := New(peer, nil)
+
+	done, cmd := m.Update(keyText("R"))
+
+	if done || cmd == nil {
+		t.Fatal("refresh should keep menu open and emit cmd")
+	}
+	msg, ok := cmd().(types.RemotePeerMenuMsg)
+	if !ok {
+		t.Fatalf("got %T want RemotePeerMenuMsg", cmd())
+	}
+	if msg.Peer.ID != "p1" {
+		t.Fatalf("bad refresh msg %+v", msg)
+	}
+}
+
+func TestRelayCursorSurvivesAsyncTmuxList(t *testing.T) {
+	var hosts []types.RemoteHost
+	for i := 0; i < 5; i++ {
+		hosts = append(hosts, types.RemoteHost{Alias: fmt.Sprintf("host-%02d", i), Hostname: "example", Username: "root", Port: 22})
+	}
+	m := New(types.RemotePeer{Name: "peer"}, hosts)
+	m.Update(keyMsg("tab"))
+	m.Update(keyMsg("down"))
+	m.Update(keyMsg("down"))
+	if m.cursor != 2 {
+		t.Fatalf("cursor before list = %d", m.cursor)
+	}
+
+	m.SetTmuxSessions(nil)
+
+	if m.cursor != 2 || m.tab != tabRelay {
+		t.Fatalf("relay cursor changed after tmux list: tab=%d cursor=%d", m.tab, m.cursor)
+	}
+}
+
+func TestTmuxTabPaginatesSessions(t *testing.T) {
+	var sessions []relay.TmuxSessionInfo
+	for i := 0; i < 10; i++ {
+		sessions = append(sessions, relay.TmuxSessionInfo{Name: fmt.Sprintf("tmux-%02d", i)})
+	}
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.SetTmuxSessions(sessions)
+
+	first := m.View()
+	for i := 0; i < pageSize+1; i++ {
+		m.Update(keyMsg("down"))
+	}
+	second := m.View()
+
+	if !strings.Contains(first, "tmux-00") || strings.Contains(first, "tmux-09") {
+		t.Fatalf("first page wrong:\n%s", first)
+	}
+	if !strings.Contains(second, "tmux-08") || !strings.Contains(second, "tmux-09") {
+		t.Fatalf("second page wrong:\n%s", second)
 	}
 }
 
@@ -87,66 +173,73 @@ func TestTabToggle(t *testing.T) {
 		t.Fatal("tab key should switch to Relay")
 	}
 	m.Update(keyMsg("tab"))
-	if m.tab != tabActive {
-		t.Fatal("tab key should switch back to Active")
+	if m.tab != tabTmux {
+		t.Fatal("tab key should switch back to tmux")
 	}
 }
 
-func TestActiveNewEmitsOpen(t *testing.T) {
+func TestTmuxNewEmitsOpen(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
-	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})
 	m.cursor = 0
 	done, cmd := m.Update(keyMsg("enter"))
 	if !done || cmd == nil {
 		t.Fatal("enter on new should close menu and emit cmd")
 	}
 	msg := cmd().(types.RemoteShellOpenMsg)
-	if msg.Target != relay.TargetActiveNew || !msg.Active || msg.HostLabel != "" {
+	if msg.Target != relay.TargetTmuxNew || !msg.Tmux || msg.HostLabel != "" {
 		t.Fatalf("bad new msg %+v", msg)
 	}
 }
 
-func TestActiveAttachEmitsOpen(t *testing.T) {
+func TestTmuxAttachEmitsOpen(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
-	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})
 	m.cursor = 1
 	_, cmd := m.Update(keyMsg("enter"))
 	msg := cmd().(types.RemoteShellOpenMsg)
-	if msg.Target != relay.TargetActiveAttach || msg.ShellID != "ab" || !msg.Active {
+	if msg.Target != relay.TargetTmuxAttach || msg.SessionID != "work" || !msg.Tmux {
 		t.Fatalf("bad attach msg %+v", msg)
 	}
 }
 
-func TestActiveLabelPrefersName(t *testing.T) {
-	got := activeLabel(relay.ActiveShellInfo{ID: "ab", Shell: "zsh", Name: "work"})
+func TestTmuxLabelUsesName(t *testing.T) {
+	got := tmuxLabel(relay.TmuxSessionInfo{Name: "work"})
 	if got != "work" {
 		t.Fatalf("label = %q", got)
 	}
 }
 
-func TestActiveRenameRequestsPrompt(t *testing.T) {
+func TestTmuxDescHidesMissingCreatedTime(t *testing.T) {
+	got := tmuxDesc(relay.TmuxSessionInfo{Name: "work"})
+	if strings.Contains(got, "00:00:00") {
+		t.Fatalf("desc = %q", got)
+	}
+}
+
+func TestTmuxRenameRequestsPrompt(t *testing.T) {
 	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
-	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh", Name: "work"}})
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})
 	m.cursor = 1
 	done, cmd := m.Update(keyText("r"))
 	if done || cmd == nil {
 		t.Fatal("rename request should keep menu open")
 	}
-	msg := cmd().(types.RemoteShellRenameRequestMsg)
-	if msg.Peer.ID != "p1" || msg.ShellID != "ab" || msg.CurrentName != "work" {
+	msg := cmd().(types.RemoteTmuxRenameRequestMsg)
+	if msg.Peer.ID != "p1" || msg.SessionID != "work" || msg.CurrentName != "work" {
 		t.Fatalf("bad rename msg %+v", msg)
 	}
 }
 
-func TestActiveKillRequestsConfirmationAndKeepsMenu(t *testing.T) {
+func TestTmuxKillRequestsConfirmationAndKeepsMenu(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
-	m.SetShells([]relay.ActiveShellInfo{{ID: "ab", Shell: "zsh"}})
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})
 	m.cursor = 1
 	done, cmd := m.Update(keyText("d"))
 	if done {
 		t.Fatal("kill request should keep menu open")
 	}
-	if _, ok := cmd().(types.RemoteShellKillRequestMsg); !ok {
+	if _, ok := cmd().(types.RemoteTmuxKillRequestMsg); !ok {
 		t.Fatal("d should emit kill confirmation request")
 	}
 }

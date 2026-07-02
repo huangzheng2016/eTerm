@@ -6,25 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
-
-type wsHello struct {
-	Role    string `json:"role"`
-	Tenant  string `json:"tenant"`
-	PeerID  string `json:"peer_id"`
-	Name    string `json:"name"`
-	Version int    `json:"version"`
-}
-
-type wsOpen struct {
-	PeerID     string `json:"peer_id"`
-	Target     string `json:"target"`
-	HostSyncID string `json:"host_sync_id,omitempty"`
-}
 
 type relaySession struct {
 	client chan relay.Frame
@@ -35,6 +22,12 @@ type RelayHub struct {
 	peers    *PeerRegistry
 	mu       sync.Mutex
 	sessions map[uint32]relaySession
+}
+
+var relaySendTimeoutNanos atomic.Int64
+
+func init() {
+	relaySendTimeoutNanos.Store(int64(time.Second))
 }
 
 func NewRelayHub(peers *PeerRegistry) *RelayHub {
@@ -102,10 +95,22 @@ func (h *RelayHub) closeDaemonSessions(daemon chan relay.Frame) {
 	}
 }
 
-func trySend(ch chan relay.Frame, f relay.Frame) {
+func trySend(ch chan relay.Frame, f relay.Frame) bool {
+	if f.Type == relay.FrameClose {
+		timer := time.NewTimer(time.Duration(relaySendTimeoutNanos.Load()))
+		defer timer.Stop()
+		select {
+		case ch <- f:
+			return true
+		case <-timer.C:
+			return false
+		}
+	}
 	select {
 	case ch <- f:
+		return true
 	default:
+		return false
 	}
 }
 
@@ -145,7 +150,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if f.Type == relay.FrameHello {
-			var hello wsHello
+			var hello relay.HelloPayload
 			if json.Unmarshal(f.Payload, &hello) != nil || hello.PeerID == "" {
 				continue
 			}
@@ -154,10 +159,10 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if s, ok := h.session(f.StreamID); ok {
-			select {
-			case s.client <- f:
-			case <-ctx.Done():
-				return
+			if !trySend(s.client, f) {
+				h.closeSession(f.StreamID)
+				_ = trySend(s.daemon, relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
+				continue
 			}
 			if f.Type == relay.FrameClose || f.Type == relay.FrameOpenErr {
 				h.closeSession(f.StreamID)
@@ -200,32 +205,31 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if f.Type == relay.FrameOpen {
-			var open wsOpen
+			var open relay.OpenRequest
 			if json.Unmarshal(f.Payload, &open) != nil {
-				send <- relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("bad open payload")}
+				_ = trySend(send, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("bad open payload")})
 				continue
 			}
 			peer, ok := h.peers.Get(r.Header.Get("X-ETerm-Tenant"), open.PeerID)
 			if !ok {
-				send <- relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("peer offline")}
+				_ = trySend(send, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("peer offline")})
 				continue
 			}
 			if err := h.setSession(f.StreamID, relaySession{client: send, daemon: peer.Send}); err != nil {
-				send <- relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())}
+				_ = trySend(send, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 				continue
 			}
-			select {
-			case peer.Send <- f:
-			case <-ctx.Done():
-				return
+			if !trySend(peer.Send, f) {
+				h.closeSession(f.StreamID)
+				_ = trySend(send, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("daemon queue full")})
 			}
 			continue
 		}
 		if s, ok := h.session(f.StreamID); ok {
-			select {
-			case s.daemon <- f:
-			case <-ctx.Done():
-				return
+			if !trySend(s.daemon, f) {
+				h.closeSession(f.StreamID)
+				_ = trySend(s.client, relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID, Payload: []byte("daemon queue full")})
+				continue
 			}
 			if f.Type == relay.FrameClose {
 				h.closeSession(f.StreamID)

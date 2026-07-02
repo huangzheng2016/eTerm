@@ -1,6 +1,7 @@
 package tmuxmenu
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -16,6 +17,58 @@ func TestTmuxMenuShowsSessions(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestTmuxMenuShowsLoadingEmptyAndError(t *testing.T) {
+	m := New(nil)
+	m.SetLoading(true)
+	if !strings.Contains(m.View(), "Loading tmux sessions") {
+		t.Fatalf("missing loading state:\n%s", m.View())
+	}
+
+	m.SetLoading(false)
+	if !strings.Contains(m.View(), "No tmux sessions") {
+		t.Fatalf("missing empty state:\n%s", m.View())
+	}
+
+	m.SetError("tmux not found in PATH")
+	if !strings.Contains(m.View(), "tmux not found in PATH") {
+		t.Fatalf("missing error state:\n%s", m.View())
+	}
+}
+
+func TestTmuxMenuRefreshEmitsMenuMsg(t *testing.T) {
+	m := New(nil)
+
+	done, cmd := m.Update(keyText("R"))
+
+	if done || cmd == nil {
+		t.Fatal("refresh should keep menu open and emit cmd")
+	}
+	if _, ok := cmd().(types.TmuxMenuMsg); !ok {
+		t.Fatalf("got %T want TmuxMenuMsg", cmd())
+	}
+}
+
+func TestTmuxMenuPaginatesSessions(t *testing.T) {
+	var sessions []types.TmuxSession
+	for i := 0; i < 10; i++ {
+		sessions = append(sessions, types.TmuxSession{Name: fmt.Sprintf("tmux-%02d", i)})
+	}
+	m := New(sessions)
+
+	first := m.View()
+	for i := 0; i < pageSize+1; i++ {
+		m.Update(keyMsg("down"))
+	}
+	second := m.View()
+
+	if !strings.Contains(first, "tmux-00") || strings.Contains(first, "tmux-09") {
+		t.Fatalf("first page wrong:\n%s", first)
+	}
+	if !strings.Contains(second, "tmux-08") || !strings.Contains(second, "tmux-09") {
+		t.Fatalf("second page wrong:\n%s", second)
 	}
 }
 

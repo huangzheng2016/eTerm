@@ -14,6 +14,14 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
+var (
+	remoteOpenWithProgress            = remote.OpenWithProgress
+	remoteOpenTmuxSessionWithProgress = remote.OpenTmuxSessionWithProgress
+	remoteListTmuxSessions            = remote.ListTmuxSessions
+	remoteKillTmuxSession             = remote.KillTmuxSession
+	remoteRenameTmuxSession           = remote.RenameTmuxSession
+)
+
 func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
 	if cfg.Mode != "http" {
@@ -21,35 +29,35 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	}
 	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
 
-	if msg.Active {
+	if msg.Tmux {
 		peer := msg.Peer
-		target, shellID := msg.Target, msg.ShellID
-		prefix := "Open active shell"
+		target, sessionID := msg.Target, msg.SessionID
+		prefix := "Open remote tmux"
 		var progress func(string)
 		var progressCh chan string
 		var progressCmd tea.Cmd
 		a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
 		return a, tea.Batch(progressCmd, func() tea.Msg {
 			defer close(progressCh)
-			is, newID, err := remote.OpenActiveShellWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, shellID, rows, cols, func(stage remote.OpenStage) {
+			is, newID, err := remoteOpenTmuxSessionWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, sessionID, rows, cols, func(stage remote.OpenStage) {
 				progress(connectStageText(prefix, string(stage)))
 			})
 			if err != nil {
-				return types.ConnErrorMsg{Err: err, Target: "[A]" + peer.Name}
+				return types.ConnErrorMsg{Err: err, Target: "[T]" + peer.Name}
 			}
-			reShellID := shellID
-			if target == relay.TargetActiveNew {
-				reShellID = newID
+			reSessionID := sessionID
+			if target == relay.TargetTmuxNew {
+				reSessionID = newID
 			}
-			title := activeShellTabTitle(peer.Name, reShellID, msg.HostLabel)
-			spec := &types.RemoteReconnect{Peer: peer, Active: true, Target: relay.TargetActiveAttach, ShellID: reShellID}
+			title := remoteTmuxTabTitle(peer.Name, reSessionID)
+			spec := &types.RemoteReconnect{Peer: peer, Tmux: true, Target: relay.TargetTmuxAttach, SessionID: reSessionID}
 			return remoteTerminalOpenedMsg{is: is, title: title, tabType: SSHTab, replaceTabAt: -1, reconnect: spec}
 		})
 	}
 
 	title := "[R]" + msg.Peer.Name
 	tabType := LocalTab
-	if msg.Target == "host" {
+	if msg.Target == relay.TargetHost {
 		title = "[R]" + msg.Peer.Name + "-" + msg.HostLabel
 		tabType = SSHTab
 	}
@@ -62,7 +70,7 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
 	return a, tea.Batch(progressCmd, func() tea.Msg {
 		defer close(progressCh)
-		is, err := remote.OpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, hostSyncID, rows, cols, func(stage remote.OpenStage) {
+		is, err := remoteOpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, hostSyncID, rows, cols, func(stage remote.OpenStage) {
 			progress(connectStageText(prefix, string(stage)))
 		})
 		if err != nil {
@@ -101,12 +109,12 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		defer close(progressCh)
 		var is *internalssh.InteractiveSession
 		var err error
-		if spec.Active {
-			is, _, err = remote.OpenActiveShellWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.ShellID, rows, cols, func(stage remote.OpenStage) {
+		if spec.Tmux {
+			is, _, err = remoteOpenTmuxSessionWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.SessionID, rows, cols, func(stage remote.OpenStage) {
 				progress(connectStageText(prefix, string(stage)))
 			})
 		} else {
-			is, err = remote.OpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
+			is, err = remoteOpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
 				progress(connectStageText(prefix, string(stage)))
 			})
 		}
@@ -114,87 +122,80 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 			return types.ConnErrorMsg{Err: err, Target: title, Retry: types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec}}
 		}
 		specCopy := spec
-		return remoteTerminalOpenedMsg{is: is, title: title, tabType: SSHTab, replaceTabAt: idx, reconnect: &specCopy}
+		tabType := SSHTab
+		if spec.Target == relay.TargetLocal {
+			tabType = LocalTab
+		}
+		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy}
 	})
 }
 
-func (a App) loadActiveShells(peer types.RemotePeer) tea.Cmd {
+func (a App) loadRemoteTmuxSessions(peer types.RemotePeer) tea.Cmd {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
 	if cfg.Mode != "http" {
 		return nil
 	}
 	return func() tea.Msg {
-		shells, err := remote.ListActiveShells(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
-		return types.RemoteActiveShellsLoadedMsg{Peer: peer, Shells: shells, Err: err}
+		sessions, err := remoteListTmuxSessions(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
+		return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Sessions: sessions, Err: err}
 	}
 }
 
-func (a App) killActiveShell(msg types.RemoteShellKillMsg) tea.Cmd {
+func (a App) killRemoteTmuxSession(msg types.RemoteTmuxKillMsg) tea.Cmd {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
 	if cfg.Mode != "http" {
 		return nil
 	}
 	peer := msg.Peer
-	shellID := msg.ShellID
+	sessionID := msg.SessionID
 	return func() tea.Msg {
-		_ = remote.KillActiveShell(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, shellID)
-		shells, err := remote.ListActiveShells(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
-		return types.RemoteActiveShellsLoadedMsg{Peer: peer, Shells: shells, Err: err}
+		if err := remoteKillTmuxSession(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID); err != nil {
+			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
+		}
+		sessions, err := remoteListTmuxSessions(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
+		return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Sessions: sessions, Err: err}
 	}
 }
 
-func (a App) renameActiveShell(msg types.RemoteShellRenameMsg) (App, tea.Cmd) {
+func (a App) renameRemoteTmuxSession(msg types.RemoteTmuxRenameMsg) (App, tea.Cmd) {
 	name := strings.TrimSpace(msg.Name)
 	if name == "" {
 		return a, nil
 	}
-	a.renameActiveShellTabs(msg.Peer.ID, msg.ShellID, name)
 	cfg := esync.LoadConfig(a.db, a.masterKey)
 	if cfg.Mode != "http" {
 		return a, nil
 	}
 	peer := msg.Peer
-	shellID := msg.ShellID
+	sessionID := msg.SessionID
 	return a, func() tea.Msg {
-		if err := remote.RenameActiveShell(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, shellID, name); err != nil {
-			return types.ErrorMsg{Err: err}
+		if err := remoteRenameTmuxSession(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID, name); err != nil {
+			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
 		}
-		shells, err := remote.ListActiveShells(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
-		return types.RemoteActiveShellsLoadedMsg{Peer: peer, Shells: shells, Err: err}
+		return remoteTmuxRenameAppliedMsg{Peer: peer, OldSessionID: sessionID, Name: name}
 	}
 }
 
-func (a *App) renameActiveShellTabs(peerID, shellID, name string) {
+func (a *App) renameRemoteTmuxTabs(peerID, sessionID, name string) {
 	for i := range a.tabs {
 		sm, ok := a.tabs[i].Model.(*sshview.Model)
 		if !ok {
 			continue
 		}
 		spec := sm.RemoteReconnect()
-		if spec == nil || !spec.Active || spec.Peer.ID != peerID || spec.ShellID != shellID {
+		if spec == nil || !spec.Tmux || spec.Peer.ID != peerID || spec.SessionID != sessionID {
 			continue
 		}
-		a.tabs[i].Title = activeShellTabTitle(spec.Peer.Name, shellID, name)
+		spec.SessionID = name
+		spec.Target = relay.TargetTmuxAttach
+		sm.SetRemoteReconnect(spec)
+		a.tabs[i].Title = remoteTmuxTabTitle(spec.Peer.Name, name)
 	}
 	a.syncTabBar()
 }
 
-func activeShellTabTitle(peerName, shellID, label string) string {
-	suffix := strings.TrimSpace(label)
-	if suffix == "" {
-		suffix = defaultActiveShellName(shellID)
-	}
-	if suffix == "" {
-		suffix = shellID
-	}
-	return "[A]" + peerName + "-" + suffix
-}
-
-func defaultActiveShellName(shellID string) string {
-	if shellID == "" {
-		return ""
-	}
-	return "active-" + shellID
+func remoteTmuxTabTitle(peerName, sessionID string) string {
+	return "[T]" + peerName + "-" + sessionID
 }
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {

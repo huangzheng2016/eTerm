@@ -18,16 +18,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/wskeepalive"
 )
 
-type openPayload struct {
-	PeerID     string `json:"peer_id"`
-	Target     string `json:"target"`
-	HostSyncID string `json:"host_sync_id,omitempty"`
-	ShellID    string `json:"shell_id,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Rows       int    `json:"rows,omitempty"`
-	Cols       int    `json:"cols,omitempty"`
-}
-
 type OpenStage string
 
 const (
@@ -55,61 +45,54 @@ func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS boo
 }
 
 func OpenWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, error) {
-	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols}, progress)
+	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols}, progress)
 	if err != nil {
 		return nil, err
 	}
 	return sessionFromConn(ctx, conn, streamID, rows, cols), nil
 }
 
-// OpenActiveShell attaches to an existing daemon shell (target active-attach) or
-// creates one (target active-new). For active-new the assigned shell id is
-// returned in the second value.
-func OpenActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, shellID string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
-	return OpenActiveShellWithProgress(ctx, serverURL, apiKey, tenant, insecureTLS, peerID, target, shellID, rows, cols, nil)
+func OpenTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
+	return OpenTmuxSessionWithProgress(ctx, serverURL, apiKey, tenant, insecureTLS, peerID, target, sessionID, rows, cols, nil)
 }
 
-func OpenActiveShellWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, shellID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, string, error) {
-	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: target, ShellID: shellID, Rows: rows, Cols: cols}, progress)
+func OpenTmuxSessionWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, SessionID: sessionID, Rows: rows, Cols: cols}, progress)
 	if err != nil {
 		return nil, "", err
 	}
 	return sessionFromConn(ctx, conn, streamID, rows, cols), string(okPayload), nil
 }
 
-// ListActiveShells issues a one-shot active-list request.
-func ListActiveShells(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.ActiveShellInfo, error) {
-	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveList}, nil)
+func ListTmuxSessions(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.TmuxSessionInfo, error) {
+	okPayload, err := openControl(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: relay.TargetTmuxList})
 	if err != nil {
 		return nil, err
 	}
-	conn.Close(websocket.StatusNormalClosure, "")
-	return ParseShellList(okPayload)
+	return ParseTmuxSessionList(okPayload)
 }
 
-// KillActiveShell issues a one-shot active-kill request.
-func KillActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, shellID string) error {
-	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveKill, ShellID: shellID}, nil)
+func KillTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID string) error {
+	_, err := openControl(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: relay.TargetTmuxKill, SessionID: sessionID})
+	return err
+}
+
+func RenameTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) error {
+	_, err := openControl(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: relay.TargetTmuxRename, SessionID: sessionID, Name: name})
+	return err
+}
+
+func openControl(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest) ([]byte, error) {
+	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, op, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	conn.Close(websocket.StatusNormalClosure, "")
-	return nil
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+	return okPayload, nil
 }
 
-// RenameActiveShell issues a one-shot active-rename request.
-func RenameActiveShell(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, shellID, name string) error {
-	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, openPayload{PeerID: peerID, Target: relay.TargetActiveRename, ShellID: shellID, Name: name}, nil)
-	if err != nil {
-		return err
-	}
-	conn.Close(websocket.StatusNormalClosure, "")
-	return nil
-}
-
-// ParseShellList decodes an active-list OpenOK payload.
-func ParseShellList(payload []byte) ([]relay.ActiveShellInfo, error) {
-	var out []relay.ActiveShellInfo
+func ParseTmuxSessionList(payload []byte) ([]relay.TmuxSessionInfo, error) {
+	var out []relay.TmuxSessionInfo
 	if len(payload) == 0 {
 		return out, nil
 	}
@@ -119,7 +102,7 @@ func ParseShellList(payload []byte) ([]relay.ActiveShellInfo, error) {
 	return out, nil
 }
 
-func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op openPayload, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
+func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
 	ctx, cancel := openTimeoutContext(ctx)
 	defer cancel()
 
@@ -131,14 +114,14 @@ func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureT
 		header.Set("X-ETerm-Tenant", tenant)
 	}
 	reportOpenProgress(progress, OpenStageConnect)
-	conn, err := dial(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/client"), header, insecureTLS)
+	conn, err := esync.DialWebSocket(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/client"), header, insecureTLS)
 	if err != nil {
 		return nil, 0, nil, err
 	}
 	streamID := randomStreamID()
 	payload, _ := json.Marshal(op)
 	reportOpenProgress(progress, OpenStageRequest)
-	if err := conn.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload})); err != nil {
+	if err := writeFrame(ctx, conn, relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload}); err != nil {
 		conn.CloseNow()
 		return nil, 0, nil, err
 	}
@@ -172,30 +155,21 @@ func reportOpenProgress(progress ProgressFunc, stage OpenStage) {
 	}
 }
 
-func dial(ctx context.Context, urls []string, header http.Header, insecureTLS bool) (*websocket.Conn, error) {
-	var lastErr error
-	client := esync.HTTPClient(30*time.Second, insecureTLS)
-	for _, u := range urls {
-		conn, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{HTTPHeader: header, HTTPClient: client})
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		return conn, nil
-	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, errors.New("server URL is required")
-}
-
 var defaultOpenTimeout = 30 * time.Second
+var defaultWriteTimeout = 10 * time.Second
 
 func openTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, defaultOpenTimeout)
+}
+
+func writeTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, defaultWriteTimeout)
 }
 
 func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int) *internalssh.InteractiveSession {
@@ -211,7 +185,7 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 		Resize: func(rows, cols int) error {
 			stdin.mu.Lock()
 			defer stdin.mu.Unlock()
-			return conn.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameResize, StreamID: streamID, Payload: relay.ResizePayload(rows, cols)}))
+			return writeFrame(ctx, conn, relay.Frame{Type: relay.FrameResize, StreamID: streamID, Payload: relay.ResizePayload(rows, cols)})
 		},
 	}
 	is.AddCloser(closerFunc(stopKeepalive))
@@ -260,7 +234,7 @@ func (f closerFunc) Close() error {
 func (w *wsStdin) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	err := w.conn.Write(w.ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: w.streamID, Payload: p}))
+	err := writeFrame(w.ctx, w.conn, relay.Frame{Type: relay.FrameData, StreamID: w.streamID, Payload: p})
 	if err != nil {
 		return 0, err
 	}
@@ -270,8 +244,14 @@ func (w *wsStdin) Write(p []byte) (int, error) {
 func (w *wsStdin) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	_ = w.conn.Write(w.ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: w.streamID}))
+	_ = writeFrame(w.ctx, w.conn, relay.Frame{Type: relay.FrameClose, StreamID: w.streamID})
 	return w.conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func writeFrame(ctx context.Context, conn *websocket.Conn, f relay.Frame) error {
+	wctx, cancel := writeTimeoutContext(ctx)
+	defer cancel()
+	return conn.Write(wctx, websocket.MessageBinary, relay.Encode(f))
 }
 
 func randomStreamID() uint32 {

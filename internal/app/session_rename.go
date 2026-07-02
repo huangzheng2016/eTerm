@@ -16,7 +16,7 @@ import (
 type sessionRenameKind int
 
 const (
-	renameRemoteShell sessionRenameKind = iota
+	renameRemoteTmux sessionRenameKind = iota
 	renameTmuxSession
 	renameTab
 )
@@ -25,7 +25,7 @@ type sessionRenameModel struct {
 	kind    sessionRenameKind
 	input   textinput.Model
 	peer    types.RemotePeer
-	shellID string
+	session string
 	oldName string
 	tab     int
 }
@@ -35,9 +35,9 @@ type tabRenameMsg struct {
 	Title string
 }
 
-func newRemoteShellRenamePrompt(msg types.RemoteShellRenameRequestMsg) *sessionRenameModel {
+func newRemoteTmuxRenamePrompt(msg types.RemoteTmuxRenameRequestMsg) *sessionRenameModel {
 	ti := newSessionRenameInput(msg.CurrentName)
-	return &sessionRenameModel{kind: renameRemoteShell, input: ti, peer: msg.Peer, shellID: msg.ShellID}
+	return &sessionRenameModel{kind: renameRemoteTmux, input: ti, peer: msg.Peer, session: msg.SessionID}
 }
 
 func newTmuxRenamePrompt(msg types.TmuxRenameRequestMsg) *sessionRenameModel {
@@ -82,10 +82,10 @@ func (m *sessionRenameModel) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, nil
 		}
 		switch m.kind {
-		case renameRemoteShell:
+		case renameRemoteTmux:
 			peer := m.peer
-			shellID := m.shellID
-			return true, func() tea.Msg { return types.RemoteShellRenameMsg{Peer: peer, ShellID: shellID, Name: name} }
+			session := m.session
+			return true, func() tea.Msg { return types.RemoteTmuxRenameMsg{Peer: peer, SessionID: session, Name: name} }
 		case renameTmuxSession:
 			oldName := m.oldName
 			return true, func() tea.Msg { return types.TmuxRenameMsg{OldName: oldName, NewName: name} }
@@ -105,8 +105,8 @@ func (m *sessionRenameModel) paste(msg tea.PasteMsg) {
 
 func (m *sessionRenameModel) View() string {
 	title := "Rename session"
-	if m.kind == renameRemoteShell {
-		title = "Rename active shell"
+	if m.kind == renameRemoteTmux {
+		title = "Rename tmux session"
 	} else if m.kind == renameTab {
 		title = "Rename tab"
 	}
@@ -125,18 +125,18 @@ func (a App) openActiveTabRenamePrompt() (App, tea.Cmd) {
 	}
 	tab := a.tabs[a.activeTab]
 	if sm, ok := tab.Model.(*sshview.Model); ok {
-		if spec := sm.RemoteReconnect(); spec != nil && spec.Active {
-			a.renamePrompt = newRemoteShellRenamePrompt(types.RemoteShellRenameRequestMsg{
+		if spec := sm.RemoteReconnect(); spec != nil && spec.Tmux {
+			a.renamePrompt = newRemoteTmuxRenamePrompt(types.RemoteTmuxRenameRequestMsg{
 				Peer:        spec.Peer,
-				ShellID:     spec.ShellID,
-				CurrentName: activeShellPromptName(tab.Title, spec.Peer.Name, spec.ShellID),
+				SessionID:   spec.SessionID,
+				CurrentName: remoteTmuxPromptName(tab.Title, spec.Peer.Name, spec.SessionID),
 			})
 			a.renamePrompt.syncWidth(a.width)
 			return a, textinput.Blink
 		}
 	}
-	if strings.HasPrefix(tab.Title, "[T]") {
-		name := strings.TrimPrefix(tab.Title, "[T]")
+	if tab.Type == LocalTab && tab.TmuxSession != "" {
+		name := tab.TmuxSession
 		a.renamePrompt = newTmuxRenamePrompt(types.TmuxRenameRequestMsg{Name: name})
 		a.renamePrompt.syncWidth(a.width)
 		return a, textinput.Blink
@@ -146,14 +146,14 @@ func (a App) openActiveTabRenamePrompt() (App, tea.Cmd) {
 	return a, textinput.Blink
 }
 
-func activeShellPromptName(title, peerName, shellID string) string {
-	prefix := "[A]" + peerName + "-"
+func remoteTmuxPromptName(title, peerName, sessionID string) string {
+	prefix := "[T]" + peerName + "-"
 	if strings.HasPrefix(title, prefix) {
 		if name := strings.TrimSpace(strings.TrimPrefix(title, prefix)); name != "" {
 			return name
 		}
 	}
-	return shellID
+	return sessionID
 }
 
 func (a App) renameTab(msg tabRenameMsg) (App, tea.Cmd) {

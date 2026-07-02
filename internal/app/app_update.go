@@ -613,30 +613,46 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.RemotePeerMenuMsg:
 		a.remoteMenu = remotemenu.New(msg.Peer, msg.Hosts)
-		return a, a.loadActiveShells(msg.Peer)
+		a.remoteMenu.SetTmuxLoading(true)
+		return a, a.loadRemoteTmuxSessions(msg.Peer)
 
-	case types.RemoteActiveShellsLoadedMsg:
-		if a.remoteMenu != nil && msg.Err == nil {
-			a.remoteMenu.SetShells(msg.Shells)
+	case types.RemoteTmuxSessionsLoadedMsg:
+		if msg.Err != nil {
+			if a.remoteMenu != nil && a.remoteMenu.Peer.ID == msg.Peer.ID {
+				a.remoteMenu.SetTmuxError(msg.Err.Error())
+				return a, nil
+			}
+			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
+		}
+		if a.remoteMenu != nil && a.remoteMenu.Peer.ID == msg.Peer.ID {
+			a.remoteMenu.SetTmuxSessions(msg.Sessions)
 		}
 		return a, nil
 
-	case types.RemoteShellKillRequestMsg:
-		kill := types.RemoteShellKillMsg{Peer: msg.Peer, ShellID: msg.ShellID}
-		a.pendingRemoteShellKill = &kill
-		a.confirm = components.NewConfirm("Kill Active Shell", fmt.Sprintf("Kill active shell %s on %s?", msg.ShellID, msg.Peer.Name)).Show()
+	case types.RemoteTmuxKillRequestMsg:
+		kill := types.RemoteTmuxKillMsg{Peer: msg.Peer, SessionID: msg.SessionID}
+		a.pendingRemoteTmuxKill = &kill
+		a.confirm = components.NewConfirm("Kill tmux session", fmt.Sprintf("Kill tmux session %s on %s?", msg.SessionID, msg.Peer.Name)).Show()
 		return a, nil
 
-	case types.RemoteShellKillMsg:
-		return a, a.killActiveShell(msg)
+	case types.RemoteTmuxKillMsg:
+		return a, a.killRemoteTmuxSession(msg)
 
-	case types.RemoteShellRenameRequestMsg:
-		a.renamePrompt = newRemoteShellRenamePrompt(msg)
+	case types.RemoteTmuxRenameRequestMsg:
+		a.renamePrompt = newRemoteTmuxRenamePrompt(msg)
 		a.renamePrompt.syncWidth(a.width)
 		return a, textinput.Blink
 
-	case types.RemoteShellRenameMsg:
-		return a.renameActiveShell(msg)
+	case types.RemoteTmuxRenameMsg:
+		return a.renameRemoteTmuxSession(msg)
+
+	case remoteTmuxRenameAppliedMsg:
+		a.renameRemoteTmuxTabs(msg.Peer.ID, msg.OldSessionID, msg.Name)
+		return a, a.loadRemoteTmuxSessions(msg.Peer)
+
+	case tmuxRenameAppliedMsg:
+		a.renameTmuxTabs(msg.OldName, msg.NewName)
+		return a, a.loadTmuxSessions()
 
 	case types.RemoteShellReconnectMsg:
 		return a.applyRemoteShellReconnect(msg)
@@ -649,10 +665,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.TmuxMenuMsg:
 		a.tmuxMenu = tmuxmenu.New(nil)
+		a.tmuxMenu.SetLoading(true)
 		return a, a.loadTmuxSessions()
 
 	case types.TmuxSessionsLoadedMsg:
 		if msg.Err != nil {
+			if a.tmuxMenu != nil {
+				a.tmuxMenu.SetError(msg.Err.Error())
+				return a, nil
+			}
 			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
 		}
 		if a.tmuxMenu != nil {
@@ -666,7 +687,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.TmuxKillRequestMsg:
 		kill := types.TmuxKillMsg{Name: msg.Name}
 		a.pendingTmuxKill = &kill
-		a.confirm = components.NewConfirm("Kill tmux Session", fmt.Sprintf("Kill tmux session %s?", msg.Name)).Show()
+		a.confirm = components.NewConfirm("Kill tmux session", fmt.Sprintf("Kill tmux session %s?", msg.Name)).Show()
 		return a, nil
 
 	case types.TmuxKillMsg:

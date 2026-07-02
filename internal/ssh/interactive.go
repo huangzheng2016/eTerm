@@ -60,12 +60,7 @@ func (i *InteractiveSession) Close() error {
 // NewInteractiveSession opens a PTY shell without blocking on Wait().
 // rows/cols are PTY dimensions (height x width in cells).
 func NewInteractiveSession(client *ssh.Client, rows, cols int, forwardAgent bool) (*InteractiveSession, error) {
-	if cols < 40 {
-		cols = 80
-	}
-	if rows < 5 {
-		rows = 24
-	}
+	rows, cols = NormalizePTYSize(rows, cols)
 
 	sess, err := client.NewSession()
 	if err != nil {

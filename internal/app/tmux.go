@@ -6,20 +6,21 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/huangzheng2016/eTerm/internal/localtmux"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/tmux"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
 type tmuxTerminalOpenedMsg struct {
-	is    *internalssh.InteractiveSession
-	title string
+	is      *internalssh.InteractiveSession
+	title   string
+	session string
 }
 
 func (a App) loadTmuxSessions() tea.Cmd {
 	return func() tea.Msg {
-		sessions, err := localtmux.ListSessions(context.Background())
+		sessions, err := tmux.ListSessions(context.Background())
 		return types.TmuxSessionsLoadedMsg{Sessions: sessions, Err: err}
 	}
 }
@@ -28,17 +29,17 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 	cols, rows := ptyFromAppSizeForTab(a, LocalTab)
 	return a, func() tea.Msg {
 		if msg.New {
-			is, name, err := localtmux.NewSession(context.Background(), rows, cols)
+			is, name, err := tmux.NewSession(context.Background(), rows, cols)
 			if err != nil {
 				return types.ErrorMsg{Err: fmt.Errorf("tmux new-session: %w", err)}
 			}
-			return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(name)}
+			return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(name), session: name}
 		}
-		is, err := localtmux.AttachSession(context.Background(), msg.Name, rows, cols)
+		is, err := tmux.AttachSession(context.Background(), msg.Name, rows, cols)
 		if err != nil {
 			return types.ErrorMsg{Err: fmt.Errorf("tmux attach-session: %w", err)}
 		}
-		return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(msg.Name)}
+		return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(msg.Name), session: msg.Name}
 	}
 }
 
@@ -47,7 +48,7 @@ func (a App) applyTmuxTerminalOpened(msg tmuxTerminalOpenedMsg) (App, tea.Cmd) {
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(LocalTab))
 	}
-	tab := Tab{Type: LocalTab, Title: msg.title, Model: sv}
+	tab := Tab{Type: LocalTab, Title: msg.title, Model: sv, TmuxSession: msg.session}
 	a.tabs = append(a.tabs, tab)
 	a.activeTab = len(a.tabs) - 1
 	a.syncTabBar()
@@ -57,10 +58,10 @@ func (a App) applyTmuxTerminalOpened(msg tmuxTerminalOpenedMsg) (App, tea.Cmd) {
 func (a App) killTmuxSession(msg types.TmuxKillMsg) tea.Cmd {
 	name := msg.Name
 	return func() tea.Msg {
-		if err := localtmux.KillSession(context.Background(), name); err != nil {
-			return types.ErrorMsg{Err: err}
+		if err := tmux.KillSession(context.Background(), name); err != nil {
+			return types.TmuxSessionsLoadedMsg{Err: err}
 		}
-		sessions, err := localtmux.ListSessions(context.Background())
+		sessions, err := tmux.ListSessions(context.Background())
 		return types.TmuxSessionsLoadedMsg{Sessions: sessions, Err: err}
 	}
 }
@@ -71,19 +72,22 @@ func (a App) renameTmuxSession(msg types.TmuxRenameMsg) (App, tea.Cmd) {
 	if oldName == "" || newName == "" {
 		return a, nil
 	}
+	return a, func() tea.Msg {
+		if err := tmux.RenameSession(context.Background(), oldName, newName); err != nil {
+			return types.TmuxSessionsLoadedMsg{Err: err}
+		}
+		return tmuxRenameAppliedMsg{OldName: oldName, NewName: newName}
+	}
+}
+
+func (a *App) renameTmuxTabs(oldName, newName string) {
 	for i := range a.tabs {
-		if a.tabs[i].Title == tmuxTabTitle(oldName) {
+		if a.tabs[i].TmuxSession == oldName {
 			a.tabs[i].Title = tmuxTabTitle(newName)
+			a.tabs[i].TmuxSession = newName
 		}
 	}
 	a.syncTabBar()
-	return a, func() tea.Msg {
-		if err := localtmux.RenameSession(context.Background(), oldName, newName); err != nil {
-			return types.ErrorMsg{Err: err}
-		}
-		sessions, err := localtmux.ListSessions(context.Background())
-		return types.TmuxSessionsLoadedMsg{Sessions: sessions, Err: err}
-	}
 }
 
 func tmuxTabTitle(name string) string {
