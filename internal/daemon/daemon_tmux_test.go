@@ -101,7 +101,7 @@ func TestHandleOpenTmuxList(t *testing.T) {
 	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxList})
 	out := newDaemonSink()
 
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 1, Payload: payload}, &sync.Mutex{}, map[uint32]*internalssh.InteractiveSession{}, out.write, context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 1, Payload: payload}, &sync.Mutex{}, map[uint32]*internalssh.InteractiveSession{}, out.write, context.Background(), context.Background())
 
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	var got []relay.TmuxSessionInfo
@@ -125,7 +125,7 @@ func TestHandleOpenTmuxNewStartsStream(t *testing.T) {
 	out := newDaemonSink()
 	sessions := map[uint32]*internalssh.InteractiveSession{}
 
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background(), context.Background())
 
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	if string(f.Payload) != "tmux-abc123" {
@@ -156,7 +156,7 @@ func TestHandleOpenTmuxNewCleansUpWhenOpenOKWriteFails(t *testing.T) {
 
 	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 12, Payload: payload}, &sync.Mutex{}, sessions, func(relay.Frame) error {
 		return errors.New("write failed")
-	}, context.Background())
+	}, context.Background(), context.Background())
 
 	if sessions[12] != nil {
 		t.Fatal("session registered after OpenOK write failed")
@@ -172,7 +172,7 @@ func TestHandleOpenControlSendsCloseAfterOpenOK(t *testing.T) {
 	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxKill, SessionID: "work"})
 	out := newDaemonSink()
 
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 13, Payload: payload}, &sync.Mutex{}, map[uint32]*internalssh.InteractiveSession{}, out.write, context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 13, Payload: payload}, &sync.Mutex{}, map[uint32]*internalssh.InteractiveSession{}, out.write, context.Background(), context.Background())
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	closeFrame := waitDaemonFrame(t, out, relay.FrameClose)
@@ -203,7 +203,7 @@ func TestHandleOpenTmuxErrorTargetsReturnOpenErr(t *testing.T) {
 		payload, _ := json.Marshal(req)
 		out := newDaemonSink()
 
-		handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: uint32(i + 20), Payload: payload}, &sync.Mutex{}, map[uint32]*internalssh.InteractiveSession{}, out.write, context.Background())
+		handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: uint32(i + 20), Payload: payload}, &sync.Mutex{}, map[uint32]*internalssh.InteractiveSession{}, out.write, context.Background(), context.Background())
 
 		f := waitDaemonFrame(t, out, relay.FrameOpenErr)
 		if string(f.Payload) != wantErr.Error() {
@@ -263,6 +263,34 @@ func TestHandleFrameDispatchesOpenWithoutBlocking(t *testing.T) {
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 }
 
+func TestHandleFrameTmuxOpenKeepsStreamAfterRequestReturns(t *testing.T) {
+	restoreTmuxStubs(t)
+	fake := newDaemonFakeSession()
+	tmuxNewSession = func(context.Context, int, int) (*internalssh.InteractiveSession, string, error) {
+		return fake.is, "tmux-abc123", nil
+	}
+	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
+	out := newDaemonSink()
+	sessions := map[uint32]*internalssh.InteractiveSession{}
+
+	handleFrame(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 42, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background())
+
+	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
+	select {
+	case f := <-out.frames:
+		if f.Type == relay.FrameClose {
+			t.Fatal("stream closed after open request returned")
+		}
+	case <-time.After(100 * time.Millisecond):
+	}
+	go func() { _, _ = fake.stdout.Write([]byte("ok")) }()
+	data := waitDaemonFrame(t, out, relay.FrameData)
+	if data.StreamID != 42 || string(data.Payload) != "ok" {
+		t.Fatalf("data = %+v", data)
+	}
+	_ = fake.stdout.Close()
+}
+
 func TestHandleOpenTmuxAttachKeepsExistingStream(t *testing.T) {
 	restoreTmuxStubs(t)
 	first := newDaemonFakeSession()
@@ -282,8 +310,8 @@ func TestHandleOpenTmuxAttachKeepsExistingStream(t *testing.T) {
 	out := newDaemonSink()
 	sessions := map[uint32]*internalssh.InteractiveSession{}
 
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 3, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background())
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 4, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 3, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background(), context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 4, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background(), context.Background())
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
@@ -309,8 +337,8 @@ func TestHandleOpenTmuxKillAndRename(t *testing.T) {
 	killPayload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxKill, SessionID: "work"})
 	renamePayload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: "work", Name: "ops"})
 
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 5, Payload: killPayload}, &sync.Mutex{}, sessions, out.write, context.Background())
-	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 6, Payload: renamePayload}, &sync.Mutex{}, sessions, out.write, context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 5, Payload: killPayload}, &sync.Mutex{}, sessions, out.write, context.Background(), context.Background())
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 6, Payload: renamePayload}, &sync.Mutex{}, sessions, out.write, context.Background(), context.Background())
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)

@@ -213,7 +213,7 @@ func handleFrame(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessi
 		go func() {
 			reqCtx, cancel := context.WithTimeout(ctx, openRequestTimeout)
 			defer cancel()
-			handleOpen(rt, f, sessionsMu, sessions, writeFrame, reqCtx)
+			handleOpen(rt, f, sessionsMu, sessions, writeFrame, reqCtx, ctx)
 		}()
 	case relay.FrameData:
 		is := getSession(sessionsMu, sessions, f.StreamID)
@@ -274,7 +274,7 @@ func removeSession(mu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveS
 	return is
 }
 
-func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, writeFrame func(relay.Frame) error, ctx context.Context) {
+func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, writeFrame func(relay.Frame) error, ctx context.Context, streamCtx context.Context) {
 	var req relay.OpenRequest
 	if err := json.Unmarshal(f.Payload, &req); err != nil {
 		_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
@@ -306,7 +306,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			}
 			return
 		}
-		go pumpSession(ctx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
+		go pumpSession(streamCtx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
 			return removeSession(sessionsMu, sessions, streamID, is) != nil
 		})
 	case relay.TargetTmuxAttach:
@@ -322,7 +322,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			}
 			return
 		}
-		go pumpSession(ctx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
+		go pumpSession(streamCtx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
 			return removeSession(sessionsMu, sessions, streamID, is) != nil
 		})
 	case relay.TargetTmuxKill:
@@ -354,7 +354,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			}
 			return
 		}
-		go pumpSession(ctx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
+		go pumpSession(streamCtx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
 			return removeSession(sessionsMu, sessions, streamID, is) != nil
 		})
 	}
