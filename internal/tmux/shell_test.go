@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +94,38 @@ func TestNewSessionCleansUpWhenAttachFails(t *testing.T) {
 	}
 }
 
+func TestAttachSessionKeepsProcessAfterOpenContextCancel(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "tmux.log")
+	tmuxPath := filepath.Join(dir, "tmux")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+		"if [ \"$1\" = \"set-option\" ]; then exit 0; fi\n" +
+		"if [ \"$1\" = \"attach-session\" ]; then\n" +
+		"  printf 'ready\\n'\n" +
+		"  while IFS= read -r line; do printf 'got:%s\\n' \"$line\"; done\n" +
+		"fi\n"
+	if err := os.WriteFile(tmuxPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	is, err := AttachSession(ctx, "work", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+	readUntil(t, is.Stdout, "ready")
+
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := is.Stdin.Write([]byte("ping\n")); err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, is.Stdout, "got:ping")
+}
+
 func TestPtyCommandCloseKillsStubbornProcessAfterTimeout(t *testing.T) {
 	oldTimeout := internalssh.ProcessCloseKillTimeout
 	internalssh.ProcessCloseKillTimeout = 20 * time.Millisecond
@@ -122,6 +155,44 @@ func stubbornShell(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func readUntil(t *testing.T, r interface{ Read([]byte) (int, error) }, want string) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	var got []byte
+	ch := make(chan struct {
+		n   int
+		err error
+	}, 1)
+	buf := make([]byte, 256)
+	for {
+		go func() {
+			n, err := r.Read(buf)
+			ch <- struct {
+				n   int
+				err error
+			}{n: n, err: err}
+		}()
+		select {
+		case res := <-ch:
+			if res.n > 0 {
+				got = append(got, buf[:res.n]...)
+				if strings.Contains(string(got), want) {
+					return
+				}
+			}
+			if res.err != nil {
+				t.Fatalf("read %q: %v, got %q", want, res.err, got)
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for %q, got %q", want, got)
+		}
+	}
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func sameStrings(a, b []string) bool {

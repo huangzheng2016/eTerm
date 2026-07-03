@@ -52,7 +52,7 @@ func AttachSession(ctx context.Context, name string, rows, cols int) (*internals
 	if err := runTmux(ctx, "set-option", statusOffArgs(name)); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "tmux", attachSessionArgs(name)...)
+	cmd := exec.Command("tmux", attachSessionArgs(name)...)
 	is, err := ptyCommand(cmd, rows, cols)
 	if err != nil {
 		return nil, tmuxCommandError("attach-session", err, nil)
