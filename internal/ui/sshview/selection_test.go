@@ -166,6 +166,62 @@ func TestScrollbackRenderDoesNotSpaceCJK(t *testing.T) {
 	}
 }
 
+func TestHiddenCursorDoesNotRenderManualCursor(t *testing.T) {
+	m := New(nil, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("abc\x1b[?25l")})
+
+	if !m.cursorHidden {
+		t.Fatal("expected cursor hidden")
+	}
+	if got, want := m.renderScreenWithCursor(), m.emu.Render(); got != want {
+		t.Fatalf("hidden cursor rendered extra cell:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+func TestShowCursorRestoresManualCursor(t *testing.T) {
+	m := New(nil, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("abc\x1b[?25l\x1b[?25h")})
+
+	if m.cursorHidden {
+		t.Fatal("expected cursor visible")
+	}
+	if got, want := m.renderScreenWithCursor(), m.emu.Render(); got == want {
+		t.Fatal("visible cursor was not rendered")
+	}
+}
+
+func TestAltScreenRenderKeepsClearedCells(t *testing.T) {
+	m := New(nil, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+	m.SetSize(20, 4)
+
+	_, _ = m.Update(ChunkMsg{
+		StreamID: m.StreamID(),
+		Data:     []byte("\x1b[?1049hABCDEFGHIJ\x1b[Habc\x1b[K\x1b[?25l"),
+	})
+
+	got := m.renderScreenWithCursor()
+	lines := strings.Split(got, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("line count = %d want 4: %q", len(lines), got)
+	}
+	if lines[0] != "abc"+strings.Repeat(" ", 17) {
+		t.Fatalf("first line = %q", lines[0])
+	}
+	for i := 1; i < len(lines); i++ {
+		if lines[i] != strings.Repeat(" ", 20) {
+			t.Fatalf("line %d = %q", i, lines[i])
+		}
+	}
+	if strings.Contains(got, "DEFG") {
+		t.Fatalf("cleared cells leaked old content: %q", got)
+	}
+}
+
 func TestScrollbackViewShowsCompactTopRightPosition(t *testing.T) {
 	e := mkEmu(20, 5, "L0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\n")
 	m := &Model{emu: e, scrollOffset: 2, scrollIndicatorUntil: time.Now().Add(time.Second)}

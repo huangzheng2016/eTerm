@@ -14,9 +14,8 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
-// vt.Render() draws the cell grid but does not include a visible text cursor (the TUI
-// cursor is tracked internally only). We briefly invert the cursor cell so the block
-// is visible like a real terminal.
+// vt.Render() omits trailing blank cells. In alt-screen full-screen apps, render
+// the whole cell grid so cleared areas overwrite the previous frame.
 var disconnectBannerStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#e0a000")).
 	Bold(true)
@@ -124,11 +123,17 @@ func (m *Model) renderScreenWithCursor() string {
 	w, h := m.emu.Width(), m.emu.Height()
 	pos := m.emu.CursorPosition()
 	cx, cy := pos.X, pos.Y
-	if w <= 0 || h <= 0 || cx < 0 || cy < 0 || cx >= w || cy >= h {
+	if m.cursorHidden || w <= 0 || h <= 0 || cx < 0 || cy < 0 || cx >= w || cy >= h {
+		if m.emu.IsAltScreen() {
+			return m.renderFullScreen()
+		}
 		return m.emu.Render()
 	}
 	orig := m.emu.CellAt(cx, cy)
 	if orig == nil {
+		if m.emu.IsAltScreen() {
+			return m.renderFullScreen()
+		}
 		return m.emu.Render()
 	}
 
@@ -142,8 +147,23 @@ func (m *Model) renderScreenWithCursor() string {
 
 	m.emu.SetCell(cx, cy, &highlight)
 	out := m.emu.Render()
+	if m.emu.IsAltScreen() {
+		out = m.renderFullScreen()
+	}
 	m.emu.SetCell(cx, cy, &saved)
 	return out
+}
+
+func (m *Model) renderFullScreen() string {
+	w, h := m.emu.Width(), m.emu.Height()
+	if w <= 0 || h <= 0 {
+		return m.emu.Render()
+	}
+	lines := make([]string, 0, h)
+	for y := 0; y < h; y++ {
+		lines = append(lines, renderScreenLine(m, w, y))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderScrollback renders a mixed view: scrollback lines at the top, then

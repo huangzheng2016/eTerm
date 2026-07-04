@@ -103,6 +103,7 @@ type Model struct {
 	appCursorKeys  bool
 	mouseMode      bool
 	bracketedPaste bool
+	cursorHidden   bool
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -122,6 +123,27 @@ func (m *Model) RemoteReconnect() *types.RemoteReconnect {
 // New creates a model; call SetSize or rely on WindowSizeMsg. hostID is used to reconnect after a network drop.
 func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
 	emu := vt.NewEmulator(80, 24)
+	// tmux asks these xterm probes before repainting full-screen panes.
+	emu.RegisterCsiHandler(ansi.Command('?', 0, 'n'), func(params ansi.Params) bool {
+		n, _, ok := params.Param(0, 0)
+		if !ok || n != 996 {
+			return false
+		}
+		_, _ = io.WriteString(emu.InputPipe(), ansi.LightDarkReport(true))
+		return true
+	})
+	emu.RegisterCsiHandler(ansi.Command('>', 0, 'q'), func(params ansi.Params) bool {
+		_, _ = io.WriteString(emu.InputPipe(), "\x1bP>|eTerm\x1b\\")
+		return true
+	})
+	emu.RegisterCsiHandler('t', func(params ansi.Params) bool {
+		n, _, ok := params.Param(0, 0)
+		if !ok || n != 18 {
+			return false
+		}
+		_, _ = io.WriteString(emu.InputPipe(), ansi.WindowOp(8, emu.Height(), emu.Width()))
+		return true
+	})
 	m := &Model{
 		sess:       is,
 		emu:        emu,
@@ -154,6 +176,9 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 			if isMouseTrackingMode(mode) {
 				m.mouseMode = false
 			}
+		},
+		CursorVisibility: func(visible bool) {
+			m.cursorHidden = !visible
 		},
 	})
 	// Drain the emulator's input pipe so internal writes (e.g. in-band resize
