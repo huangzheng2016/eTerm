@@ -9,7 +9,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
-	"github.com/huangzheng2016/eTerm/internal/sshconfig"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/batchresultview"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
@@ -558,15 +557,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx = a.activeTab
 		}
 		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 {
-			if m, ok := a.tabs[idx].Model.(*sshview.Model); ok && isTerminalTab(a.tabs[idx].Type) {
-				finalizeSSHSession(a.db, m)
-				_ = m.Close()
-			}
+			closeCmd := closeTerminalTabCmd(a.db, a.tabs[idx])
 			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
 			if a.activeTab >= len(a.tabs) {
 				a.activeTab = len(a.tabs) - 1
 			}
 			a.syncTabBar()
+			return a, closeCmd
 		}
 		return a, nil
 
@@ -1275,11 +1272,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.ImportSSHConfigPreviewMsg:
 		return a, func() tea.Msg {
-			parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
+			parsed, err := parseSSHConfigForImport()
 			if err != nil {
 				return types.ErrorMsg{Err: err}
 			}
-			preview := buildSSHConfigImportPreview(a.db, parsed)
+			preview := buildSSHImportPreview(a.db, parsed)
 			return preview
 		}
 
@@ -1296,9 +1293,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
 		}
-		if msg.Added == 0 && msg.Changed == 0 && msg.Skipped == 0 {
+		if msg.Added == 0 && msg.Changed == 0 && msg.Skipped == 0 && msg.KeysAdded == 0 && msg.KeysSkipped == 0 && msg.KeysFailed == 0 {
 			var tc tea.Cmd
-			a.toast, tc = a.toast.Show("No SSH config hosts found", components.ToastWarning, 3*time.Second)
+			a.toast, tc = a.toast.Show("No SSH config hosts or keys found", components.ToastWarning, 3*time.Second)
 			return a, tea.Batch(tc, reflowWindow(a))
 		}
 		if msg.Changed == 0 && msg.Skipped == 0 {
@@ -1320,9 +1317,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(tc, reflowWindow(a))
 		}
 		var tc tea.Cmd
-		tmsg := fmt.Sprintf("Imported %d (%d skipped", msg.Imported, msg.Skipped)
+		tmsg := fmt.Sprintf("Imported %d hosts, %d keys (%d hosts skipped, %d keys skipped", msg.Imported, msg.KeysImported, msg.Skipped, msg.KeysSkipped)
 		if msg.Overwritten > 0 {
 			tmsg += fmt.Sprintf(", %d overwritten", msg.Overwritten)
+		}
+		if msg.KeysFailed > 0 {
+			tmsg += fmt.Sprintf(", %d keys failed", msg.KeysFailed)
 		}
 		tmsg += ")"
 		if msg.UnresolvedProxyJumps > 0 {

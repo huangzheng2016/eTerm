@@ -35,3 +35,26 @@ Host kerberos
 		t.Fatalf("got %#v want %#v", hosts[0].PreferredAuthentications, want)
 	}
 }
+
+func TestParseSSHConfigExpandsQuotedIdentityFileHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "config")
+	data := []byte(`
+	Host prod
+	  HostName prod.example.com
+	  IdentityFile "%d/.ssh/id_ed25519"
+`)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	hosts, err := ParseSSHConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".ssh", "id_ed25519")
+	if hosts[0].IdentFile != want {
+		t.Fatalf("got %q want %q", hosts[0].IdentFile, want)
+	}
+}

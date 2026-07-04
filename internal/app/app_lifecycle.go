@@ -146,17 +146,27 @@ func syncTickCmd(database *gorm.DB) tea.Cmd {
 
 func (a App) closeCurrentTabIfAllowed() (App, tea.Cmd) {
 	if len(a.tabs) > 1 && a.activeTab > 0 {
-		if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok && isTerminalTab(a.tabs[a.activeTab].Type) {
-			finalizeSSHSession(a.db, m)
-			_ = m.Close()
-		}
+		closeCmd := closeTerminalTabCmd(a.db, a.tabs[a.activeTab])
 		a.tabs = append(a.tabs[:a.activeTab], a.tabs[a.activeTab+1:]...)
 		if a.activeTab >= len(a.tabs) {
 			a.activeTab = len(a.tabs) - 1
 		}
 		a.syncTabBar()
+		return a, closeCmd
 	}
 	return a, nil
+}
+
+func closeTerminalTabCmd(gdb *gorm.DB, tab Tab) tea.Cmd {
+	m, ok := tab.Model.(*sshview.Model)
+	if !ok || !isTerminalTab(tab.Type) {
+		return nil
+	}
+	return func() tea.Msg {
+		finalizeSSHSession(gdb, m)
+		_ = m.Close()
+		return nil
+	}
 }
 
 func (a App) lockSession() (App, tea.Cmd) {

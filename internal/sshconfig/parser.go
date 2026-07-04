@@ -38,18 +38,18 @@ type ParsedHost struct {
 }
 
 type etermMetadata struct {
-	Group           string `json:"group,omitempty"`
-	Tags            string `json:"tags,omitempty"`
-	Description     string `json:"description,omitempty"`
-	AuthMethod      string `json:"auth_method,omitempty"`
-	KeyName         string `json:"key_name,omitempty"`
-	ProxyType       string `json:"proxy_type,omitempty"`
-	ProxyHost       string `json:"proxy_host,omitempty"`
-	ProxyPort       int    `json:"proxy_port,omitempty"`
-	ProxyUser       string `json:"proxy_user,omitempty"`
-	GSSAPISource    string `json:"gssapi_source,omitempty"`
-	GSSAPIKeytab    string `json:"gssapi_keytab,omitempty"`
-	KrbPrincipal    string `json:"krb_principal,omitempty"`
+	Group        string `json:"group,omitempty"`
+	Tags         string `json:"tags,omitempty"`
+	Description  string `json:"description,omitempty"`
+	AuthMethod   string `json:"auth_method,omitempty"`
+	KeyName      string `json:"key_name,omitempty"`
+	ProxyType    string `json:"proxy_type,omitempty"`
+	ProxyHost    string `json:"proxy_host,omitempty"`
+	ProxyPort    int    `json:"proxy_port,omitempty"`
+	ProxyUser    string `json:"proxy_user,omitempty"`
+	GSSAPISource string `json:"gssapi_source,omitempty"`
+	GSSAPIKeytab string `json:"gssapi_keytab,omitempty"`
+	KrbPrincipal string `json:"krb_principal,omitempty"`
 }
 
 func ParseSSHConfig(path string) ([]ParsedHost, error) {
@@ -272,8 +272,13 @@ func resolveIncludePaths(baseDir, raw string) []string {
 }
 
 func expandPath(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.Trim(p, `"'`)
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		p = strings.ReplaceAll(p, "%d", home)
+	}
 	if strings.HasPrefix(p, "~/") {
-		home, _ := os.UserHomeDir()
 		return filepath.Join(home, p[2:])
 	}
 	return p
@@ -331,4 +336,3 @@ func ValidateExtraOptions(raw string) error {
 	}
 	return nil
 }
-

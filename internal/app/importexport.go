@@ -2,16 +2,41 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/sshconfig"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
 func sshConfigPath() string {
 	return sshconfig.MainConfigPath()
+}
+
+func parseSSHConfigForImport() ([]sshconfig.ParsedHost, error) {
+	parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func buildSSHImportPreview(database *gorm.DB, parsed []sshconfig.ParsedHost) types.ImportSSHConfigPreviewResultMsg {
+	preview := buildSSHConfigImportPreview(database, parsed)
+	keyPreview := previewSSHKeyImport(database, parsed)
+	preview.KeysAdded = keyPreview.imported
+	preview.KeysSkipped = keyPreview.skipped
+	preview.KeysFailed = keyPreview.failed
+	return preview
 }
 
 func buildSSHConfigImportPreview(database *gorm.DB, parsed []sshconfig.ParsedHost) types.ImportSSHConfigPreviewResultMsg {
@@ -30,6 +55,197 @@ func buildSSHConfigImportPreview(database *gorm.DB, parsed []sshconfig.ParsedHos
 		}
 	}
 	return preview
+}
+
+type sshKeyImportStats struct {
+	imported int
+	skipped  int
+	failed   int
+}
+
+type sshKeyImportPath struct {
+	path       string
+	referenced bool
+}
+
+type sshKeyFileInfo struct {
+	path        string
+	name        string
+	keyType     string
+	publicKey   string
+	fingerprint string
+	publicPath  string
+	certPath    string
+}
+
+func previewSSHKeyImport(database *gorm.DB, parsed []sshconfig.ParsedHost) sshKeyImportStats {
+	var stats sshKeyImportStats
+	for _, item := range discoverSSHKeyImportPaths(parsed) {
+		info, err := readSSHKeyFileInfo(item.path)
+		if err != nil {
+			if item.referenced {
+				stats.failed++
+			}
+			continue
+		}
+		if _, ok := findExistingSSHKeyForImport(database, info.path, info.fingerprint); ok {
+			stats.skipped++
+			continue
+		}
+		stats.imported++
+	}
+	return stats
+}
+
+func importSSHKeys(database *gorm.DB, parsed []sshconfig.ParsedHost) sshKeyImportStats {
+	var stats sshKeyImportStats
+	for _, item := range discoverSSHKeyImportPaths(parsed) {
+		info, err := readSSHKeyFileInfo(item.path)
+		if err != nil {
+			if item.referenced {
+				stats.failed++
+			}
+			continue
+		}
+		if _, ok := findExistingSSHKeyForImport(database, info.path, info.fingerprint); ok {
+			stats.skipped++
+			continue
+		}
+		name := uniqueSSHImportKeyName(database, info.name)
+		key := db.SSHKey{
+			Name:            name,
+			Type:            info.keyType,
+			PublicKeyData:   info.publicKey,
+			PrivatePath:     info.path,
+			PublicPath:      info.publicPath,
+			Fingerprint:     info.fingerprint,
+			StorageMode:     "file",
+			CertificatePath: info.certPath,
+		}
+		if err := database.Create(&key).Error; err != nil {
+			stats.failed++
+			continue
+		}
+		stats.imported++
+	}
+	return stats
+}
+
+func discoverSSHKeyImportPaths(parsed []sshconfig.ParsedHost) []sshKeyImportPath {
+	items := make(map[string]bool)
+	for _, ph := range parsed {
+		path := strings.TrimSpace(ph.IdentFile)
+		if path == "" {
+			continue
+		}
+		items[path] = true
+	}
+
+	sshDir := filepath.Dir(sshConfigPath())
+	entries, err := os.ReadDir(sshDir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			path := filepath.Join(sshDir, entry.Name())
+			if !shouldTrySSHPrivateKey(path) {
+				continue
+			}
+			if _, ok := items[path]; !ok {
+				items[path] = false
+			}
+		}
+	}
+
+	paths := make([]string, 0, len(items))
+	for path := range items {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	out := make([]sshKeyImportPath, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, sshKeyImportPath{path: path, referenced: items[path]})
+	}
+	return out
+}
+
+func shouldTrySSHPrivateKey(path string) bool {
+	name := filepath.Base(path)
+	if strings.HasSuffix(name, ".pub") || strings.HasSuffix(name, "-cert.pub") {
+		return false
+	}
+	switch name {
+	case "config", "authorized_keys":
+		return false
+	}
+	return !strings.HasPrefix(name, "known_hosts")
+}
+
+func readSSHKeyFileInfo(path string) (sshKeyFileInfo, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return sshKeyFileInfo{}, err
+	}
+	defer security.ClearBytes(data)
+	signer, err := ssh.ParsePrivateKey(data)
+	if err != nil {
+		return sshKeyFileInfo{}, err
+	}
+	pub := signer.PublicKey()
+	info := sshKeyFileInfo{
+		path:        path,
+		name:        filepath.Base(path),
+		keyType:     pub.Type(),
+		publicKey:   string(ssh.MarshalAuthorizedKey(pub)),
+		fingerprint: ssh.FingerprintSHA256(pub),
+	}
+	if info.name == "" || info.name == "." || info.name == string(filepath.Separator) {
+		info.name = "ssh-key"
+	}
+	pubPath := path + ".pub"
+	if _, err := os.Stat(pubPath); err == nil {
+		info.publicPath = pubPath
+	}
+	certPath := path + "-cert.pub"
+	if _, err := os.Stat(certPath); err == nil {
+		info.certPath = certPath
+	}
+	return info, nil
+}
+
+func findExistingSSHKeyForImport(database *gorm.DB, path, fingerprint string) (db.SSHKey, bool) {
+	var key db.SSHKey
+	if strings.TrimSpace(path) != "" {
+		if err := database.Where("private_path = ?", path).First(&key).Error; err == nil {
+			return key, true
+		}
+	}
+	if strings.TrimSpace(fingerprint) != "" {
+		if err := database.Where("fingerprint = ?", fingerprint).First(&key).Error; err == nil {
+			return key, true
+		}
+	}
+	return db.SSHKey{}, false
+}
+
+func uniqueSSHImportKeyName(database *gorm.DB, base string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "ssh-key"
+	}
+	for i := 0; ; i++ {
+		name := base
+		if i > 0 {
+			name = fmt.Sprintf("%s-%d", base, i+1)
+		}
+		var count int64
+		database.Model(&db.SSHKey{}).Where("name = ?", name).Count(&count)
+		if count == 0 {
+			database.Unscoped().Where("name = ? AND deleted_at IS NOT NULL", name).Delete(&db.SSHKey{})
+			return name
+		}
+	}
 }
 
 type comparableImportHost struct {
@@ -90,7 +306,7 @@ func importComparableHost(h db.Host) comparableImportHost {
 
 // CountImportConflicts returns how many parsed host blocks match an existing DB row.
 func CountImportConflicts(database *gorm.DB) (int, error) {
-	parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
+	parsed, err := parseSSHConfigForImport()
 	if err != nil {
 		return 0, err
 	}
@@ -140,22 +356,7 @@ func findHostByParsed(database *gorm.DB, ph sshconfig.ParsedHost) (db.Host, bool
 }
 
 func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
-	var keyID *uint
-	if ph.KeyName != "" {
-		var key db.SSHKey
-		if err := database.Where("name = ?", ph.KeyName).First(&key).Error; err == nil {
-			id := key.ID
-			keyID = &id
-		}
-	}
-	if keyID == nil && ph.IdentFile != "" {
-		var key db.SSHKey
-		if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
-			id := key.ID
-			keyID = &id
-		}
-	}
-
+	keyID := resolveSSHKeyIDForParsed(database, ph)
 	authMethod, gssapiSource := importedAuthFromParsed(ph, keyID != nil)
 	if authMethod != "key" {
 		keyID = nil
@@ -187,6 +388,30 @@ func hostFromParsed(database *gorm.DB, ph sshconfig.ParsedHost) db.Host {
 		host.Username = "root"
 	}
 	return host
+}
+
+func resolveSSHKeyIDForParsed(database *gorm.DB, ph sshconfig.ParsedHost) *uint {
+	if ph.KeyName != "" {
+		var key db.SSHKey
+		if err := database.Where("name = ?", ph.KeyName).First(&key).Error; err == nil {
+			id := key.ID
+			return &id
+		}
+	}
+	if ph.IdentFile != "" {
+		var key db.SSHKey
+		if err := database.Where("private_path = ?", ph.IdentFile).First(&key).Error; err == nil {
+			id := key.ID
+			return &id
+		}
+		if info, err := readSSHKeyFileInfo(ph.IdentFile); err == nil {
+			if key, ok := findExistingSSHKeyForImport(database, "", info.fingerprint); ok {
+				id := key.ID
+				return &id
+			}
+		}
+	}
+	return nil
 }
 
 func importedAuthFromParsed(ph sshconfig.ParsedHost, hasKey bool) (string, string) {
@@ -230,11 +455,12 @@ func importedAuthFromParsed(ph sshconfig.ParsedHost, hasKey bool) (string, strin
 }
 
 func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigResultMsg {
-	parsed, err := sshconfig.ParseSSHConfig(sshConfigPath())
+	parsed, err := parseSSHConfigForImport()
 	if err != nil {
 		return types.ImportSSHConfigResultMsg{Err: err}
 	}
 
+	keyStats := importSSHKeys(database, parsed)
 	created := make(map[string]uint)
 	imported := 0
 	skipped := 0
@@ -281,6 +507,9 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 						Skipped:              skipped,
 						Overwritten:          overwritten,
 						UnresolvedProxyJumps: unresolved,
+						KeysImported:         keyStats.imported,
+						KeysSkipped:          keyStats.skipped,
+						KeysFailed:           keyStats.failed,
 						Err:                  fmt.Errorf("overwrite %q: %w", ph.Alias, err),
 					}
 				}
@@ -299,6 +528,9 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 				Skipped:              skipped,
 				Overwritten:          overwritten,
 				UnresolvedProxyJumps: unresolved,
+				KeysImported:         keyStats.imported,
+				KeysSkipped:          keyStats.skipped,
+				KeysFailed:           keyStats.failed,
 				Err:                  fmt.Errorf("import %q: %w", ph.Alias, err),
 			}
 		}
@@ -346,6 +578,9 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 		Skipped:              skipped,
 		Overwritten:          overwritten,
 		UnresolvedProxyJumps: unresolved,
+		KeysImported:         keyStats.imported,
+		KeysSkipped:          keyStats.skipped,
+		KeysFailed:           keyStats.failed,
 	}
 }
 

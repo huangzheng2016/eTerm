@@ -292,10 +292,13 @@ type ImportSSHConflictCountMsg struct {
 }
 
 type ImportSSHConfigPreviewResultMsg struct {
-	Added   int
-	Changed int
-	Skipped int
-	Err     error
+	Added       int
+	Changed     int
+	Skipped     int
+	KeysAdded   int
+	KeysSkipped int
+	KeysFailed  int
+	Err         error
 }
 
 // ImportSSHConfigRunMsg runs import with strategy: skip | overwrite | merge_jumps.
@@ -309,6 +312,9 @@ type ImportSSHConfigResultMsg struct {
 	Skipped              int
 	Overwritten          int
 	UnresolvedProxyJumps int
+	KeysImported         int
+	KeysSkipped          int
+	KeysFailed           int
 	Err                  error
 }
 

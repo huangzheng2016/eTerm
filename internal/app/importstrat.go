@@ -55,7 +55,8 @@ func (m *importStratMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea
 
 func (m *importStratMenuModel) View() string {
 	title := ui.TitleStyle.Render("SSH config import")
-	msg := fmt.Sprintf("Preview: %d new, %d changed, %d unchanged.", m.preview.Added, m.preview.Changed, m.preview.Skipped)
+	hostMsg := fmt.Sprintf("Hosts: %d new, %d changed, %d unchanged.", m.preview.Added, m.preview.Changed, m.preview.Skipped)
+	keyMsg := fmt.Sprintf("Keys: %d new, %d skipped, %d failed.", m.preview.KeysAdded, m.preview.KeysSkipped, m.preview.KeysFailed)
 	items := []struct {
 		label string
 		key   string
@@ -75,7 +76,7 @@ func (m *importStratMenuModel) View() string {
 		rows += fmt.Sprintf("%s%s %s\n", cur, st.Render(it.label), ui.DimStyle.Render("["+it.key+"]"))
 	}
 	hint := ui.DimStyle.Render("↑↓ · 1/2 · enter · esc cancel")
-	content := lipgloss.JoinVertical(lipgloss.Left, title, "", msg, "", rows, hint)
+	content := lipgloss.JoinVertical(lipgloss.Left, title, "", hostMsg, keyMsg, "", rows, hint)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
