@@ -2,7 +2,6 @@ package syncd
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 )
 
@@ -20,9 +19,7 @@ type stdioResponse struct {
 }
 
 func RunStdio(engine *Engine) error {
-	// Limit stdin to 16 MB to prevent memory exhaustion
-	limited := io.LimitReader(os.Stdin, 16<<20)
-	dec := json.NewDecoder(limited)
+	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 
 	for dec.More() {

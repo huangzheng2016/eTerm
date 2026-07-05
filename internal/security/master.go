@@ -82,10 +82,7 @@ func (m *MasterKeyManager) ReplaceAfterRotation(salt []byte, verifier []byte, ke
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.key != nil {
-		m.key.Clear()
-		m.key = nil
-	}
+	m.clearKey()
 	m.salt = append([]byte(nil), salt...)
 	m.verifier = append([]byte(nil), verifier...)
 	m.key = key
@@ -125,11 +122,15 @@ func (m *MasterKeyManager) Lock() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.clearKey()
+	m.locked = true
+}
+
+func (m *MasterKeyManager) clearKey() {
 	if m.key != nil {
 		m.key.Clear()
 		m.key = nil
 	}
-	m.locked = true
 }
 
 func (m *MasterKeyManager) IsLocked() bool {
@@ -163,10 +164,7 @@ func (m *MasterKeyManager) CheckTimeout() bool {
 	}
 
 	if time.Since(m.lastActivity) > m.lockTimeout {
-		if m.key != nil {
-			m.key.Clear()
-			m.key = nil
-		}
+		m.clearKey()
 		m.locked = true
 		return true
 	}

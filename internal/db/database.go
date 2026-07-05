@@ -6,6 +6,7 @@ import (
 
 	"github.com/glebarez/sqlite" // modernc/sqlite — works with CGO_ENABLED=0 (releases, cross-builds)
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -56,14 +57,8 @@ func GetSetting(db *gorm.DB, key string) (string, error) {
 }
 
 func SetSetting(db *gorm.DB, key, value string) error {
-	var setting AppSetting
-	result := db.Where("key = ?", key).First(&setting)
-	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
-			return db.Create(&AppSetting{Key: key, Value: value}).Error
-		}
-		return result.Error
-	}
-	setting.Value = value
-	return db.Save(&setting).Error
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value"}),
+	}).Create(&AppSetting{Key: key, Value: value}).Error
 }

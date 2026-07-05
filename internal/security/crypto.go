@@ -9,13 +9,16 @@ import (
 	"io"
 )
 
-func Encrypt(plaintext []byte, key []byte) (string, error) {
+func newAESGCM(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	return cipher.NewGCM(block)
+}
 
-	aesGCM, err := cipher.NewGCM(block)
+func Encrypt(plaintext []byte, key []byte) (string, error) {
+	aesGCM, err := newAESGCM(key)
 	if err != nil {
 		return "", err
 	}
@@ -44,12 +47,7 @@ func Decrypt(encoded string, key []byte) ([]byte, error) {
 	nonce := combined[:12]
 	ciphertext := combined[12:]
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-
-	aesGCM, err := cipher.NewGCM(block)
+	aesGCM, err := newAESGCM(key)
 	if err != nil {
 		return nil, err
 	}

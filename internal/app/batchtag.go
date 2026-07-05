@@ -81,14 +81,7 @@ type batchTagApplyMsg struct {
 }
 
 func applyBatchTags(database *gorm.DB, msg batchTagApplyMsg) tea.Msg {
-	parts := strings.Split(msg.RawTags, ",")
-	var add []string
-	for _, p := range parts {
-		t := strings.TrimSpace(p)
-		if t != "" {
-			add = append(add, t)
-		}
-	}
+	add := parseTagsString(msg.RawTags)
 	if len(add) == 0 {
 		return types.SuccessMsg{Message: "No tags to add"}
 	}

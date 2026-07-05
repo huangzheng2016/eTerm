@@ -31,19 +31,6 @@ func matchCtrlShiftAnyOf(msg tea.KeyPressMsg, binding key.Binding) bool {
 	return false
 }
 
-// matchCtrlShiftFromKeys extracts Ctrl+Shift letters from a key string slice and matches any.
-func matchCtrlShiftFromKeys(msg tea.KeyPressMsg, keys []string) bool {
-	for _, k := range keys {
-		if len(k) > len("ctrl+shift+") && strings.HasPrefix(k, "ctrl+shift+") {
-			letter := []rune(strings.TrimPrefix(k, "ctrl+shift+"))
-			if len(letter) == 1 && matchCtrlShift(msg, letter[0]) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // matchAppNextTab matches next-tab chords even when key.Matches misses (terminal string quirks).
 func matchAppNextTab(msg tea.KeyPressMsg, km KeyMap) bool {
 	if key.Matches(msg, km.NextTab) {

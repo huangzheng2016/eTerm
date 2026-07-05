@@ -145,13 +145,8 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 		offset += arrowWidth
 	}
 
-	used = 0
 	for i := t.scrollIdx; i <= lastVisible; i++ {
 		w := widths[i]
-		need := w
-		if i > t.scrollIdx {
-			need += tabGap
-		}
 		cellStart := offset
 		if i > t.scrollIdx {
 			cellStart++
@@ -164,7 +159,6 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 			return t, false
 		}
 		offset = cellStart + w
-		used += need
 	}
 	return t, false
 }
