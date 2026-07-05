@@ -126,6 +126,10 @@ func (t *httpTransport) do(method, path string, body []byte, contentType string)
 		}
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			continue
+		}
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	if lastErr != nil {

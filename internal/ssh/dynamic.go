@@ -92,7 +92,7 @@ func handleSOCKSConn(client *ssh.Client, c net.Conn, done <-chan struct{}) {
 		if _, err := io.ReadFull(br, ip[:]); err != nil {
 			return
 		}
-		host = "[" + net.IP(ip[:]).String() + "]"
+		host = net.IP(ip[:]).String()
 	default:
 		_, _ = c.Write([]byte{5, 8, 0, 1, 0, 0, 0, 0, 0, 0}) // address not supported
 		return

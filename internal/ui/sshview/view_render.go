@@ -146,9 +146,11 @@ func (m *Model) renderScreenWithCursor() string {
 	}
 
 	m.emu.SetCell(cx, cy, &highlight)
-	out := m.emu.Render()
+	var out string
 	if m.emu.IsAltScreen() {
 		out = m.renderFullScreen()
+	} else {
+		out = m.emu.Render()
 	}
 	m.emu.SetCell(cx, cy, &saved)
 	return out
@@ -251,16 +253,26 @@ func renderScrollbackLine(m *Model, w, idx int) string {
 
 func renderScreenLine(m *Model, w, y int) string {
 	var sb strings.Builder
+	var pen uv.Style
 	for x := 0; x < w; x++ {
 		cell := m.emu.CellAt(x, y)
 		if cell != nil && cell.Width == 0 {
 			continue
 		}
-		if cell == nil || cell.Content == "" {
-			sb.WriteByte(' ')
-		} else {
-			sb.WriteString(renderCellANSI(cell))
+		content := " "
+		var st uv.Style
+		if cell != nil && cell.Content != "" {
+			content = cell.Content
+			st = cell.Style
 		}
+		if !st.Equal(&pen) {
+			sb.WriteString(st.Diff(&pen))
+			pen = st
+		}
+		sb.WriteString(content)
+	}
+	if !pen.IsZero() {
+		sb.WriteString(ansi.ResetStyle)
 	}
 	return sb.String()
 }

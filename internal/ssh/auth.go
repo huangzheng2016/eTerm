@@ -17,19 +17,10 @@ import (
 func BuildAuthMethods(host *db.Host, key *db.SSHKey, masterKey *security.MasterKeyManager) ([]ssh.AuthMethod, []io.Closer, error) {
 	switch host.AuthMethod {
 	case "password":
-		secKey := masterKey.GetKey()
-		if secKey == nil {
-			return nil, nil, fmt.Errorf("master key is locked")
-		}
-		defer secKey.Clear()
-
-		passBytes, err := security.Decrypt(host.Password, secKey.Bytes())
+		password, err := decryptHostPassword(host, masterKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to decrypt password: %w", err)
+			return nil, nil, err
 		}
-		password := string(passBytes)
-		security.ClearBytes(passBytes)
-
 		return []ssh.AuthMethod{ssh.Password(password)}, nil, nil
 
 	case "key":
@@ -55,18 +46,10 @@ func BuildAuthMethods(host *db.Host, key *db.SSHKey, masterKey *security.MasterK
 		return []ssh.AuthMethod{ssh.PublicKeysCallback(agentClient.Signers)}, []io.Closer{conn}, nil
 
 	case "interactive":
-		secKey := masterKey.GetKey()
-		if secKey == nil {
-			return nil, nil, fmt.Errorf("master key is locked")
-		}
-		defer secKey.Clear()
-
-		passBytes, err := security.Decrypt(host.Password, secKey.Bytes())
+		password, err := decryptHostPassword(host, masterKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to decrypt password: %w", err)
+			return nil, nil, err
 		}
-		password := string(passBytes)
-		security.ClearBytes(passBytes)
 
 		return []ssh.AuthMethod{ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
 			answers := make([]string, len(questions))
@@ -86,6 +69,22 @@ func BuildAuthMethods(host *db.Host, key *db.SSHKey, masterKey *security.MasterK
 	default:
 		return nil, nil, fmt.Errorf("unsupported auth method: %s", host.AuthMethod)
 	}
+}
+
+func decryptHostPassword(host *db.Host, masterKey *security.MasterKeyManager) (string, error) {
+	secKey := masterKey.GetKey()
+	if secKey == nil {
+		return "", fmt.Errorf("master key is locked")
+	}
+	defer secKey.Clear()
+
+	passBytes, err := security.Decrypt(host.Password, secKey.Bytes())
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt password: %w", err)
+	}
+	password := string(passBytes)
+	security.ClearBytes(passBytes)
+	return password, nil
 }
 
 func LoadPrivateKey(key *db.SSHKey, masterKey *security.MasterKeyManager) (ssh.Signer, error) {

@@ -26,56 +26,14 @@ type RemoteRemoveFS interface {
 }
 
 func Upload(client *Client, localPath string, remotePath string, progress ProgressCallback) error {
-	localFile, err := os.Open(localPath)
+	bs := &batchState{total: 1}
+	transferred, err := uploadOne(client, localPath, remotePath, progress, bs)
 	if err != nil {
-		return fmt.Errorf("failed to open local file: %w", err)
+		return err
 	}
-	defer localFile.Close()
-
-	stat, err := localFile.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat local file: %w", err)
-	}
-
-	remoteFile, err := client.sftpClient.Create(remotePath)
-	if err != nil {
-		return fmt.Errorf("failed to create remote file: %w", err)
-	}
-	defer remoteFile.Close()
-
-	totalBytes := stat.Size()
-	var transferred int64
-
-	buf := make([]byte, 32*1024)
-	for {
-		n, readErr := localFile.Read(buf)
-		if n > 0 {
-			_, writeErr := remoteFile.Write(buf[:n])
-			if writeErr != nil {
-				return fmt.Errorf("failed to write remote file: %w", writeErr)
-			}
-			transferred += int64(n)
-			if progress != nil {
-				progress(TransferProgress{
-					TotalBytes:       totalBytes,
-					TransferredBytes: transferred,
-					CurrentFile:      filepath.Base(localPath),
-					FileIndex:        1,
-					TotalFiles:       1,
-				})
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return fmt.Errorf("failed to read local file: %w", readErr)
-		}
-	}
-
 	if progress != nil {
 		progress(TransferProgress{
-			TotalBytes:       totalBytes,
+			TotalBytes:       transferred,
 			TransferredBytes: transferred,
 			CurrentFile:      filepath.Base(localPath),
 			Done:             true,
@@ -83,61 +41,18 @@ func Upload(client *Client, localPath string, remotePath string, progress Progre
 			TotalFiles:       1,
 		})
 	}
-
 	return nil
 }
 
 func Download(client *Client, remotePath string, localPath string, progress ProgressCallback) error {
-	remoteFile, err := client.sftpClient.Open(remotePath)
+	bs := &batchState{total: 1}
+	transferred, err := downloadOne(client, remotePath, localPath, progress, bs)
 	if err != nil {
-		return fmt.Errorf("failed to open remote file: %w", err)
+		return err
 	}
-	defer remoteFile.Close()
-
-	stat, err := remoteFile.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat remote file: %w", err)
-	}
-
-	localFile, err := os.Create(localPath)
-	if err != nil {
-		return fmt.Errorf("failed to create local file: %w", err)
-	}
-	defer localFile.Close()
-
-	totalBytes := stat.Size()
-	var transferred int64
-
-	buf := make([]byte, 32*1024)
-	for {
-		n, readErr := remoteFile.Read(buf)
-		if n > 0 {
-			_, writeErr := localFile.Write(buf[:n])
-			if writeErr != nil {
-				return fmt.Errorf("failed to write local file: %w", writeErr)
-			}
-			transferred += int64(n)
-			if progress != nil {
-				progress(TransferProgress{
-					TotalBytes:       totalBytes,
-					TransferredBytes: transferred,
-					CurrentFile:      filepath.Base(remotePath),
-					FileIndex:        1,
-					TotalFiles:       1,
-				})
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return fmt.Errorf("failed to read remote file: %w", readErr)
-		}
-	}
-
 	if progress != nil {
 		progress(TransferProgress{
-			TotalBytes:       totalBytes,
+			TotalBytes:       transferred,
 			TransferredBytes: transferred,
 			CurrentFile:      filepath.Base(remotePath),
 			Done:             true,
@@ -145,7 +60,6 @@ func Download(client *Client, remotePath string, localPath string, progress Prog
 			TotalFiles:       1,
 		})
 	}
-
 	return nil
 }
 
@@ -189,21 +103,21 @@ type batchState struct {
 	total int
 }
 
-func uploadOne(client *Client, localPath, remotePath string, progress ProgressCallback, bs *batchState) error {
+func uploadOne(client *Client, localPath, remotePath string, progress ProgressCallback, bs *batchState) (int64, error) {
 	localFile, err := os.Open(localPath)
 	if err != nil {
-		return fmt.Errorf("failed to open local file: %w", err)
+		return 0, fmt.Errorf("failed to open local file: %w", err)
 	}
 	defer localFile.Close()
 
 	stat, err := localFile.Stat()
 	if err != nil {
-		return fmt.Errorf("failed to stat local file: %w", err)
+		return 0, fmt.Errorf("failed to stat local file: %w", err)
 	}
 
 	remoteFile, err := client.sftpClient.Create(remotePath)
 	if err != nil {
-		return fmt.Errorf("failed to create remote file: %w", err)
+		return 0, fmt.Errorf("failed to create remote file: %w", err)
 	}
 	defer remoteFile.Close()
 
@@ -216,7 +130,7 @@ func uploadOne(client *Client, localPath, remotePath string, progress ProgressCa
 		if n > 0 {
 			_, writeErr := remoteFile.Write(buf[:n])
 			if writeErr != nil {
-				return fmt.Errorf("failed to write remote file: %w", writeErr)
+				return 0, fmt.Errorf("failed to write remote file: %w", writeErr)
 			}
 			transferred += int64(n)
 			if progress != nil {
@@ -233,10 +147,10 @@ func uploadOne(client *Client, localPath, remotePath string, progress ProgressCa
 			break
 		}
 		if readErr != nil {
-			return fmt.Errorf("failed to read local file: %w", readErr)
+			return 0, fmt.Errorf("failed to read local file: %w", readErr)
 		}
 	}
-	return nil
+	return transferred, nil
 }
 
 func uploadDirRecursive(client *Client, localDir, remoteDir string, progress ProgressCallback, bs *batchState) error {
@@ -256,7 +170,7 @@ func uploadDirRecursive(client *Client, localDir, remoteDir string, progress Pro
 				return err
 			}
 		} else {
-			if err := uploadOne(client, lp, rp, progress, bs); err != nil {
+			if _, err := uploadOne(client, lp, rp, progress, bs); err != nil {
 				return err
 			}
 		}
@@ -277,21 +191,21 @@ func UploadDir(client *Client, localDir string, remoteDir string, progress Progr
 	return nil
 }
 
-func downloadOne(client *Client, remotePath, localPath string, progress ProgressCallback, bs *batchState) error {
+func downloadOne(client *Client, remotePath, localPath string, progress ProgressCallback, bs *batchState) (int64, error) {
 	remoteFile, err := client.sftpClient.Open(remotePath)
 	if err != nil {
-		return fmt.Errorf("failed to open remote file: %w", err)
+		return 0, fmt.Errorf("failed to open remote file: %w", err)
 	}
 	defer remoteFile.Close()
 
 	stat, err := remoteFile.Stat()
 	if err != nil {
-		return fmt.Errorf("failed to stat remote file: %w", err)
+		return 0, fmt.Errorf("failed to stat remote file: %w", err)
 	}
 
 	localFile, err := os.Create(localPath)
 	if err != nil {
-		return fmt.Errorf("failed to create local file: %w", err)
+		return 0, fmt.Errorf("failed to create local file: %w", err)
 	}
 	defer localFile.Close()
 
@@ -304,7 +218,7 @@ func downloadOne(client *Client, remotePath, localPath string, progress Progress
 		if n > 0 {
 			_, writeErr := localFile.Write(buf[:n])
 			if writeErr != nil {
-				return fmt.Errorf("failed to write local file: %w", writeErr)
+				return 0, fmt.Errorf("failed to write local file: %w", writeErr)
 			}
 			transferred += int64(n)
 			if progress != nil {
@@ -321,10 +235,10 @@ func downloadOne(client *Client, remotePath, localPath string, progress Progress
 			break
 		}
 		if readErr != nil {
-			return fmt.Errorf("failed to read remote file: %w", readErr)
+			return 0, fmt.Errorf("failed to read remote file: %w", readErr)
 		}
 	}
-	return nil
+	return transferred, nil
 }
 
 func downloadDirRecursive(client *Client, remoteDir, localDir string, progress ProgressCallback, bs *batchState) error {
@@ -344,7 +258,7 @@ func downloadDirRecursive(client *Client, remoteDir, localDir string, progress P
 				return err
 			}
 		} else {
-			if err := downloadOne(client, rp, lp, progress, bs); err != nil {
+			if _, err := downloadOne(client, rp, lp, progress, bs); err != nil {
 				return err
 			}
 		}

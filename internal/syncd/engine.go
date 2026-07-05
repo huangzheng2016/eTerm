@@ -152,7 +152,7 @@ func (e *Engine) GetBlobByToken(token string) (*BlobEntry, error) {
 
 func (e *Engine) validBlob(entry *BlobEntry) (*BlobEntry, error) {
 	if !entry.ExpiresAt.After(time.Now().UTC()) {
-		_ = e.DB.Delete(&entry).Error
+		_ = e.DB.Delete(entry).Error
 		return nil, ErrBlobNotFound
 	}
 	return entry, nil
