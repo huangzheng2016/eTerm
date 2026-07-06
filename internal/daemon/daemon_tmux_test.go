@@ -166,6 +166,39 @@ func TestHandleOpenTmuxNewCleansUpWhenOpenOKWriteFails(t *testing.T) {
 	}
 }
 
+func TestHandleOpenTmuxNewReturnsOpenErrWhenSessionExitsImmediately(t *testing.T) {
+	restoreTmuxStubs(t)
+	fake := newDaemonFakeSession()
+	fake.done <- errors.New("tmux attach-session: exit status 1")
+	killed := ""
+	tmuxNewSession = func(context.Context, int, int) (*internalssh.InteractiveSession, string, error) {
+		return fake.is, "tmux-abc123", nil
+	}
+	tmuxKillSession = func(_ context.Context, name string) error {
+		killed = name
+		return nil
+	}
+	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
+	out := newDaemonSink()
+	sessions := map[uint32]*internalssh.InteractiveSession{}
+
+	handleOpen(&runtimeConfig{}, relay.Frame{Type: relay.FrameOpen, StreamID: 15, Payload: payload}, &sync.Mutex{}, sessions, out.write, context.Background(), context.Background())
+
+	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
+	if string(f.Payload) != "tmux attach-session: exit status 1" {
+		t.Fatalf("open err payload = %q", f.Payload)
+	}
+	if sessions[15] != nil {
+		t.Fatal("session registered after immediate exit")
+	}
+	if !fake.stdin.closed {
+		t.Fatal("session not closed after immediate exit")
+	}
+	if killed != "tmux-abc123" {
+		t.Fatalf("killed = %q", killed)
+	}
+}
+
 func TestHandleOpenControlSendsCloseAfterOpenOK(t *testing.T) {
 	restoreTmuxStubs(t)
 	tmuxKillSession = func(context.Context, string) error { return nil }
@@ -179,6 +212,26 @@ func TestHandleOpenControlSendsCloseAfterOpenOK(t *testing.T) {
 	if closeFrame.StreamID != 13 {
 		t.Fatalf("close stream = %d", closeFrame.StreamID)
 	}
+}
+
+func TestPumpSessionSendsClosePayloadOnSessionError(t *testing.T) {
+	fake := newDaemonFakeSession()
+	out := newDaemonSink()
+	wantErr := errors.New("tmux attach-session: exit status 1")
+
+	go pumpSession(context.Background(), 14, fake.is, out.write, func(uint32, *internalssh.InteractiveSession) bool {
+		return true
+	})
+	fake.done <- wantErr
+
+	closeFrame := waitDaemonFrame(t, out, relay.FrameClose)
+	if closeFrame.StreamID != 14 {
+		t.Fatalf("close stream = %d", closeFrame.StreamID)
+	}
+	if string(closeFrame.Payload) != wantErr.Error() {
+		t.Fatalf("close payload = %q", closeFrame.Payload)
+	}
+	_ = fake.stdout.Close()
 }
 
 func TestHandleOpenTmuxErrorTargetsReturnOpenErr(t *testing.T) {

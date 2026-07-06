@@ -191,6 +191,7 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 	is.AddCloser(closerFunc(stopKeepalive))
 	go func() {
 		defer pw.Close()
+		sawData := false
 		for {
 			typ, data, err := conn.Read(ctx)
 			if err != nil {
@@ -206,6 +207,9 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 			}
 			switch f.Type {
 			case relay.FrameData:
+				if len(f.Payload) > 0 {
+					sawData = true
+				}
 				if _, err := pw.Write(f.Payload); err != nil {
 					done <- err
 					return
@@ -213,6 +217,8 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 			case relay.FrameClose:
 				if len(f.Payload) > 0 {
 					done <- errors.New(string(f.Payload))
+				} else if !sawData {
+					done <- errors.New("remote terminal exited before output")
 				} else {
 					done <- nil
 				}

@@ -223,6 +223,95 @@ func TestFrameClosePayloadEndsSessionWithError(t *testing.T) {
 	}
 }
 
+func TestEmptyFrameCloseBeforeDataEndsSessionWithError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	select {
+	case err := <-is.Done:
+		if err == nil || err.Error() != "remote terminal exited before output" {
+			t.Fatalf("done err = %v, want remote terminal exited before output", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for done")
+	}
+}
+
+func TestEmptyFrameCloseAfterDataEndsSessionNormally(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: []byte("x")}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	buf := make([]byte, 1)
+	if _, err := io.ReadFull(is.Stdout, buf); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-is.Done:
+		if err != nil {
+			t.Fatalf("done err = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for done")
+	}
+}
+
 func TestOpenErrReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
