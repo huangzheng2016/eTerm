@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,36 +17,38 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
+var readClipboardBlob = clipboardblob.Read
+
 type imagePasteFallbackMsg struct {
 	streamID uint64
 	msg      tea.Msg
 }
 
-func (a App) startImageURLPaste(fallback tea.Msg) (App, tea.Cmd) {
+func (a App) startImageURLPaste(fallback tea.Msg, forceUpload bool) (App, tea.Cmd) {
 	if !a.activeTabIsSSH() {
-		return a, func() tea.Msg { return types.ErrorMsg{Err: fmt.Errorf("image URL paste requires a shell tab")} }
+		return a, func() tea.Msg { return types.ErrorMsg{Err: fmt.Errorf("paste URL requires a shell tab")} }
 	}
 	if a.imageUploadProgressCh != nil {
-		return a, func() tea.Msg { return types.ErrorMsg{Err: fmt.Errorf("image upload already in progress")} }
+		return a, func() tea.Msg { return types.ErrorMsg{Err: fmt.Errorf("clipboard upload already in progress")} }
 	}
 	target := activeSSHView(&a)
 	if target == nil {
 		return a, nil
 	}
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	return a, startImageURLPasteCmd(&a, cfg, target.StreamID(), fallback)
+	return a, startImageURLPasteCmd(&a, cfg, target.StreamID(), fallback, !forceUpload && a.activeTabIsLocalShell())
 }
 
-func startImageURLPasteCmd(a *App, cfg esync.Config, streamID uint64, fallback tea.Msg) tea.Cmd {
+func startImageURLPasteCmd(a *App, cfg esync.Config, streamID uint64, fallback tea.Msg, localFileLink bool) tea.Cmd {
 	ch := make(chan syncblob.Progress, 16)
 	a.imageUploadProgressCh = ch
-	return tea.Batch(waitImageUploadProgressCmd(ch, streamID), uploadImageURLCmd(ch, cfg, streamID, fallback, imageURLCacheSnapshot(a.imageURLCache, time.Now())))
+	return tea.Batch(waitImageUploadProgressCmd(ch, streamID), uploadImageURLCmd(ch, cfg, streamID, fallback, imageURLCacheSnapshot(a.imageURLCache, time.Now()), localFileLink))
 }
 
-func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID uint64, fallback tea.Msg, cache map[string]imageURLCacheEntry) tea.Cmd {
+func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID uint64, fallback tea.Msg, cache map[string]imageURLCacheEntry, localFileLink bool) tea.Cmd {
 	return func() tea.Msg {
 		defer close(ch)
-		blob, err := clipboardblob.Read()
+		blob, err := readClipboardBlob()
 		if err == clipboardblob.ErrNoBlob {
 			if fallback == nil {
 				return types.ImageUploadDoneMsg{StreamID: streamID, Err: err}
@@ -53,6 +57,9 @@ func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID u
 		}
 		if err != nil {
 			return types.ImageUploadDoneMsg{StreamID: streamID, Err: err}
+		}
+		if localFileLink && blob.LocalPath != "" {
+			return types.ImageUploadDoneMsg{StreamID: streamID, URL: fileURL(blob.LocalPath), Filename: blob.Filename}
 		}
 		cacheKey := imageCacheKey(blob)
 		if entry, ok := cache[cacheKey]; ok {
@@ -82,6 +89,17 @@ func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID u
 		}
 		return types.ImageUploadDoneMsg{StreamID: streamID, URL: url, Filename: blob.Filename, CacheKey: cacheKey, ExpiresAt: out.ExpiresAt}
 	}
+}
+
+func (a App) activeTabIsLocalShell() bool {
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return false
+	}
+	if a.tabs[a.activeTab].Type != LocalTab {
+		return false
+	}
+	m, ok := a.tabs[a.activeTab].Model.(*sshview.Model)
+	return ok && m.RemoteReconnect() == nil
 }
 
 func waitImageUploadProgressCmd(ch <-chan syncblob.Progress, streamID uint64) tea.Cmd {
@@ -132,4 +150,12 @@ func markdownBlobLink(filename, url string) string {
 		return url
 	}
 	return "[" + strings.NewReplacer("[", "\\[", "]", "\\]").Replace(filename) + "](" + url + ")"
+}
+
+func fileURL(path string) string {
+	path = filepath.ToSlash(path)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }

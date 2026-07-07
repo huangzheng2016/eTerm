@@ -363,14 +363,14 @@ type SnippetSelectedMsg struct {
 	Command string
 }
 
-// ImageUploadProgressMsg reports local image upload progress.
+// ImageUploadProgressMsg reports clipboard upload progress.
 type ImageUploadProgressMsg struct {
 	StreamID   uint64
 	TotalBytes int64
 	SentBytes  int64
 }
 
-// ImageUploadDoneMsg completes local image upload.
+// ImageUploadDoneMsg completes clipboard upload.
 type ImageUploadDoneMsg struct {
 	StreamID  uint64
 	URL       string

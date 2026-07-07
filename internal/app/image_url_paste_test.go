@@ -2,12 +2,18 @@ package app
 
 import (
 	"bytes"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/clipboardblob"
+	internaldb "github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/syncblob"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
@@ -110,5 +116,136 @@ func TestImagePasteFallbackForwardsOriginalPasteMsg(t *testing.T) {
 
 	if got := stdin.String(); got != "hello" {
 		t.Fatalf("stdin = %q", got)
+	}
+}
+
+func TestLocalFilePasteUsesFileURL(t *testing.T) {
+	oldRead := readClipboardBlob
+	readClipboardBlob = func() (*clipboardblob.Blob, error) {
+		return &clipboardblob.Blob{
+			Data:      []byte("abc"),
+			Mime:      "application/gzip",
+			Filename:  "a b.tar.gz",
+			LocalPath: "/tmp/a b.tar.gz",
+		}, nil
+	}
+	t.Cleanup(func() { readClipboardBlob = oldRead })
+
+	stdin := &testWriteCloser{}
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "local", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+	a := App{
+		viewState: MainView,
+		activeTab: 0,
+		tabs: []Tab{
+			{Type: LocalTab, Title: "local", Model: tab},
+		},
+	}
+
+	ch := make(chan syncblob.Progress, 1)
+	msg := uploadImageURLCmd(ch, esync.Config{}, tab.StreamID(), nil, nil, true)()
+	updated, _ := a.Update(msg)
+	a = updated.(App)
+
+	if got := stdin.String(); got != "[a b.tar.gz](file:///tmp/a%20b.tar.gz) " {
+		t.Fatalf("stdin = %q", got)
+	}
+}
+
+func TestPasteImageURLMsgForcesUploadForLocalFiles(t *testing.T) {
+	a, tab := localClipboardPasteTestApp(t)
+	_, cmd := a.Update(types.PasteImageURLMsg{})
+	assertForcedPasteNeedsSync(t, cmd, tab.StreamID())
+}
+
+func TestPasteImageURLKeyForcesUploadForLocalFiles(t *testing.T) {
+	a, tab := localClipboardPasteTestApp(t)
+	_, cmd := a.Update(tea.KeyPressMsg(tea.Key{Code: 'i', Text: "I", Mod: tea.ModCtrl | tea.ModShift}))
+	assertForcedPasteNeedsSync(t, cmd, tab.StreamID())
+}
+
+func TestActiveTabIsLocalShellIncludesLocalTmuxAndExcludesRemoteLocal(t *testing.T) {
+	localTmux := sshview.New(nil, "tmux", 0, viewkeys.SSHKeys{})
+	remoteLocal := sshview.New(nil, "remote", 0, viewkeys.SSHKeys{})
+	remoteLocal.SetRemoteReconnect(&types.RemoteReconnect{Peer: types.RemotePeer{ID: "peer"}})
+	t.Cleanup(func() { _ = localTmux.Close() })
+	t.Cleanup(func() { _ = remoteLocal.Close() })
+
+	a := App{
+		viewState: MainView,
+		activeTab: 0,
+		tabs: []Tab{
+			{Type: LocalTab, Title: "[T]work", Model: localTmux, TmuxSession: "work"},
+			{Type: LocalTab, Title: "[R]peer", Model: remoteLocal},
+		},
+	}
+
+	if !a.activeTabIsLocalShell() {
+		t.Fatal("local tmux should use local file links")
+	}
+	a.activeTab = 1
+	if a.activeTabIsLocalShell() {
+		t.Fatal("remote LocalShell should not use local file links")
+	}
+}
+
+func localClipboardPasteTestApp(t *testing.T) (App, *sshview.Model) {
+	t.Helper()
+	oldRead := readClipboardBlob
+	readClipboardBlob = func() (*clipboardblob.Blob, error) {
+		return &clipboardblob.Blob{
+			Data:      []byte("abc"),
+			Mime:      "application/gzip",
+			Filename:  "a b.tar.gz",
+			LocalPath: "/tmp/a b.tar.gz",
+		}, nil
+	}
+	t.Cleanup(func() { readClipboardBlob = oldRead })
+
+	database, err := internaldb.InitDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: &testWriteCloser{}}, "local", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+	cfg := DefaultKeyBindingConfig()
+	return App{
+		db:        database,
+		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
+		viewState: MainView,
+		activeTab: 0,
+		keyMap:    BuildKeyMap(cfg),
+		kbConfig:  cfg,
+		tabs: []Tab{
+			{Type: LocalTab, Title: "local", Model: tab},
+		},
+	}, tab
+}
+
+func assertForcedPasteNeedsSync(t *testing.T, cmd tea.Cmd, streamID uint64) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("cmd = %T, want tea.BatchMsg", cmd())
+	}
+	if len(batch) != 2 {
+		t.Fatalf("batch len = %d", len(batch))
+	}
+	msg := batch[1]()
+	done, ok := msg.(types.ImageUploadDoneMsg)
+	if !ok {
+		t.Fatalf("upload msg = %T", msg)
+	}
+	if done.StreamID != streamID {
+		t.Fatalf("stream id = %d", done.StreamID)
+	}
+	if done.Err == nil || done.Err.Error() != "sync is not configured" {
+		t.Fatalf("err = %v", done.Err)
+	}
+	if done.URL != "" {
+		t.Fatalf("url = %q", done.URL)
 	}
 }

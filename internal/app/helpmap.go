@@ -25,7 +25,7 @@ func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected boo
 		parts = append(parts,
 			km.LockApp.Help().Key+" lock",
 			helpLabel(cfg.SSHSnippetPicker)+" snippet",
-			km.PasteImageURL.Help().Key+" image",
+			km.PasteImageURL.Help().Key+" paste",
 		)
 	}
 	if sshDisconnected {

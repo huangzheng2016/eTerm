@@ -374,7 +374,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !a.activeTabIsSSH() {
 				break
 			}
-			return a.startImageURLPaste(nil)
+			return a.startImageURLPaste(nil, true)
 		}
 
 		// Alt+1..9 jumps to tab by number
@@ -428,7 +428,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.activeTabIsSSH() {
 			if a.imageUploadProgressCh == nil {
-				return a.startImageURLPaste(msg)
+				return a.startImageURLPaste(msg, false)
 			}
 		}
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
@@ -1120,7 +1120,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pct = float64(msg.SentBytes) / float64(msg.TotalBytes) * 100
 		}
 		var tc tea.Cmd
-		a.toast, tc = a.toast.Show(fmt.Sprintf("Uploading image %.1f%%", pct), components.ToastInfo, 30*time.Second)
+		a.toast, tc = a.toast.Show(fmt.Sprintf("Uploading clipboard %.1f%%", pct), components.ToastInfo, 30*time.Second)
 		if a.imageUploadProgressCh != nil {
 			return a, tea.Batch(tc, waitImageUploadProgressCmd(a.imageUploadProgressCh, msg.StreamID))
 		}
@@ -1140,10 +1140,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m := sshViewByStreamID(&a, msg.StreamID); m != nil {
 			m.PasteText(markdownBlobLink(msg.Filename, msg.URL) + " ")
 		}
-		return a, func() tea.Msg { return types.SuccessMsg{Message: "Image URL pasted"} }
+		return a, func() tea.Msg { return types.SuccessMsg{Message: "URL pasted"} }
 
 	case types.PasteImageURLMsg:
-		return a.startImageURLPaste(nil)
+		return a.startImageURLPaste(nil, true)
 
 	case imagePasteFallbackMsg:
 		a.imageUploadProgressCh = nil

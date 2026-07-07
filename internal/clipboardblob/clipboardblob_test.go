@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/huangzheng2016/eTerm/internal/clipboardimg"
 )
 
 func TestFromFilePathUsesFileBytesNameAndMime(t *testing.T) {
@@ -28,6 +30,9 @@ func TestFromFilePathUsesFileBytesNameAndMime(t *testing.T) {
 	if blob.Mime != "application/zip" {
 		t.Fatalf("mime = %q", blob.Mime)
 	}
+	if blob.LocalPath != path {
+		t.Fatalf("local path = %q", blob.LocalPath)
+	}
 }
 
 func TestFromFilePathRejectsTooLarge(t *testing.T) {
@@ -39,6 +44,26 @@ func TestFromFilePathRejectsTooLarge(t *testing.T) {
 
 	_, err := fromFilePath(path)
 	if err != ErrBlobTooLarge {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestReadIgnoresMissingClipboardFilePath(t *testing.T) {
+	oldPath := readClipboardFilePath
+	oldImage := readClipboardImage
+	readClipboardFilePath = func() (string, error) {
+		return filepath.Join(t.TempDir(), "missing.zip"), nil
+	}
+	readClipboardImage = func() (*clipboardimg.Image, error) {
+		return nil, clipboardimg.ErrNoImage
+	}
+	t.Cleanup(func() {
+		readClipboardFilePath = oldPath
+		readClipboardImage = oldImage
+	})
+
+	_, err := Read()
+	if err != ErrNoBlob {
 		t.Fatalf("err = %v", err)
 	}
 }

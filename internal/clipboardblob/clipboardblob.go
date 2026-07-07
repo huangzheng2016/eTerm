@@ -17,21 +17,30 @@ const MaxBytes = 10 * 1024 * 1024
 var ErrNoBlob = errors.New("clipboard does not contain a supported file or image")
 var ErrBlobTooLarge = errors.New("clipboard blob exceeds 10 MiB")
 
+var readClipboardFilePath = clipboardFilePath
+var readClipboardImage = clipboardimg.Read
+
 type Blob struct {
-	Data     []byte
-	Mime     string
-	Filename string
+	Data      []byte
+	Mime      string
+	Filename  string
+	LocalPath string
 }
 
 func Read() (*Blob, error) {
-	path, err := clipboardFilePath()
+	path, err := readClipboardFilePath()
 	if err == nil {
-		return fromFilePath(path)
-	}
-	if err != ErrNoBlob {
+		blob, fileErr := fromFilePath(path)
+		if fileErr == nil {
+			return blob, nil
+		}
+		if fileErr != ErrNoBlob {
+			return nil, fileErr
+		}
+	} else if err != ErrNoBlob {
 		return nil, err
 	}
-	img, err := clipboardimg.Read()
+	img, err := readClipboardImage()
 	if err == clipboardimg.ErrNoImage {
 		return nil, ErrNoBlob
 	}
@@ -57,9 +66,10 @@ func fromFilePath(path string) (*Blob, error) {
 		return nil, err
 	}
 	return &Blob{
-		Data:     data,
-		Mime:     fileMime(path, data),
-		Filename: filepath.Base(path),
+		Data:      data,
+		Mime:      fileMime(path, data),
+		Filename:  filepath.Base(path),
+		LocalPath: path,
 	}, nil
 }
 

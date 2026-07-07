@@ -119,7 +119,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		PasteImageURL: key.NewBinding(
 			key.WithKeys("ctrl+shift+i"),
-			key.WithHelp("C-S-i", "paste image url"),
+			key.WithHelp("C-S-i", "paste url"),
 		),
 	}
 }

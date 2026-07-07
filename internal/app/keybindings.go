@@ -311,7 +311,7 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		),
 		PasteImageURL: key.NewBinding(
 			key.WithKeys(cfg.PasteImageURL...),
-			key.WithHelp(helpLabel(cfg.PasteImageURL), "paste image url"),
+			key.WithHelp(helpLabel(cfg.PasteImageURL), "paste url"),
 		),
 	}
 }

@@ -9,7 +9,7 @@
 - **导入** -- 支持导入 `~/.ssh/config` 与 Termius 主机数据
 - **SFTP 与端口转发** -- 双栏文件管理，本地/远程/动态端口转发
 - **同步与远程 Shell** -- 通过 syncd 在多台设备间同步配置，并打开同租户设备上的远程 Shell
-- **效率工具** -- 命令片段、会话记录、图片短链粘贴、命令面板、可配置快捷键
+- **效率工具** -- 命令片段、会话记录、剪贴板链接粘贴、命令面板、可配置快捷键
 - **安全存储** -- 主密码加密敏感字段；同步数据传输前加密，服务端只保存密文
 
 ## 演示
@@ -92,7 +92,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 | `h` / `H`       | 隐藏主机 / 切换隐藏可见      |
 | `/`             | 搜索                 |
 | `Esc`           | 打开菜单（退出 / 设置 / 同步） |
-| `C-S-i`         | 上传剪贴板图片并粘贴短链      |
+| `C-S-i`         | 上传剪贴板文件/图片并粘贴链接   |
 | `C-Tab`         | 下一标签页              |
 | `C-k`           | 命令面板               |
 | `?`             | 所有快捷键              |
@@ -104,7 +104,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 
 ## 多设备同步
 
-`Esc` -> Sync 打开同步设置。默认使用 HTTP syncd；远程 Shell 和图片短链也依赖 HTTP syncd。
+`Esc` -> Sync 打开同步设置。默认使用 HTTP syncd；远程 Shell 和剪贴板托管也依赖 HTTP syncd。
 
 最小启动：
 
@@ -154,18 +154,19 @@ eterm daemon status
 eterm daemon stop
 ```
 
-同步设置里仍可选择 SSH 模式做一次性同步，但远程 Shell 和图片托管只支持 HTTP 模式。同步数据在上传前加密，syncd 不保存明文。
+同步设置里仍可选择 SSH 模式做一次性同步，但远程 Shell 和剪贴板文件托管只支持 HTTP 模式。同步数据在上传前加密，syncd 不保存明文。
 
-## 图片短链粘贴
+## 剪贴板链接粘贴
 
 在 `[L]` 本地 Shell、`[S]` SSH Shell、`[R]` 远程 Shell 中可使用：
 
-- `C-S-i`：读取系统剪贴板图片，上传到 HTTP syncd，向当前 Shell 粘贴短链
-- `C-k` -> `Paste Image URL`：同样功能，适合作为兜底入口
+- 普通粘贴：本地 Shell 和本地 tmux 中，剪贴板里的本地文件会粘贴为 `[filename](file:///path)`；SSH 和远程 Shell 会上传到 HTTP syncd 后粘贴链接
+- `C-S-i`：强制读取系统剪贴板文件/图片，上传到 HTTP syncd，向当前 Shell 粘贴 `[filename](url)`
+- `C-k` -> `Paste URL`：同样强制上传，适合作为兜底入口
 
-短链格式为 `https://sync.example.com/b/<token>`，有效期 30 分钟。图片最大 10 MiB。该功能只支持 HTTP syncd。
+短链格式为 `https://sync.example.com/b/<token>`，有效期 30 分钟。文件/图片最大 10 MiB。上传功能只支持 HTTP syncd。
 
-普通文本粘贴不受影响。纯图片剪贴板通常不会触发终端文本粘贴事件，请使用 `C-S-i` 或命令面板入口上传图片。
+普通文本粘贴不受影响。纯图片剪贴板通常不会触发终端文本粘贴事件，请使用 `C-S-i` 或命令面板入口上传。
 
 ## 推荐 tmux 配置
 
