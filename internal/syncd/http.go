@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -191,5 +192,8 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 func writeBlob(w http.ResponseWriter, blob *BlobEntry) {
 	w.Header().Set("Content-Type", blob.Mime)
 	w.Header().Set("Content-Length", strconv.FormatInt(blob.Bytes, 10))
+	if blob.Filename != "" {
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": blob.Filename}))
+	}
 	_, _ = w.Write(blob.Data)
 }

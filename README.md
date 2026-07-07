@@ -167,6 +167,42 @@ eterm daemon stop
 
 普通文本粘贴不受影响。纯图片剪贴板通常不会触发终端文本粘贴事件，请使用 `C-S-i` 或命令面板入口上传图片。
 
+## 推荐 tmux 配置
+
+本地 tmux 和远端 tmux 都推荐启用 OSC52 剪贴板。远端 tmux 需要这样配置，复制内容才能通过 eTerm 同步回本地系统剪贴板。
+
+`~/.tmux.conf`：
+
+```tmux
+# 启用鼠标支持：滚轮滚动历史、拖动选择复制
+set -g mouse on
+
+# 复制模式使用 vi 按键
+set -g mode-keys vi
+
+# 通过 OSC52 同步到外层终端剪贴板
+set -g set-clipboard on
+set -as terminal-features ',*:clipboard'
+
+# 鼠标拖动选择后自动复制到系统剪贴板
+bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-selection-and-cancel
+bind -T copy-mode MouseDragEnd1Pane send -X copy-selection-and-cancel
+
+# 在 copy mode 中按 y 复制到系统剪贴板
+bind -T copy-mode-vi y send -X copy-selection-and-cancel
+bind -T copy-mode y send -X copy-selection-and-cancel
+
+# 开启扩展键支持，使 Ctrl+Enter / Shift+Enter 等组合键正常工作
+set -g extended-keys on
+set -g extended-keys-format csi-u
+```
+
+重载配置：
+
+```bash
+tmux source-file ~/.tmux.conf
+```
+
 ## 数据
 
 默认路径：`~/.config/eterm/eterm.db`（SQLite），可用 `-c path` 指定。

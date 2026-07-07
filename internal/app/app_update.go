@@ -1135,10 +1135,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.imageURLCache == nil {
 				a.imageURLCache = make(map[string]imageURLCacheEntry)
 			}
-			a.imageURLCache[msg.CacheKey] = imageURLCacheEntry{URL: msg.URL, ExpiresAt: msg.ExpiresAt}
+			a.imageURLCache[msg.CacheKey] = imageURLCacheEntry{URL: msg.URL, Filename: msg.Filename, ExpiresAt: msg.ExpiresAt}
 		}
 		if m := sshViewByStreamID(&a, msg.StreamID); m != nil {
-			m.PasteText(msg.URL + " ")
+			m.PasteText(markdownBlobLink(msg.Filename, msg.URL) + " ")
 		}
 		return a, func() tea.Msg { return types.SuccessMsg{Message: "Image URL pasted"} }
 

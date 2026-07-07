@@ -49,10 +49,10 @@ func TestImageUploadDonePastesIntoOriginalTab(t *testing.T) {
 		},
 	}
 
-	updated, _ := a.Update(types.ImageUploadDoneMsg{StreamID: first.StreamID(), URL: "https://example.test/i.png"})
+	updated, _ := a.Update(types.ImageUploadDoneMsg{StreamID: first.StreamID(), URL: "https://example.test/i.png", Filename: "i.png"})
 	a = updated.(App)
 
-	if got := firstStdin.String(); got != "https://example.test/i.png " {
+	if got := firstStdin.String(); got != "[i.png](https://example.test/i.png) " {
 		t.Fatalf("first stdin = %q", got)
 	}
 	if got := secondStdin.String(); got != "" {
@@ -76,6 +76,7 @@ func TestImageUploadDoneCachesURL(t *testing.T) {
 	updated, _ := a.Update(types.ImageUploadDoneMsg{
 		StreamID:  tab.StreamID(),
 		URL:       "https://example.test/b/abc",
+		Filename:  "archive.tar.gz",
 		CacheKey:  "image-key",
 		ExpiresAt: expiresAt,
 	})
@@ -83,6 +84,9 @@ func TestImageUploadDoneCachesURL(t *testing.T) {
 
 	if got := a.imageURLCache["image-key"].URL; got != "https://example.test/b/abc" {
 		t.Fatalf("cached url = %q", got)
+	}
+	if got := a.imageURLCache["image-key"].Filename; got != "archive.tar.gz" {
+		t.Fatalf("cached filename = %q", got)
 	}
 }
 

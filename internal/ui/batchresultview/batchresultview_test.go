@@ -1,6 +1,7 @@
 package batchresultview
 
 import (
+	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,6 +15,9 @@ func TestCopySelectedOutputReturnsClipboardCommand(t *testing.T) {
 
 	if cmd == nil {
 		t.Fatal("expected clipboard command")
+	}
+	if got := fmt.Sprint(cmd()); got != "failure output" {
+		t.Fatalf("clipboard = %q", got)
 	}
 }
 

@@ -21,6 +21,7 @@ func TestBlobHTTPUploadDownload(t *testing.T) {
 	}
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("X-ETerm-Blob-Mime", "image/png")
+	req.Header.Set("X-ETerm-Blob-Filename", "archive.zip")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +50,9 @@ func TestBlobHTTPUploadDownload(t *testing.T) {
 	defer get.Body.Close()
 	if get.StatusCode != 200 {
 		t.Fatalf("download status = %d", get.StatusCode)
+	}
+	if got := get.Header.Get("Content-Disposition"); got != `attachment; filename=archive.zip` {
+		t.Fatalf("content disposition = %q", got)
 	}
 	body, _ := io.ReadAll(get.Body)
 	if string(body) != "abc" {

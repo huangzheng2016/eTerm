@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/huangzheng2016/eTerm/internal/clipboardimg"
+	"github.com/huangzheng2016/eTerm/internal/clipboardblob"
 )
 
 type Progress struct {
@@ -36,9 +36,9 @@ type UploadResult struct {
 	BaseURL   string    `json:"-"`
 }
 
-func (c *Client) Upload(img *clipboardimg.Image, progress ProgressCallback) (*UploadResult, error) {
-	if img == nil {
-		return nil, fmt.Errorf("image is nil")
+func (c *Client) Upload(blob *clipboardblob.Blob, progress ProgressCallback) (*UploadResult, error) {
+	if blob == nil {
+		return nil, fmt.Errorf("blob is nil")
 	}
 	client := c.HTTP
 	if client == nil {
@@ -46,7 +46,7 @@ func (c *Client) Upload(img *clipboardimg.Image, progress ProgressCallback) (*Up
 	}
 	var lastErr error
 	for _, baseURL := range c.baseURLs() {
-		out, err := c.uploadTo(client, baseURL, img, progress)
+		out, err := c.uploadTo(client, baseURL, blob, progress)
 		if err == nil {
 			return out, nil
 		}
@@ -79,11 +79,11 @@ func (c *Client) baseURLs() []string {
 	return []string{baseURL}
 }
 
-func (c *Client) uploadTo(client *http.Client, baseURL string, img *clipboardimg.Image, progress ProgressCallback) (*UploadResult, error) {
+func (c *Client) uploadTo(client *http.Client, baseURL string, blob *clipboardblob.Blob, progress ProgressCallback) (*UploadResult, error) {
 	reader := &progressReader{
-		data:     img.Data,
+		data:     blob.Data,
 		progress: progress,
-		total:    int64(len(img.Data)),
+		total:    int64(len(blob.Data)),
 	}
 	req, err := http.NewRequest("POST", baseURL+"/api/v1/blobs", reader)
 	if err != nil {
@@ -93,9 +93,9 @@ func (c *Client) uploadTo(client *http.Client, baseURL string, img *clipboardimg
 	if c.Tenant != "" {
 		req.Header.Set("X-ETerm-Tenant", c.Tenant)
 	}
-	req.Header.Set("X-ETerm-Blob-Mime", img.Mime)
-	req.Header.Set("X-ETerm-Blob-Filename", img.Filename)
-	req.ContentLength = int64(len(img.Data))
+	req.Header.Set("X-ETerm-Blob-Mime", blob.Mime)
+	req.Header.Set("X-ETerm-Blob-Filename", blob.Filename)
+	req.ContentLength = int64(len(blob.Data))
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

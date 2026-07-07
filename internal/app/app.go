@@ -132,6 +132,7 @@ type App struct {
 
 type imageURLCacheEntry struct {
 	URL       string
+	Filename  string
 	ExpiresAt time.Time
 }
 

@@ -7,9 +7,11 @@
 package sshview
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -104,6 +106,8 @@ type Model struct {
 	mouseMode      bool
 	bracketedPaste bool
 	cursorHidden   bool
+
+	osc52Clipboard []string
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -154,6 +158,12 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		doneClosed: make(chan struct{}),
 		vk:         vk,
 	}
+	emu.RegisterOscHandler(52, func(data []byte) bool {
+		if text, ok := osc52ClipboardText(data); ok {
+			m.osc52Clipboard = append(m.osc52Clipboard, text)
+		}
+		return true
+	})
 	emu.SetCallbacks(vt.Callbacks{
 		EnableMode: func(mode ansi.Mode) {
 			if mode == ansi.ModeCursorKeys {
@@ -405,6 +415,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		before := m.emu.ScrollbackLen()
 		_, _ = m.emu.Write(msg.Data)
+		clipCmds := m.takeOSC52ClipboardCommands()
 		// Only follow new output when already at the live view (bottom). When the
 		// user has scrolled up, keep the same lines in view by compensating for the
 		// rows that the new output pushed into scrollback.
@@ -416,7 +427,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, waitChunk(m)
+		return m, tea.Batch(append(clipCmds, waitChunk(m))...)
 
 	case StreamDoneMsg:
 		if msg.StreamID != m.streamID {
@@ -634,6 +645,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func osc52ClipboardText(data []byte) (string, bool) {
+	parts := strings.SplitN(string(data), ";", 3)
+	if len(parts) != 3 || parts[0] != "52" || parts[2] == "?" {
+		return "", false
+	}
+	if parts[1] != "" && !strings.Contains(parts[1], "c") {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(parts[2])
+	if err != nil {
+		return "", false
+	}
+	return string(decoded), true
+}
+
+func (m *Model) takeOSC52ClipboardCommands() []tea.Cmd {
+	if len(m.osc52Clipboard) == 0 {
+		return nil
+	}
+	out := make([]tea.Cmd, 0, len(m.osc52Clipboard))
+	for _, text := range m.osc52Clipboard {
+		out = append(out, tea.SetClipboard(text))
+	}
+	m.osc52Clipboard = nil
+	return out
 }
 
 func (m *Model) showScrollIndicator() tea.Cmd {

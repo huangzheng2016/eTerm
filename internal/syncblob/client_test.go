@@ -6,13 +6,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/huangzheng2016/eTerm/internal/clipboardimg"
+	"github.com/huangzheng2016/eTerm/internal/clipboardblob"
 )
 
 func TestClientUploadProgress(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer key" {
 			t.Fatalf("auth = %q", got)
+		}
+		if got := r.Header.Get("X-ETerm-Blob-Mime"); got != "application/zip" {
+			t.Fatalf("mime = %q", got)
+		}
+		if got := r.Header.Get("X-ETerm-Blob-Filename"); got != "a.zip" {
+			t.Fatalf("filename = %q", got)
 		}
 		body, _ := io.ReadAll(r.Body)
 		if string(body) != "abc" {
@@ -25,8 +31,8 @@ func TestClientUploadProgress(t *testing.T) {
 
 	client := &Client{BaseURL: srv.URL, APIKey: "key"}
 	var last Progress
-	img := &clipboardimg.Image{Data: []byte("abc"), Mime: "image/png", Filename: "a.png"}
-	out, err := client.Upload(img, func(p Progress) { last = p })
+	blob := &clipboardblob.Blob{Data: []byte("abc"), Mime: "application/zip", Filename: "a.zip"}
+	out, err := client.Upload(blob, func(p Progress) { last = p })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +50,8 @@ func TestClientUploadFallsBackToNextBaseURL(t *testing.T) {
 	defer srv.Close()
 
 	client := &Client{BaseURLs: []string{"http://127.0.0.1:1", srv.URL}, APIKey: "key", HTTP: srv.Client()}
-	img := &clipboardimg.Image{Data: []byte("abc"), Mime: "image/png", Filename: "a.png"}
-	out, err := client.Upload(img, nil)
+	blob := &clipboardblob.Blob{Data: []byte("abc"), Mime: "application/zip", Filename: "a.zip"}
+	out, err := client.Upload(blob, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

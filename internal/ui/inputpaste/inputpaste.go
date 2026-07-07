@@ -9,12 +9,12 @@ import (
 )
 
 func TextInput(m textinput.Model, msg tea.PasteMsg) textinput.Model {
-	m.SetValue(m.Value() + singleLine(msg.Content))
+	m, _ = m.Update(tea.PasteMsg{Content: singleLine(msg.Content)})
 	return m
 }
 
 func TextArea(m textarea.Model, msg tea.PasteMsg) textarea.Model {
-	m.SetValue(m.Value() + msg.Content)
+	m, _ = m.Update(msg)
 	return m
 }
 

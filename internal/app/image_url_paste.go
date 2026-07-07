@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/huangzheng2016/eTerm/internal/clipboardimg"
+	"github.com/huangzheng2016/eTerm/internal/clipboardblob"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
 	"github.com/huangzheng2016/eTerm/internal/syncblob"
 	"github.com/huangzheng2016/eTerm/internal/types"
@@ -44,8 +44,8 @@ func startImageURLPasteCmd(a *App, cfg esync.Config, streamID uint64, fallback t
 func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID uint64, fallback tea.Msg, cache map[string]imageURLCacheEntry) tea.Cmd {
 	return func() tea.Msg {
 		defer close(ch)
-		img, err := clipboardimg.Read()
-		if err == clipboardimg.ErrNoImage {
+		blob, err := clipboardblob.Read()
+		if err == clipboardblob.ErrNoBlob {
 			if fallback == nil {
 				return types.ImageUploadDoneMsg{StreamID: streamID, Err: err}
 			}
@@ -54,9 +54,9 @@ func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID u
 		if err != nil {
 			return types.ImageUploadDoneMsg{StreamID: streamID, Err: err}
 		}
-		cacheKey := imageCacheKey(img)
+		cacheKey := imageCacheKey(blob)
 		if entry, ok := cache[cacheKey]; ok {
-			return types.ImageUploadDoneMsg{StreamID: streamID, URL: entry.URL, CacheKey: cacheKey, ExpiresAt: entry.ExpiresAt}
+			return types.ImageUploadDoneMsg{StreamID: streamID, URL: entry.URL, Filename: entry.Filename, CacheKey: cacheKey, ExpiresAt: entry.ExpiresAt}
 		}
 		if !cfg.Enabled || cfg.Mode != "http" || cfg.ServerURL == "" || cfg.APIKey == "" {
 			return types.ImageUploadDoneMsg{StreamID: streamID, Err: fmt.Errorf("sync is not configured")}
@@ -67,7 +67,7 @@ func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID u
 			Tenant:   cfg.TenantID(),
 			HTTP:     esync.HTTPClient(2*time.Minute, cfg.InsecureTLS),
 		}
-		out, err := client.Upload(img, func(p syncblob.Progress) {
+		out, err := client.Upload(blob, func(p syncblob.Progress) {
 			select {
 			case ch <- p:
 			default:
@@ -80,7 +80,7 @@ func uploadImageURLCmd(ch chan<- syncblob.Progress, cfg esync.Config, streamID u
 		if strings.HasPrefix(url, "/") {
 			url = out.BaseURL + url
 		}
-		return types.ImageUploadDoneMsg{StreamID: streamID, URL: url, CacheKey: cacheKey, ExpiresAt: out.ExpiresAt}
+		return types.ImageUploadDoneMsg{StreamID: streamID, URL: url, Filename: blob.Filename, CacheKey: cacheKey, ExpiresAt: out.ExpiresAt}
 	}
 }
 
@@ -112,8 +112,8 @@ func sshViewByStreamID(a *App, streamID uint64) *sshview.Model {
 	return nil
 }
 
-func imageCacheKey(img *clipboardimg.Image) string {
-	sum := sha256.Sum256(img.Data)
+func imageCacheKey(blob *clipboardblob.Blob) string {
+	sum := sha256.Sum256(blob.Data)
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
@@ -125,4 +125,11 @@ func imageURLCacheSnapshot(cache map[string]imageURLCacheEntry, now time.Time) m
 		}
 	}
 	return out
+}
+
+func markdownBlobLink(filename, url string) string {
+	if filename == "" {
+		return url
+	}
+	return "[" + strings.NewReplacer("[", "\\[", "]", "\\]").Replace(filename) + "](" + url + ")"
 }

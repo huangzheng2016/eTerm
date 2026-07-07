@@ -374,6 +374,7 @@ type ImageUploadProgressMsg struct {
 type ImageUploadDoneMsg struct {
 	StreamID  uint64
 	URL       string
+	Filename  string
 	CacheKey  string
 	ExpiresAt time.Time
 	Err       error
