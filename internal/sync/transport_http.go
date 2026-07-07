@@ -58,7 +58,7 @@ func (t *httpTransport) Pull(sinceRev int64) ([]SyncRecord, int64, error) {
 		Records  []SyncRecord `json:"records"`
 		Revision int64        `json:"revision"`
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20)) // 16 MB
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, 0, err
 	}

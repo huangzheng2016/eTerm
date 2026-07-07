@@ -136,12 +136,43 @@ func TestCloseDaemonSessionsTimesOutWhenQueueIsFull(t *testing.T) {
 	}
 }
 
-func TestTrySendReportsDroppedFrameWhenQueueIsFull(t *testing.T) {
+func TestDefaultRelaySendTimeoutIsFiveMinutes(t *testing.T) {
+	if got := time.Duration(relaySendTimeoutNanos.Load()); got != 5*time.Minute {
+		t.Fatalf("timeout = %s", got)
+	}
+}
+
+func TestTrySendWaitsForQueueSpace(t *testing.T) {
+	oldTimeout := relaySendTimeoutNanos.Swap(int64(time.Second))
+	t.Cleanup(func() { relaySendTimeoutNanos.Store(oldTimeout) })
+
 	ch := make(chan relay.Frame, 1)
 	ch <- relay.Frame{Type: relay.FrameData, StreamID: 1}
 
-	if trySend(ch, relay.Frame{Type: relay.FrameData, StreamID: 2}) {
-		t.Fatal("full queue should drop non-close frame")
+	done := make(chan bool, 1)
+	go func() {
+		done <- trySend(ch, relay.Frame{Type: relay.FrameData, StreamID: 2})
+	}()
+
+	select {
+	case ok := <-done:
+		t.Fatalf("trySend returned %v before queue space was available", ok)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	<-ch
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("trySend returned false after queue space was available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("trySend did not send after queue space was available")
+	}
+
+	got := <-ch
+	if got.StreamID != 2 {
+		t.Fatalf("stream id = %d", got.StreamID)
 	}
 }
 

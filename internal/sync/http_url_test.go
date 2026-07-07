@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,5 +54,32 @@ func TestHTTPTransportAllowsInsecureTLS(t *testing.T) {
 	tr := NewHTTPTransportWithOptions(server.URL, "", "", true)
 	if err := tr.Ping(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHTTPTransportPullReadsMoreThanSixteenMiB(t *testing.T) {
+	payload := strings.Repeat("x", 16<<20)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/records" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"records": []SyncRecord{{
+				SyncID:  "big",
+				Type:    TypeSnippet,
+				Payload: payload,
+			}},
+			"revision": int64(7),
+		})
+	}))
+	defer server.Close()
+
+	tr := NewHTTPTransportWithOptions(server.URL, "", "", false)
+	records, rev, err := tr.Pull(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev != 7 || len(records) != 1 || records[0].Payload != payload {
+		t.Fatalf("rev=%d records=%d payload=%d", rev, len(records), len(records[0].Payload))
 	}
 }

@@ -24,10 +24,12 @@ type RelayHub struct {
 	sessions map[uint32]relaySession
 }
 
+const relaySendQueueSize = 1024
+
 var relaySendTimeoutNanos atomic.Int64
 
 func init() {
-	relaySendTimeoutNanos.Store(int64(time.Second))
+	relaySendTimeoutNanos.Store(int64(5 * time.Minute))
 }
 
 func NewRelayHub(peers *PeerRegistry) *RelayHub {
@@ -96,20 +98,12 @@ func (h *RelayHub) closeDaemonSessions(daemon chan relay.Frame) {
 }
 
 func trySend(ch chan relay.Frame, f relay.Frame) bool {
-	if f.Type == relay.FrameClose {
-		timer := time.NewTimer(time.Duration(relaySendTimeoutNanos.Load()))
-		defer timer.Stop()
-		select {
-		case ch <- f:
-			return true
-		case <-timer.C:
-			return false
-		}
-	}
+	timer := time.NewTimer(time.Duration(relaySendTimeoutNanos.Load()))
+	defer timer.Stop()
 	select {
 	case ch <- f:
 		return true
-	default:
+	case <-timer.C:
 		return false
 	}
 }
@@ -121,7 +115,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.CloseNow()
 
-	send := make(chan relay.Frame, 64)
+	send := make(chan relay.Frame, relaySendQueueSize)
 	ctx := r.Context()
 	done := make(chan struct{})
 	stop := make(chan struct{})
@@ -178,7 +172,7 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.CloseNow()
 
-	send := make(chan relay.Frame, 64)
+	send := make(chan relay.Frame, relaySendQueueSize)
 	ctx := r.Context()
 	done := make(chan struct{})
 	stop := make(chan struct{})
