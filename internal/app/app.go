@@ -73,6 +73,7 @@ type App struct {
 	pendingFwdDeleteID     uint
 	pendingFingerprint     *types.FingerprintConfirmMsg
 	pendingQuit            bool
+	pendingTmuxRestore     []tmuxRestoreEntry
 	pendingRemoteTmuxKill  *types.RemoteTmuxKillMsg
 	pendingTmuxKill        *types.TmuxKillMsg
 
@@ -128,6 +129,7 @@ type App struct {
 	pendingQuickConnect        *types.QuickConnectMsg
 	imageUploadProgressCh      chan syncblob.Progress
 	imageURLCache              map[string]imageURLCacheEntry
+	tmuxRestorePath            string
 }
 
 type imageURLCacheEntry struct {
@@ -143,18 +145,19 @@ func NewApp(database *gorm.DB, masterKey *security.MasterKeyManager) App {
 	kbCfg := LoadKeyBindingConfig(database)
 
 	return App{
-		db:         database,
-		masterKey:  masterKey,
-		viewState:  LoginView,
-		tabs:       tabs,
-		activeTab:  0,
-		tabBar:     tabBar,
-		statusBar:  components.NewStatusBar(),
-		helpBubble: newAppHelpBubble(),
-		toast:      components.NewToast(),
-		confirm:    components.NewConfirm("", ""),
-		keyMap:     BuildKeyMap(kbCfg),
-		kbConfig:   kbCfg,
+		db:              database,
+		masterKey:       masterKey,
+		viewState:       LoginView,
+		tabs:            tabs,
+		activeTab:       0,
+		tabBar:          tabBar,
+		statusBar:       components.NewStatusBar(),
+		helpBubble:      newAppHelpBubble(),
+		toast:           components.NewToast(),
+		confirm:         components.NewConfirm("", ""),
+		keyMap:          BuildKeyMap(kbCfg),
+		kbConfig:        kbCfg,
+		tmuxRestorePath: defaultTmuxRestorePath(),
 	}
 }
 

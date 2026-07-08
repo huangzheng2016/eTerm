@@ -102,6 +102,8 @@ type RemoteDaemonLoadedMsg struct {
 
 type RemoteDaemonRefreshMsg struct{}
 
+type RefreshConnectivityMsg struct{}
+
 type RemotePeerMenuMsg struct {
 	Peer  RemotePeer
 	Hosts []RemoteHost

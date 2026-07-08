@@ -21,14 +21,14 @@ func TestDaemonCommandDefaultsToStart(t *testing.T) {
 }
 
 func TestDaemonCommandParsesSubcommandAndFlags(t *testing.T) {
-	cmd, opts, err := parseDaemonArgs([]string{"start", "-c", "test.db", "-password", "pw", "-name", "box"})
+	cmd, opts, err := parseDaemonArgs([]string{"start", "-c", "test.db", "-password", "pw", "-name", "box", "-pprof", "127.0.0.1:6061"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cmd != "start" {
 		t.Fatalf("cmd = %q, want start", cmd)
 	}
-	if opts.DBPath != "test.db" || opts.Password != "pw" || opts.Name != "box" {
+	if opts.DBPath != "test.db" || opts.Password != "pw" || opts.Name != "box" || opts.PProfAddr != "127.0.0.1:6061" {
 		t.Fatalf("opts = %#v", opts)
 	}
 }

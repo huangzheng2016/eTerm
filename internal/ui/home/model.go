@@ -112,7 +112,9 @@ type Model struct {
 	showHidden bool
 
 	// Host online status (from TCP probe)
-	hostStatus map[uint]HostStatus
+	hostStatus              map[uint]HostStatus
+	lastConnectivityProbeAt time.Time
+	connectivityProbeSeq    uint64
 
 	remotePeers []types.RemotePeer
 	remoteHosts []types.RemoteHost

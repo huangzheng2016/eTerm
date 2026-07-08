@@ -33,6 +33,13 @@ func TestNoServerOutput(t *testing.T) {
 	}
 }
 
+func TestNoServerOutputForMissingSocket(t *testing.T) {
+	out := []byte("error connecting to /tmp/tmux-10250/default (No such file or directory)\n")
+	if !isNoServerOutput(out) {
+		t.Fatal("expected missing tmux socket output")
+	}
+}
+
 func TestCommandErrorForMissingBinary(t *testing.T) {
 	err := tmuxCommandError("list-sessions", exec.ErrNotFound, nil)
 	if err == nil || err.Error() != "tmux not found in PATH" {

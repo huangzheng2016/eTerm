@@ -16,6 +16,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/app"
 	"github.com/huangzheng2016/eTerm/internal/config"
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/debugpprof"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/login"
@@ -33,6 +34,7 @@ func main() {
 	versionFlag := flag.Bool("v", false, "print version and exit")
 	versionJSONFlag := flag.Bool("version-json", false, "print version and commit as JSON and exit")
 	noUpdateCheckFlag := flag.Bool("no-update-check", false, "disable GitHub release check on unlock")
+	pprofFlag := flag.String("pprof", "", "enable pprof HTTP server on address (env: ETERM_PPROF_ADDR)")
 	forceUpdateCheck, cliArgs := splitUpgradeCommand(os.Args[1:])
 	flag.CommandLine.Parse(cliArgs)
 
@@ -54,6 +56,10 @@ func main() {
 	}
 	if os.Getenv("ETERM_DEBUG_APP") != "" {
 		fmt.Fprintln(os.Stderr, "eterm: ETERM_DEBUG_APP is on — SSH/SFTP connect steps are logged to stderr ([eterm:app]).")
+	}
+	if _, err := debugpprof.Start("eterm", debugpprof.ResolveAddr(*pprofFlag, "ETERM_PPROF_ADDR")); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to start pprof: %v\n", err)
+		os.Exit(1)
 	}
 
 	dbPath := config.DBPath()

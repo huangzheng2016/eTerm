@@ -152,6 +152,7 @@ func (a App) closeCurrentTabIfAllowed() (App, tea.Cmd) {
 			a.activeTab = len(a.tabs) - 1
 		}
 		a.syncTabBar()
+		a.persistTmuxRestoreSnapshot()
 		return a, closeCmd
 	}
 	return a, nil
@@ -236,10 +237,21 @@ func (a App) quitWithCheck() (tea.Model, tea.Cmd) {
 func (a *App) processConfirmResult() tea.Cmd {
 	confirmed := a.confirm.Result()
 
+	if a.pendingTmuxRestore != nil {
+		entries := append([]tmuxRestoreEntry(nil), a.pendingTmuxRestore...)
+		a.pendingTmuxRestore = nil
+		a.clearTmuxRestoreFile()
+		if confirmed {
+			return a.restoreTmuxSessions(entries)
+		}
+		return nil
+	}
+
 	// Handle pending quit
 	if a.pendingQuit {
 		a.pendingQuit = false
 		if confirmed {
+			a.persistTmuxRestoreSnapshot()
 			return tea.Quit
 		}
 		return nil

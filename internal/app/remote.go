@@ -192,6 +192,7 @@ func (a *App) renameRemoteTmuxTabs(peerID, sessionID, name string) {
 		a.tabs[i].Title = remoteTmuxTabTitle(spec.Peer.Name, name)
 	}
 	a.syncTabBar()
+	a.persistTmuxRestoreSnapshot()
 }
 
 func remoteTmuxTabTitle(peerName, sessionID string) string {
@@ -219,5 +220,6 @@ func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cm
 		a.activeTab = len(a.tabs) - 1
 	}
 	a.syncTabBar()
+	a.persistTmuxRestoreSnapshot()
 	return a, tea.Batch(sv.Init(), reflowWindow(a))
 }

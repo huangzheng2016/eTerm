@@ -312,7 +312,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			var layoutCmd tea.Cmd
 			a, layoutCmd = layoutTabModels(a)
-			return a, layoutCmd
+			var refreshCmd tea.Cmd
+			a, refreshCmd = a.refreshActiveHomeConnectivity()
+			return a, tea.Batch(layoutCmd, refreshCmd)
 		case matchAppPrevTab(msg, a.keyMap):
 			if len(a.tabs) > 1 {
 				a.activeTab = (a.activeTab - 1 + len(a.tabs)) % len(a.tabs)
@@ -320,7 +322,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			var layoutCmd tea.Cmd
 			a, layoutCmd = layoutTabModels(a)
-			return a, layoutCmd
+			var refreshCmd tea.Cmd
+			a, refreshCmd = a.refreshActiveHomeConnectivity()
+			return a, tea.Batch(layoutCmd, refreshCmd)
 		case matchCtrlShiftAnyOf(msg, a.keyMap.LocalTerminal) || key.Matches(msg, a.keyMap.LocalTerminal):
 			return a.openLocalTerminal()
 		case matchCtrlShiftAnyOf(msg, a.keyMap.RenameTab) || key.Matches(msg, a.keyMap.RenameTab):
@@ -383,7 +387,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.tabBar = a.tabBar.SetActive(a.activeTab)
 			var layoutCmd tea.Cmd
 			a, layoutCmd = layoutTabModels(a)
-			return a, layoutCmd
+			var refreshCmd tea.Cmd
+			a, refreshCmd = a.refreshActiveHomeConnectivity()
+			return a, tea.Batch(layoutCmd, refreshCmd)
 		}
 
 		// Alt+s cycles through SSH tabs, Alt+f cycles through SFTP tabs
@@ -521,7 +527,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.activeTab = a.tabBar.ActiveIndex()
 					var layoutCmd tea.Cmd
 					a, layoutCmd = layoutTabModels(a)
-					return a, layoutCmd
+					var refreshCmd tea.Cmd
+					a, refreshCmd = a.refreshActiveHomeConnectivity()
+					return a, tea.Batch(layoutCmd, refreshCmd)
+				}
+				var refreshCmd tea.Cmd
+				a, refreshCmd = a.refreshActiveHomeConnectivity()
+				if refreshCmd != nil {
+					return a, refreshCmd
 				}
 			}
 		}
@@ -546,7 +559,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var layoutCmd tea.Cmd
 		a, layoutCmd = layoutTabModels(a)
-		return a, layoutCmd
+		var refreshCmd tea.Cmd
+		a, refreshCmd = a.refreshActiveHomeConnectivity()
+		return a, tea.Batch(layoutCmd, refreshCmd)
 
 	case types.NewTabMsg:
 		return a.handleNewTabMsg(msg)
@@ -837,6 +852,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: homeModel}}
 		a.activeTab = 0
 		a.syncTabBar()
+		a.promptTmuxRestoreIfAvailable()
 		unlockCmds := []tea.Cmd{autoLockTick()}
 		if a.width > 0 && a.height > 0 {
 			unlockCmds = append(unlockCmds, tea.Sequence(reflowWindow(a), homeModel.Init()))
@@ -908,11 +924,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(a.forwardToHomeTabs(msg), reflowWindow(a))
 
+	case types.RemoteDaemonRefreshMsg:
+		return a, a.forwardToHomeTabs(msg)
+
 	case types.ConnErrorMsg:
 		appDebugf("ConnErrorMsg: %v", msg.Err)
 		a = a.stopConnectProgress()
 		a.connError = newConnErrorModel(internalssh.Classify(msg.Err), msg.Target, msg.Retry)
 		return a, reflowWindow(a)
+
+	case tmuxRestoreOpenedMsg:
+		return a.applyTmuxRestoreOpened(msg)
 
 	case types.QuitRequestMsg:
 		return a.quitWithCheck()

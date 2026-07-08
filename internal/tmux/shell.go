@@ -125,7 +125,9 @@ func parseSessions(out []byte) []types.TmuxSession {
 }
 
 func isNoServerOutput(out []byte) bool {
-	return strings.Contains(string(out), "no server running")
+	text := string(out)
+	return strings.Contains(text, "no server running") ||
+		(strings.Contains(text, "error connecting to") && strings.Contains(text, "No such file or directory"))
 }
 
 func tmuxCommandError(op string, err error, out []byte) error {

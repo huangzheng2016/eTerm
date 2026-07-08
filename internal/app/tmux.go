@@ -35,7 +35,7 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 			}
 			return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(name), session: name}
 		}
-		is, err := tmux.AttachSession(context.Background(), msg.Name, rows, cols)
+		is, err := appAttachTmuxSession(context.Background(), msg.Name, rows, cols)
 		if err != nil {
 			return types.ErrorMsg{Err: fmt.Errorf("tmux attach-session: %w", err)}
 		}
@@ -52,6 +52,7 @@ func (a App) applyTmuxTerminalOpened(msg tmuxTerminalOpenedMsg) (App, tea.Cmd) {
 	a.tabs = append(a.tabs, tab)
 	a.activeTab = len(a.tabs) - 1
 	a.syncTabBar()
+	a.persistTmuxRestoreSnapshot()
 	return a, sv.Init()
 }
 
@@ -88,6 +89,7 @@ func (a *App) renameTmuxTabs(oldName, newName string) {
 		}
 	}
 	a.syncTabBar()
+	a.persistTmuxRestoreSnapshot()
 }
 
 func tmuxTabTitle(name string) string {

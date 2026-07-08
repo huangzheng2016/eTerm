@@ -14,12 +14,14 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/config"
 	"github.com/huangzheng2016/eTerm/internal/daemon"
+	"github.com/huangzheng2016/eTerm/internal/debugpprof"
 )
 
 type daemonOptions struct {
-	DBPath   string
-	Password string
-	Name     string
+	DBPath    string
+	Password  string
+	Name      string
+	PProfAddr string
 }
 
 type daemonController struct {
@@ -35,6 +37,10 @@ func runDaemon(args []string) {
 		os.Exit(2)
 	}
 	if cmd == "run" {
+		if _, err := debugpprof.Start("eterm-daemon", debugpprof.ResolveAddr(opts.PProfAddr, "ETERM_DAEMON_PPROF_ADDR")); err != nil {
+			fmt.Fprintf(os.Stderr, "eterm daemon: pprof: %v\n", err)
+			os.Exit(1)
+		}
 		if err := daemon.Run(context.Background(), daemon.Config{
 			DBPath:   opts.DBPath,
 			Password: opts.Password,
@@ -84,10 +90,11 @@ func parseDaemonArgs(args []string) (string, daemonOptions, error) {
 	dbPath := fs.String("c", "", "path to SQLite database file (default: ~/.config/eterm/eterm.db)")
 	password := fs.String("password", "", "master password (env: ETERM_MASTER_PASSWORD)")
 	name := fs.String("name", "", "peer display name (default: hostname)")
+	pprofAddr := fs.String("pprof", "", "enable pprof HTTP server on address (env: ETERM_DAEMON_PPROF_ADDR)")
 	if err := fs.Parse(args); err != nil {
 		return "", daemonOptions{}, err
 	}
-	return cmd, daemonOptions{DBPath: *dbPath, Password: *password, Name: *name}, nil
+	return cmd, daemonOptions{DBPath: *dbPath, Password: *password, Name: *name, PProfAddr: *pprofAddr}, nil
 }
 
 func newDaemonController() (daemonController, error) {
@@ -132,6 +139,9 @@ func (c daemonController) start(out io.Writer, opts daemonOptions) int {
 	}
 	if opts.Name != "" {
 		args = append(args, "-name", opts.Name)
+	}
+	if opts.PProfAddr != "" {
+		args = append(args, "-pprof", opts.PProfAddr)
 	}
 	pid, err := startDetachedDaemon(exe, args, logFile)
 	if err != nil {

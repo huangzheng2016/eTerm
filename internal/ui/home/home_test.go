@@ -1,9 +1,11 @@
 package home
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
@@ -249,5 +251,52 @@ func TestRemoteLoadedRefreshesDaemonCardsFirst(t *testing.T) {
 	}
 	if m.gridCursor != 1 {
 		t.Fatalf("gridCursor = %d, want original host selection at index 1", m.gridCursor)
+	}
+}
+
+func TestRemoteLoadErrorClearsStaleDaemonCards(t *testing.T) {
+	m, _ := loadedModel(t)
+	m.remotePeers = []types.RemotePeer{{ID: "peer-1", Name: "daemon"}}
+	m.remoteHosts = []types.RemoteHost{{SyncID: "host-1", Alias: "remote-host"}}
+
+	out, cmd := m.Update(types.RemoteDaemonLoadedMsg{Err: errors.New("syncd unavailable"), Silent: true})
+	m = out.(Model)
+
+	if len(m.remotePeers) != 0 {
+		t.Fatalf("remote peers = %#v, want cleared", m.remotePeers)
+	}
+	if len(m.remoteHosts) != 0 {
+		t.Fatalf("remote hosts = %#v, want cleared", m.remoteHosts)
+	}
+	if msg := firstMsg(cmd); msg == nil {
+		t.Fatal("expected refresh tick command")
+	}
+}
+
+func TestRefreshConnectivitySkipsRecentProbe(t *testing.T) {
+	m, _ := loadedModel(t)
+	last := time.Now().Add(-time.Minute)
+	m.lastConnectivityProbeAt = last
+
+	out, _ := m.Update(types.RefreshConnectivityMsg{})
+	m = out.(Model)
+
+	if !m.lastConnectivityProbeAt.Equal(last) {
+		t.Fatalf("lastConnectivityProbeAt = %v, want unchanged %v", m.lastConnectivityProbeAt, last)
+	}
+}
+
+func TestRefreshConnectivityRunsAfterInterval(t *testing.T) {
+	m, _ := loadedModel(t)
+	m.lastConnectivityProbeAt = time.Now().Add(-connectivityProbeInterval - time.Second)
+
+	out, cmd := m.Update(types.RefreshConnectivityMsg{})
+	m = out.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected stale connectivity probe command")
+	}
+	if time.Since(m.lastConnectivityProbeAt) > time.Second {
+		t.Fatalf("lastConnectivityProbeAt = %v, want refreshed", m.lastConnectivityProbeAt)
 	}
 }

@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/huangzheng2016/eTerm/internal/syncd"
 	"github.com/glebarez/sqlite"
+	"github.com/huangzheng2016/eTerm/internal/debugpprof"
+	"github.com/huangzheng2016/eTerm/internal/syncd"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -20,10 +21,14 @@ func main() {
 	certFile := flag.String("cert", "", "TLS certificate file")
 	keyFile := flag.String("key", "", "TLS key file")
 	stdio := flag.Bool("stdio", false, "Run in stdio mode (JSON over stdin/stdout)")
+	pprofAddr := flag.String("pprof", "", "enable pprof HTTP server on address (env: ETERMSYNCD_PPROF_ADDR)")
 	flag.Parse()
 
 	if *apiKey == "" {
 		*apiKey = os.Getenv("ETERMSYNCD_API_KEY")
+	}
+	if _, err := debugpprof.Start("etermsyncd", debugpprof.ResolveAddr(*pprofAddr, "ETERMSYNCD_PPROF_ADDR")); err != nil {
+		log.Fatalf("pprof: %v", err)
 	}
 
 	db, err := gorm.Open(sqlite.Open(*dbPath+"?_journal_mode=WAL&_busy_timeout=5000"), &gorm.Config{

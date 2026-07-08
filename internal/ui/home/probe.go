@@ -21,8 +21,9 @@ const (
 )
 
 const (
-	probeTimeout        = 3 * time.Second
-	maxProbeConcurrency = 20
+	probeTimeout              = 3 * time.Second
+	connectivityProbeInterval = 5 * time.Minute
+	maxProbeConcurrency       = 20
 )
 
 type probeResult struct {

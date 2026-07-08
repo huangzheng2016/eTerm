@@ -12,6 +12,10 @@ import (
 const doubleClickWindow = 450 * time.Millisecond
 const remoteDaemonRefreshInterval = 10 * time.Second
 
+type connectivityProbeTickMsg struct {
+	seq uint64
+}
+
 func (m Model) Init() tea.Cmd {
 	return m.reloadHosts()
 }
@@ -53,11 +57,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.populateHostList(msg.hosts)
 		}
 		m.SetSize(m.width, m.height)
-		// Trigger async host status probing
-		return m, probeHosts(msg.hosts)
+		return m, m.refreshConnectivity(true)
 
 	case types.RemoteDaemonLoadedMsg:
 		if msg.Err != nil {
+			m.remotePeers = nil
+			m.remoteHosts = nil
 			return m, remoteDaemonRefreshTick()
 		}
 		selectedHostID := uint(0)
@@ -79,6 +84,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.RemoteDaemonRefreshMsg:
 		return m, m.loadRemote(true)
+
+	case types.RefreshConnectivityMsg:
+		return m, m.refreshConnectivity(false)
+
+	case connectivityProbeTickMsg:
+		if msg.seq != m.connectivityProbeSeq {
+			return m, nil
+		}
+		return m, m.refreshConnectivity(false)
 
 	case probeResultMsg:
 		if m.hostStatus == nil {
@@ -125,5 +139,29 @@ func (m Model) reloadHosts() tea.Cmd {
 func remoteDaemonRefreshTick() tea.Cmd {
 	return tea.Tick(remoteDaemonRefreshInterval, func(time.Time) tea.Msg {
 		return types.RemoteDaemonRefreshMsg{}
+	})
+}
+
+func (m *Model) refreshConnectivity(force bool) tea.Cmd {
+	if len(m.allHosts) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	elapsed := now.Sub(m.lastConnectivityProbeAt)
+	due := force || m.lastConnectivityProbeAt.IsZero() || elapsed >= connectivityProbeInterval
+	if !due {
+		return m.connectivityProbeTick(connectivityProbeInterval - elapsed)
+	}
+
+	m.lastConnectivityProbeAt = now
+	return tea.Batch(probeHosts(m.allHosts), m.connectivityProbeTick(connectivityProbeInterval))
+}
+
+func (m *Model) connectivityProbeTick(delay time.Duration) tea.Cmd {
+	m.connectivityProbeSeq++
+	seq := m.connectivityProbeSeq
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return connectivityProbeTickMsg{seq: seq}
 	})
 }
