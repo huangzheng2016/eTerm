@@ -314,6 +314,20 @@ func (w *captureWriteCloser) String() string {
 	return w.buf.String()
 }
 
+func (w *captureWriteCloser) waitString(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if got := w.String(); got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := w.String(); got != want {
+		t.Fatalf("stdin = %q, want %q", got, want)
+	}
+}
+
 func TestAltScreenMouseModeForwardsWheelSequence(t *testing.T) {
 	stdin := &captureWriteCloser{}
 	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
@@ -342,9 +356,7 @@ func TestPasteMsgWritesRawTextWhenBracketedPasteDisabled(t *testing.T) {
 
 	m.Update(tea.PasteMsg{Content: "hello"})
 
-	if got := stdin.String(); got != "hello" {
-		t.Fatalf("paste = %q, want raw text", got)
-	}
+	stdin.waitString(t, "hello")
 }
 
 func TestPasteMsgWritesBracketedPasteWhenEnabled(t *testing.T) {
@@ -360,9 +372,7 @@ func TestPasteMsgWritesBracketedPasteWhenEnabled(t *testing.T) {
 	m.Update(tea.PasteMsg{Content: "hello"})
 
 	want := "\x1b[200~hello\x1b[201~"
-	if got := stdin.String(); got != want {
-		t.Fatalf("paste = %q, want %q", got, want)
-	}
+	stdin.waitString(t, want)
 }
 
 func TestPasteMsgStopsBracketingAfterModeReset(t *testing.T) {
@@ -378,9 +388,7 @@ func TestPasteMsgStopsBracketingAfterModeReset(t *testing.T) {
 
 	m.Update(tea.PasteMsg{Content: "hello"})
 
-	if got := stdin.String(); got != "hello" {
-		t.Fatalf("paste = %q, want raw text", got)
-	}
+	stdin.waitString(t, "hello")
 }
 
 func TestKeyPressClearsBottomPad(t *testing.T) {

@@ -74,3 +74,22 @@ func TestTmuxTerminalProbesReply(t *testing.T) {
 		t.Fatalf("probes polluted screen: %q", got)
 	}
 }
+
+func TestXTGETTCAPReplies(t *testing.T) {
+	stdin := newProbeStdin()
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+
+	_, _ = m.Update(ChunkMsg{
+		StreamID: m.StreamID(),
+		Data:     []byte("\x1bP+q5463;524742;4D73;626164\x1b\\"),
+	})
+
+	stdin.waitContains(t, "\x1bP1+r5463=31\x1b\\")
+	stdin.waitContains(t, "\x1bP1+r524742=382F382F38\x1b\\")
+	stdin.waitContains(t, "\x1bP1+r4D73=1B5D35323B25703125733B257032257307\x1b\\")
+	stdin.waitContains(t, "\x1bP0+r626164\x1b\\")
+	if got := m.emu.Render(); got != "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" {
+		t.Fatalf("xtgettcap polluted screen: %q", got)
+	}
+}

@@ -8,6 +8,7 @@ package sshview
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -35,7 +36,20 @@ const selectionAutoScrollEdgePercent = 20
 
 const maxCoalescedChunkBytes = 64 * 1024
 
+const inputQueueSize = 512
+
+const resizeQueueSize = 4
+
 const scrollIndicatorDuration = 3 * time.Second
+
+var xtgettcapValues = map[string]string{
+	"Tc":     "1",
+	"RGB":    "8/8/8",
+	"Ms":     "\x1b]52;%p1%s;%p2%s\a",
+	"TN":     "xterm-256color",
+	"Co":     "256",
+	"colors": "256",
+}
 
 // ChunkMsg carries PTY stdout for one embedded session; StreamID routes it in App.Update.
 type ChunkMsg struct {
@@ -58,6 +72,11 @@ type scrollIndicatorTimeoutMsg struct {
 	Seq      uint64
 }
 
+type resizeRequest struct {
+	rows int
+	cols int
+}
+
 // Model streams PTY output through a virtual terminal and forwards keys to the SSH session.
 type Model struct {
 	sess     *internalssh.InteractiveSession
@@ -76,6 +95,14 @@ type Model struct {
 	ch     chan []byte
 	mu     sync.Mutex
 	closed bool
+
+	inputMu     sync.Mutex
+	inputCh     chan []byte
+	inputClosed bool
+
+	resizeMu     sync.Mutex
+	resizeCh     chan resizeRequest
+	resizeClosed bool
 
 	endErr       error
 	waitComplete bool
@@ -148,6 +175,10 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		_, _ = io.WriteString(emu.InputPipe(), ansi.WindowOp(8, emu.Height(), emu.Width()))
 		return true
 	})
+	emu.RegisterDcsHandler(ansi.Command(0, '+', 'q'), func(_ ansi.Params, data []byte) bool {
+		_, _ = io.WriteString(emu.InputPipe(), xtgettcapReply(data))
+		return true
+	})
 	m := &Model{
 		sess:       is,
 		emu:        emu,
@@ -155,9 +186,13 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		alias:      alias,
 		hostID:     hostID,
 		ch:         make(chan []byte, 128),
+		inputCh:    make(chan []byte, inputQueueSize),
+		resizeCh:   make(chan resizeRequest, resizeQueueSize),
 		doneClosed: make(chan struct{}),
 		vk:         vk,
 	}
+	m.startInputWriter()
+	m.startResizeWriter()
 	emu.RegisterOscHandler(52, func(data []byte) bool {
 		if text, ok := osc52ClipboardText(data); ok {
 			m.osc52Clipboard = append(m.osc52Clipboard, text)
@@ -201,11 +236,104 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 				return
 			}
 			if n > 0 && m.sess != nil && m.sess.Stdin != nil {
-				_, _ = m.sess.Stdin.Write(buf[:n])
+				m.queueInput(buf[:n])
 			}
 		}
 	}()
 	return m
+}
+
+func (m *Model) startInputWriter() {
+	ch := m.inputCh
+	sess := m.sess
+	go func() {
+		for b := range ch {
+			if sess != nil && sess.Stdin != nil {
+				_, _ = sess.Stdin.Write(b)
+			}
+		}
+	}()
+}
+
+func (m *Model) startResizeWriter() {
+	ch := m.resizeCh
+	sess := m.sess
+	go func() {
+		for req := range ch {
+			if sess != nil && sess.Resize != nil {
+				_ = sess.Resize(req.rows, req.cols)
+			}
+		}
+	}()
+}
+
+func (m *Model) queueInput(p []byte) bool {
+	if len(p) == 0 {
+		return false
+	}
+	b := append([]byte(nil), p...)
+	m.inputMu.Lock()
+	defer m.inputMu.Unlock()
+	if m.inputClosed || m.inputCh == nil {
+		return false
+	}
+	select {
+	case m.inputCh <- b:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) queueResize(rows, cols int) bool {
+	m.resizeMu.Lock()
+	defer m.resizeMu.Unlock()
+	if m.resizeClosed || m.resizeCh == nil {
+		return false
+	}
+	req := resizeRequest{rows: rows, cols: cols}
+	select {
+	case m.resizeCh <- req:
+		return true
+	default:
+		select {
+		case <-m.resizeCh:
+		default:
+		}
+		select {
+		case m.resizeCh <- req:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+func xtgettcapReply(data []byte) string {
+	var b strings.Builder
+	for _, raw := range strings.Split(string(data), ";") {
+		if raw == "" {
+			continue
+		}
+		capHex := strings.ToUpper(raw)
+		decoded, err := hex.DecodeString(raw)
+		value, ok := xtgettcapValues[string(decoded)]
+		if err != nil || !ok {
+			b.WriteString("\x1bP0+r")
+			b.WriteString(capHex)
+			b.WriteString("\x1b\\")
+			continue
+		}
+		b.WriteString("\x1bP1+r")
+		b.WriteString(capHex)
+		b.WriteByte('=')
+		b.WriteString(strings.ToUpper(hex.EncodeToString([]byte(value))))
+		b.WriteString("\x1b\\")
+	}
+	if b.Len() == 0 {
+		return "\x1bP0+r\x1b\\"
+	}
+	return b.String()
 }
 
 func isMouseTrackingMode(mode ansi.Mode) bool {
@@ -234,7 +362,7 @@ func (m *Model) PasteCommand(cmd string) {
 	if m.disconnected || m.sess == nil || m.sess.Stdin == nil {
 		return
 	}
-	_, _ = m.sess.Stdin.Write([]byte(cmd))
+	m.queueInput([]byte(cmd))
 }
 
 func (m *Model) PasteText(text string) {
@@ -260,7 +388,7 @@ func (m *Model) SetSize(w, h int) {
 	}
 	m.emu.Resize(w, termH)
 	if m.sess != nil && m.sess.Resize != nil {
-		_ = m.sess.Resize(termH, w)
+		m.queueResize(termH, w)
 	}
 }
 
@@ -397,10 +525,36 @@ func (m *Model) Close() error {
 	if c, ok := m.emu.InputPipe().(io.Closer); ok {
 		_ = c.Close()
 	}
+	m.closeInputQueue()
+	m.closeResizeQueue()
 	if m.sess != nil {
 		return m.sess.Close()
 	}
 	return nil
+}
+
+func (m *Model) closeInputQueue() {
+	m.inputMu.Lock()
+	defer m.inputMu.Unlock()
+	if m.inputClosed {
+		return
+	}
+	m.inputClosed = true
+	if m.inputCh != nil {
+		close(m.inputCh)
+	}
+}
+
+func (m *Model) closeResizeQueue() {
+	m.resizeMu.Lock()
+	defer m.resizeMu.Unlock()
+	if m.resizeClosed {
+		return
+	}
+	m.resizeClosed = true
+	if m.resizeCh != nil {
+		close(m.resizeCh)
+	}
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -484,7 +638,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearScrollIndicator()
 		m.sel.active = false
 		if b := m.encodeKey(msg); len(b) > 0 && m.sess != nil && m.sess.Stdin != nil {
-			_, _ = m.sess.Stdin.Write(b)
+			m.queueInput(b)
 		}
 		return m, nil
 
@@ -497,7 +651,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.bracketedPaste {
 				payload = append([]byte(ansi.BracketedPasteStart), append(payload, []byte(ansi.BracketedPasteEnd)...)...)
 			}
-			_, _ = m.sess.Stdin.Write(payload)
+			m.queueInput(payload)
 		}
 		return m, nil
 
@@ -578,7 +732,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if len(seq) > 0 {
 					for i := 0; i < lines; i++ {
-						_, _ = m.sess.Stdin.Write(seq)
+						m.queueInput(seq)
 					}
 				}
 			}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/relay"
@@ -58,6 +59,28 @@ func (r *unblockOnCloseReader) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+type blockingWriteCloser struct {
+	started chan struct{}
+	release chan struct{}
+	start   sync.Once
+	once    sync.Once
+}
+
+func newBlockingWriteCloser() *blockingWriteCloser {
+	return &blockingWriteCloser{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (w *blockingWriteCloser) Write(p []byte) (int, error) {
+	w.start.Do(func() { close(w.started) })
+	<-w.release
+	return len(p), nil
+}
+
+func (w *blockingWriteCloser) Close() error {
+	w.once.Do(func() { close(w.release) })
+	return nil
+}
+
 func TestReadLoopDoesNotDropChunksWhenChannelIsFull(t *testing.T) {
 	m := &Model{
 		sess: &internalssh.InteractiveSession{Stdout: &oneByteReader{data: []byte("abc")}},
@@ -106,6 +129,78 @@ func TestCloseWhileReadLoopHasPendingDataDoesNotPanic(t *testing.T) {
 	case p := <-panicCh:
 		t.Fatalf("readLoop panic = %v", p)
 	default:
+	}
+}
+
+func TestKeyPressDoesNotBlockWhenSessionInputBlocks(t *testing.T) {
+	stdin := newBlockingWriteCloser()
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	defer m.Close()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("key update blocked on session stdin")
+	}
+}
+
+func TestResizeDoesNotBlockWhenSessionResizeBlocks(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	m := New(&internalssh.InteractiveSession{
+		Resize: func(rows, cols int) error {
+			<-release
+			return nil
+		},
+	}, "test", 0, viewkeys.SSHKeys{})
+	defer func() {
+		once.Do(func() { close(release) })
+		_ = m.Close()
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("window size update blocked on session resize")
+	}
+}
+
+func TestMouseForwardDoesNotBlockWhenSessionInputBlocks(t *testing.T) {
+	stdin := newBlockingWriteCloser()
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	defer m.Close()
+
+	m.emu.WriteString("\x1b[?1049h\x1b[?1000h\x1b[?1006h")
+	m.Update(wheel(tea.MouseWheelDown))
+
+	select {
+	case <-stdin.started:
+	case <-time.After(time.Second):
+		t.Fatal("first mouse event was not written")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = m.Update(wheel(tea.MouseWheelUp))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("mouse update blocked on session stdin")
 	}
 }
 

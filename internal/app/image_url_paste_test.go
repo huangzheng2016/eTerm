@@ -38,6 +38,20 @@ func (w *testWriteCloser) String() string {
 	return w.buf.String()
 }
 
+func (w *testWriteCloser) waitString(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if got := w.String(); got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := w.String(); got != want {
+		t.Fatalf("stdin = %q, want %q", got, want)
+	}
+}
+
 func TestImageUploadDonePastesIntoOriginalTab(t *testing.T) {
 	firstStdin := &testWriteCloser{}
 	secondStdin := &testWriteCloser{}
@@ -58,9 +72,7 @@ func TestImageUploadDonePastesIntoOriginalTab(t *testing.T) {
 	updated, _ := a.Update(types.ImageUploadDoneMsg{StreamID: first.StreamID(), URL: "https://example.test/i.png", Filename: "i.png"})
 	a = updated.(App)
 
-	if got := firstStdin.String(); got != "[i.png](https://example.test/i.png) " {
-		t.Fatalf("first stdin = %q", got)
-	}
+	firstStdin.waitString(t, "[i.png](https://example.test/i.png) ")
 	if got := secondStdin.String(); got != "" {
 		t.Fatalf("second stdin = %q", got)
 	}
@@ -114,9 +126,7 @@ func TestImagePasteFallbackForwardsOriginalPasteMsg(t *testing.T) {
 	})
 	a = updated.(App)
 
-	if got := stdin.String(); got != "hello" {
-		t.Fatalf("stdin = %q", got)
-	}
+	stdin.waitString(t, "hello")
 }
 
 func TestLocalFilePasteUsesFileURL(t *testing.T) {
@@ -147,9 +157,7 @@ func TestLocalFilePasteUsesFileURL(t *testing.T) {
 	updated, _ := a.Update(msg)
 	a = updated.(App)
 
-	if got := stdin.String(); got != "[a b.tar.gz](file:///tmp/a%20b.tar.gz) " {
-		t.Fatalf("stdin = %q", got)
-	}
+	stdin.waitString(t, "[a b.tar.gz](file:///tmp/a%20b.tar.gz) ")
 }
 
 func TestPasteImageURLMsgForcesUploadForLocalFiles(t *testing.T) {

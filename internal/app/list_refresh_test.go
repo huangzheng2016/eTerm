@@ -7,7 +7,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/security"
+	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 type recordingTabModel struct {
@@ -91,6 +94,52 @@ func TestClickingActiveListRefreshesConnectivity(t *testing.T) {
 	}
 	if !sawRefreshConnectivity(list) {
 		t.Fatalf("list messages = %#v, want RefreshConnectivityMsg", list.msgs)
+	}
+}
+
+func TestClickingTabDoesNotBlockWhenTerminalResizeBlocks(t *testing.T) {
+	release := make(chan struct{})
+	terminal := sshview.New(&internalssh.InteractiveSession{
+		Resize: func(rows, cols int) error {
+			<-release
+			return nil
+		},
+	}, "ssh", 0, viewkeys.SSHKeys{})
+	defer func() {
+		close(release)
+		_ = terminal.Close()
+	}()
+
+	a := App{
+		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
+		viewState: MainView,
+		width:     80,
+		height:    24,
+		tabs: []Tab{
+			{Type: HomeTab, Title: "List", Model: &recordingTabModel{}},
+			{Type: SSHTab, Title: "ssh", Model: terminal},
+		},
+		activeTab: 0,
+	}
+	a.syncTabBar()
+
+	done := make(chan App, 1)
+	go func() {
+		out, _ := a.Update(tea.MouseClickMsg(tea.Mouse{
+			X:      12,
+			Y:      0,
+			Button: tea.MouseLeft,
+		}))
+		done <- out.(App)
+	}()
+
+	select {
+	case next := <-done:
+		if next.activeTab != 1 {
+			t.Fatalf("activeTab = %d, want 1", next.activeTab)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("tab click blocked on terminal resize")
 	}
 }
 
