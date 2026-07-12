@@ -14,6 +14,11 @@ import (
 )
 
 func (a App) openKeysTab() (App, tea.Cmd) {
+	for i := range a.tabs {
+		if isListView(a.tabs[i].Type) {
+			return a.activateListView(KeyTab)
+		}
+	}
 	km := keyview.New(a.db, a.masterKey, BuildKeyViewKeys(a.kbConfig))
 	if a.width > 0 {
 		km.SetSize(a.width, a.mainContentHeightForType(KeyTab))
@@ -26,6 +31,11 @@ func (a App) openKeysTab() (App, tea.Cmd) {
 }
 
 func (a App) openForwardTab() (App, tea.Cmd) {
+	for i := range a.tabs {
+		if isListView(a.tabs[i].Type) {
+			return a.activateListView(ForwardTab)
+		}
+	}
 	fm := fwdview.New(a.db, BuildFwdKeys(a.kbConfig))
 	if a.width > 0 {
 		fm.SetSize(a.width, a.mainContentHeightForType(ForwardTab))
@@ -38,6 +48,11 @@ func (a App) openForwardTab() (App, tea.Cmd) {
 }
 
 func (a App) openSnippetsTab() (App, tea.Cmd) {
+	for i := range a.tabs {
+		if isListView(a.tabs[i].Type) {
+			return a.activateListView(SnippetTab)
+		}
+	}
 	sm := snippetview.New(a.db, BuildSnippetKeys(a.kbConfig))
 	if a.width > 0 {
 		sm.SetSize(a.width, a.mainContentHeightForType(SnippetTab))

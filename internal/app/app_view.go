@@ -37,6 +37,9 @@ func (a App) View() tea.View {
 			tab := a.tabs[a.activeTab]
 			if tab.Model != nil {
 				contentView = tab.Model.View().Content
+				if isListView(tab.Type) {
+					contentView = renderListLayout(tab.Type, contentView, layoutW, a.mainContentHeightForType(tab.Type))
+				}
 			}
 		}
 

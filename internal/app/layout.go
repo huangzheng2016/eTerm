@@ -26,7 +26,11 @@ func layoutTabModels(a App) (App, tea.Cmd) {
 			continue
 		}
 		h := a.mainContentHeightForType(a.tabs[i].Type)
-		sizeMsg := tea.WindowSizeMsg{Width: a.width, Height: h}
+		width := a.width
+		if isListView(a.tabs[i].Type) {
+			width = listContentWidth(width)
+		}
+		sizeMsg := tea.WindowSizeMsg{Width: width, Height: h}
 		updated, cmd := a.tabs[i].Model.Update(sizeMsg)
 		a.tabs[i].Model = updated
 		if cmd != nil {
@@ -82,6 +86,12 @@ func appAdjustMouseForTabContent(a App, msg tea.Msg) tea.Msg {
 		}
 		mm := m.Mouse()
 		mm.Y -= top
+		if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isListView(a.tabs[a.activeTab].Type) && a.width >= 52 {
+			if mm.X <= listSidebarWidth {
+				return nil
+			}
+			mm.X -= listSidebarWidth + 1
+		}
 		return tea.MouseClickMsg(mm)
 	case tea.MouseWheelMsg:
 		if m.Y < top || m.Y >= top+contentH {
@@ -89,6 +99,12 @@ func appAdjustMouseForTabContent(a App, msg tea.Msg) tea.Msg {
 		}
 		mm := m.Mouse()
 		mm.Y -= top
+		if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isListView(a.tabs[a.activeTab].Type) && a.width >= 52 {
+			if mm.X <= listSidebarWidth {
+				return nil
+			}
+			mm.X -= listSidebarWidth + 1
+		}
 		return tea.MouseWheelMsg(mm)
 	case tea.MouseMotionMsg:
 		if m.Y < top || m.Y >= top+contentH {

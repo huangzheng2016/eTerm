@@ -299,6 +299,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
+		if a.allowsListNavigation() {
+			switch msg.String() {
+			case "tab":
+				return a.switchListView(1)
+			case "shift+tab":
+				return a.switchListView(-1)
+			}
+		}
+
 		switch {
 		// ? opens full-help overlay (non-SSH); SSH keeps ? for the remote shell.
 		case key.Matches(msg, a.keyMap.Help):
@@ -537,6 +546,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if refreshCmd != nil {
 					return a, refreshCmd
 				}
+			}
+			if a.width >= 52 && a.activeTab >= 0 && a.activeTab < len(a.tabs) && isListView(a.tabs[a.activeTab].Type) && msg.X < listSidebarWidth+1 {
+				row := msg.Y - top - 3
+				if row >= 0 && row < len(listViewTypes) {
+					return a.openListView(listViewTypes[row])
+				}
+				return a, nil
 			}
 		}
 
@@ -849,7 +865,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			db.SetSetting(a.db, "no_password", "false")
 		}
 		homeModel := home.New(a.db, a.masterKey, BuildHomeKeyConfig(a.kbConfig))
-		homeModel.SetSize(a.width, a.mainContentHeightForType(HomeTab))
+		homeModel.SetSize(listContentWidth(a.width), a.mainContentHeightForType(HomeTab))
 		a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: homeModel}}
 		a.activeTab = 0
 		a.syncTabBar()

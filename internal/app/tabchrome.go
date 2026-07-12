@@ -22,27 +22,29 @@ func (a App) tabStripItems() []components.TabItem {
 	items := make([]components.TabItem, len(a.tabs))
 	for i, tab := range a.tabs {
 		title := tab.Title
-		switch tab.Type {
-		case SSHTab:
-			if strings.HasPrefix(tab.Title, "[R]") || tabDetaches(tab) {
-				title = tab.Title
-			} else {
-				title = fmt.Sprintf("[S] %s", tab.Title)
-			}
-		case LocalTab:
-			if strings.HasPrefix(tab.Title, "[R]") || tab.TmuxSession != "" {
-				title = tab.Title
-			} else {
+		if !isListView(tab.Type) {
+			switch tab.Type {
+			case SSHTab:
+				if strings.HasPrefix(tab.Title, "[R]") || tabDetaches(tab) {
+					title = tab.Title
+				} else {
+					title = fmt.Sprintf("[S] %s", tab.Title)
+				}
+			case LocalTab:
+				if strings.HasPrefix(tab.Title, "[R]") || tab.TmuxSession != "" {
+					title = tab.Title
+				} else {
+					title = fmt.Sprintf("[L] %s", tab.Title)
+				}
+			case SFTPTab:
+				title = fmt.Sprintf("[F] %s", tab.Title)
+			case ForwardTab:
+				title = fmt.Sprintf("[P] %s", tab.Title)
+			case SnippetTab:
+				title = fmt.Sprintf("[B] %s", tab.Title)
+			case SessionHistoryTab:
 				title = fmt.Sprintf("[L] %s", tab.Title)
 			}
-		case SFTPTab:
-			title = fmt.Sprintf("[F] %s", tab.Title)
-		case ForwardTab:
-			title = fmt.Sprintf("[P] %s", tab.Title)
-		case SnippetTab:
-			title = fmt.Sprintf("[B] %s", tab.Title)
-		case SessionHistoryTab:
-			title = fmt.Sprintf("[L] %s", tab.Title)
 		}
 		if i < 9 {
 			title = fmt.Sprintf("%d:%s", i+1, title)

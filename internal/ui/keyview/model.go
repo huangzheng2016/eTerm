@@ -41,27 +41,29 @@ func (i keyItem) Description() string {
 }
 
 type Model struct {
-	db          *gorm.DB
-	masterKey   *security.MasterKeyManager
-	width       int
-	height      int
-	loaded      bool
-	mode        inputMode
-	nameInput   textinput.Model
-	certPathInput textinput.Model
-	keyPaste    textarea.Model
-	typeOptions []string
-	typeIdx     int
-	step        int
-	sshKeys        []db.SSHKey
-	gridCursor     int
-	gridLayout     components.GridLayout
-	vk             viewkeys.KeyViewKeys
-	pendingDeleteID uint
+	db                *gorm.DB
+	masterKey         *security.MasterKeyManager
+	width             int
+	height            int
+	loaded            bool
+	mode              inputMode
+	nameInput         textinput.Model
+	certPathInput     textinput.Model
+	keyPaste          textarea.Model
+	typeOptions       []string
+	typeIdx           int
+	step              int
+	sshKeys           []db.SSHKey
+	gridCursor        int
+	gridLayout        components.GridLayout
+	vk                viewkeys.KeyViewKeys
+	pendingDeleteID   uint
 	pendingDeleteName string
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.KeyViewKeys) { m.vk = vk }
+
+func (m Model) AllowsListNavigation() bool { return m.mode == modeNone }
 
 func New(database *gorm.DB, masterKey *security.MasterKeyManager, vk viewkeys.KeyViewKeys) Model {
 	ni := textinput.New()
@@ -75,16 +77,16 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, vk viewkeys.Ke
 	cp.Placeholder = "Optional SSH certificate path (/path/to/key-cert.pub)"
 
 	return Model{
-		db:          database,
-		masterKey:   masterKey,
-		nameInput:   ni,
+		db:            database,
+		masterKey:     masterKey,
+		nameInput:     ni,
 		certPathInput: cp,
-		keyPaste:    kp,
-		typeOptions: []string{"ed25519", "rsa"},
-		typeIdx:     0,
-		step:        0,
-		mode:        modeNone,
-		vk:          vk,
+		keyPaste:      kp,
+		typeOptions:   []string{"ed25519", "rsa"},
+		typeIdx:       0,
+		step:          0,
+		mode:          modeNone,
+		vk:            vk,
 	}
 }
 
