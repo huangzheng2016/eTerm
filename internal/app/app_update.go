@@ -548,9 +548,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if a.width >= 52 && a.activeTab >= 0 && a.activeTab < len(a.tabs) && isListView(a.tabs[a.activeTab].Type) && msg.X < listSidebarWidth+1 {
-				row := msg.Y - top - 3
-				if row >= 0 && row < len(listViewTypes) {
-					return a.openListView(listViewTypes[row])
+				localY := msg.Y - top - 3
+				if localY >= 0 {
+					row := localY / 3
+					if row >= 0 && row < len(listViewTypes) {
+						return a.openListView(listViewTypes[row])
+					}
 				}
 				return a, nil
 			}

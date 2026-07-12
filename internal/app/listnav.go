@@ -111,18 +111,23 @@ func renderListLayout(tabType TabType, content string, width, height int) string
 		{ForwardTab, "Forwards"},
 		{SnippetTab, "Snippets"},
 	}
-	rows := []string{ui.DimStyle.Render("LISTS"), ""}
+	rows := []string{ui.DimStyle.Render("MENU"), ""}
 	for _, item := range labels {
-		prefix := "  "
-		style := ui.DimStyle
+		style := lipgloss.NewStyle().
+			Width(listSidebarWidth - 4).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(lipgloss.Color("#45475A")).
+			Foreground(lipgloss.Color("#888888"))
 		if item.tab == tabType {
-			prefix = "> "
-			style = ui.SelectedStyle
+			style = style.
+				BorderForeground(lipgloss.Color("#7D56F4")).
+				Foreground(lipgloss.Color("#FF79C6")).
+				Bold(true)
 		}
-		rows = append(rows, style.Render(prefix+item.label))
+		rows = append(rows, style.Render(item.label))
 	}
 	rows = append(rows, "", ui.DimStyle.Render("Tab next"), ui.DimStyle.Render("S-Tab prev"))
-	sidebar := lipgloss.NewStyle().Width(listSidebarWidth).Height(height).Padding(1, 1).Render(strings.Join(rows, "\n"))
+	sidebar := lipgloss.NewStyle().Width(listSidebarWidth-2).Height(height).Padding(1, 1).Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
 	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("#45475A")).Height(height).Render(strings.Repeat("│\n", max(0, height-1)) + "│")
 	body := lipgloss.NewStyle().Width(listContentWidth(width)).Height(height).Render(content)
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, divider, body)
