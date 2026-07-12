@@ -77,7 +77,11 @@ func (a App) buildMainTabChrome(layoutW int) string {
 		rule := dividerStyle.Render(strings.Repeat("─", rest))
 		secondLine = lipgloss.JoinHorizontal(lipgloss.Top, paddedToast, rule)
 	} else {
-		secondLine = dividerStyle.Width(layoutW).Render(strings.Repeat("─", layoutW))
+		line := []rune(strings.Repeat("─", layoutW))
+		if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isListView(a.tabs[a.activeTab].Type) && layoutW >= 52 && listSidebarWidth < len(line) {
+			line[listSidebarWidth] = '┬'
+		}
+		secondLine = dividerStyle.Width(layoutW).Render(string(line))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, secondLine)
 }
