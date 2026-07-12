@@ -40,6 +40,7 @@ const (
 	SettingsTab       TabType = "settings"
 	SyncTab           TabType = "sync"
 	SessionHistoryTab TabType = "session-hist"
+	SessionListTab    TabType = "sessions"
 )
 
 type Tab struct {

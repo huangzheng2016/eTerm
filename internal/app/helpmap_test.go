@@ -18,6 +18,7 @@ func TestListStatusBarsMatchDefaultActions(t *testing.T) {
 		{name: "keys", tab: KeyTab, want: []string{"enter details", "n generate", "i import", "e edit", "d delete", "c copy pubkey"}, forbidden: []string{"export"}},
 		{name: "forwards", tab: ForwardTab, want: []string{"enter start", "x stop", "n new", "e edit", "d delete"}},
 		{name: "snippets", tab: SnippetTab, want: []string{"n new", "e edit", "d delete"}, forbidden: []string{"run"}},
+		{name: "sessions", tab: SessionListTab, want: []string{"enter read", "/ search", "c copy transcript"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

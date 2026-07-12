@@ -202,6 +202,11 @@ func remoteTmuxTabTitle(peerName, sessionID string) string {
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
 	sv := sshview.New(msg.is, msg.title, 0, BuildSSHKeys(a.kbConfig))
+	source := "remote"
+	if msg.reconnect != nil && msg.reconnect.Tmux {
+		source = "remote-tmux"
+	}
+	sv.SetHistoryID(createLocalSessionHistory(a.db, msg.title, source))
 	if msg.reconnect != nil {
 		sv.SetRemoteReconnect(msg.reconnect)
 	}
@@ -211,6 +216,7 @@ func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cm
 	tab := Tab{Type: msg.tabType, Title: msg.title, Model: sv}
 	if msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
 		if old, ok := a.tabs[msg.replaceTabAt].Model.(*sshview.Model); ok {
+			finalizeSSHSession(a.db, old)
 			_ = old.Close()
 		}
 		a.tabs[msg.replaceTabAt] = tab

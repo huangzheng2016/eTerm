@@ -33,7 +33,7 @@ func TestListSidebarHasExactWidthAndSingleLineSeparators(t *testing.T) {
 			t.Fatalf("sidebar line %d width = %d, want %d: %q", i, got, listSidebarWidth, line)
 		}
 	}
-	for _, row := range []int{3, 6, 9, 12, 15} {
+	for _, row := range []int{3, 6, 9, 12, 15, 18} {
 		if lines[row] != strings.Repeat("─", listSidebarWidth) {
 			t.Fatalf("separator row %d = %q", row, lines[row])
 		}
@@ -43,7 +43,7 @@ func TestListSidebarHasExactWidthAndSingleLineSeparators(t *testing.T) {
 func TestRenderListLayoutKeepsCardsAndHighlightsSection(t *testing.T) {
 	card := "[ host card ]"
 	view := renderListLayout(ForwardTab, card, 100, 20)
-	for _, want := range []string{"Hosts", "Keys", "Forwards", "Snippets", card} {
+	for _, want := range []string{"Hosts", "Keys", "Forwards", "Snippets", "Sessions", card} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("list layout missing %q", want)
 		}

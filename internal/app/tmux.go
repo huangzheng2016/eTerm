@@ -45,6 +45,7 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 
 func (a App) applyTmuxTerminalOpened(msg tmuxTerminalOpenedMsg) (App, tea.Cmd) {
 	sv := sshview.New(msg.is, msg.title, 0, BuildSSHKeys(a.kbConfig))
+	sv.SetHistoryID(createLocalSessionHistory(a.db, msg.title, "tmux"))
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(LocalTab))
 	}

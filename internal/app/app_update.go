@@ -1117,7 +1117,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			switch tab.Type {
-			case HomeTab, KeyTab, ForwardTab, SnippetTab:
+			case HomeTab, KeyTab, ForwardTab, SnippetTab, SessionListTab:
 				updated, cmd := tab.Model.Update(msg)
 				a.tabs[i].Model = updated
 				if cmd != nil {

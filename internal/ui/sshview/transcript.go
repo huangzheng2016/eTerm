@@ -5,7 +5,7 @@ import (
 	"unicode/utf8"
 )
 
-const MaxTranscriptBytes = 512 * 1024
+const MaxTranscriptBytes = 4 * 1024 * 1024
 
 // PlainTranscript returns scrollback plus visible screen as plain text (no ANSI), truncated to maxBytes.
 func (m *Model) PlainTranscript(maxBytes int) string {

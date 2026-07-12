@@ -10,6 +10,14 @@ import (
 
 const saveSessionTranscriptKey = "save_session_transcript"
 
+func createLocalSessionHistory(gdb *gorm.DB, label, source string) uint {
+	history := db.ConnectionHistory{Label: label, Source: source, ConnectedAt: time.Now(), Status: "success"}
+	if err := gdb.Create(&history).Error; err != nil {
+		return 0
+	}
+	return history.ID
+}
+
 func saveSessionTranscriptEnabled(gdb *gorm.DB) bool {
 	s, err := db.GetSetting(gdb, saveSessionTranscriptKey)
 	if err != nil {

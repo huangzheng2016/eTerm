@@ -9,12 +9,13 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
 	"github.com/huangzheng2016/eTerm/internal/ui/home"
 	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sessionlistview"
 	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
 )
 
 const listSidebarWidth = 14
 
-var listViewTypes = []TabType{HomeTab, KeyTab, ForwardTab, SnippetTab}
+var listViewTypes = []TabType{HomeTab, KeyTab, ForwardTab, SnippetTab, SessionListTab}
 
 func isListView(tabType TabType) bool {
 	for _, item := range listViewTypes {
@@ -81,6 +82,10 @@ func (a App) openListView(tabType TabType) (App, tea.Cmd) {
 		m := snippetview.New(a.db, BuildSnippetKeys(a.kbConfig))
 		m.SetSize(width, height)
 		model = m
+	case SessionListTab:
+		m := sessionlistview.New(a.db)
+		m.SetSize(width, height)
+		model = m
 	}
 	a.tabs[a.activeTab] = Tab{Type: tabType, Title: "List", Model: model}
 	a.syncTabBar()
@@ -107,7 +112,7 @@ func renderListLayout(tabType TabType, content string, width, height int) string
 	for i := range dividerRows {
 		dividerRows[i] = "│"
 	}
-	for _, row := range []int{3, 6, 9, 12, 15} {
+	for _, row := range []int{3, 6, 9, 12, 15, 18} {
 		if row < len(dividerRows) {
 			dividerRows[row] = "┤"
 		}
@@ -126,6 +131,7 @@ func renderListSidebar(tabType TabType, height int) string {
 		{KeyTab, "Keys"},
 		{ForwardTab, "Forwards"},
 		{SnippetTab, "Snippets"},
+		{SessionListTab, "Sessions"},
 	}
 	line := func(value string) string {
 		return value + strings.Repeat(" ", max(0, listSidebarWidth-lipgloss.Width(value)))

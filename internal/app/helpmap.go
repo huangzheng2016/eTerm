@@ -50,6 +50,8 @@ func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, ssh
 		return forwardStatusBarHint(cfg)
 	case SnippetTab:
 		return snippetStatusBarHint(cfg)
+	case SessionListTab:
+		return "enter read · / search · c copy transcript · ? all keys"
 	}
 	return strings.Join(statusBarShortcutParts(km, cfg, false, false, false), " · ") + " · " + helpLabel(cfg.Help) + " all keys"
 }
@@ -260,6 +262,8 @@ func (a App) contextualHelpKeyMap() bubbleshelp.KeyMap {
 	case SyncTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case SessionHistoryTab:
+		return editorAppHelpMap{a.keyMap, a.kbConfig}
+	case SessionListTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case BatchResultTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
