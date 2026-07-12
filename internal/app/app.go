@@ -106,7 +106,6 @@ type App struct {
 	batchTag     *batchTagModel
 	batchActions *batchActionsModel
 
-	importStratMenu  *importStratMenuModel
 	importSourceMenu *importSourceMenuModel
 	importHostList   *importHostListModel
 	importKeyList    *importKeyListModel

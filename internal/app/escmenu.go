@@ -15,6 +15,7 @@ const (
 	escMenuQuit escMenuItem = iota
 	escMenuSettings
 	escMenuImport
+	escMenuExport
 	escMenuSync
 )
 
@@ -44,6 +45,8 @@ func (m *escMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
 			return true, func() tea.Msg { return types.OpenSettingsMsg{} }
 		case escMenuImport:
 			return true, func() tea.Msg { return types.OpenImportSourceMenuMsg{} }
+		case escMenuExport:
+			return true, func() tea.Msg { return openExportConfigMsg{} }
 		case escMenuSync:
 			return true, func() tea.Msg { return types.OpenSyncMsg{} }
 		}
@@ -57,6 +60,8 @@ func (m *escMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
 		return true, func() tea.Msg { return types.OpenImportSourceMenuMsg{} }
 	case "y":
 		return true, func() tea.Msg { return types.OpenSyncMsg{} }
+	case "e":
+		return true, func() tea.Msg { return openExportConfigMsg{} }
 	}
 	return false, nil
 }
@@ -69,6 +74,7 @@ func (m *escMenuModel) View() string {
 		{"  Quit          ", "q"},
 		{"  Settings      ", "s"},
 		{"  Import        ", "i"},
+		{"  Export        ", "e"},
 		{"  Sync          ", "y"},
 	}
 

@@ -45,8 +45,6 @@ type KeyBindingConfig struct {
 	CloneHost      []string `json:"clone_host"`
 	ToggleView     []string `json:"toggle_view"`
 	QuickConnect   []string `json:"quick_connect"`
-	ImportSSH      []string `json:"import_ssh"`
-	ExportConfig   []string `json:"export_config"`
 	ShowHidden     []string `json:"show_hidden"`
 	HideHost       []string `json:"hide_host"`
 	SnippetPicker  []string `json:"snippet_picker"`
@@ -121,8 +119,6 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		CloneHost:      []string{"C"},
 		ToggleView:     []string{"t"},
 		QuickConnect:   []string{"q"},
-		ImportSSH:      []string{"I"},
-		ExportConfig:   []string{"E"},
 		ShowHidden:     []string{"h"},
 		HideHost:       []string{"H"},
 		SnippetPicker:  []string{"ctrl+shift+s"},
@@ -350,8 +346,6 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 			cfg.DeleteHost, cfg.CopySSH, cfg.CloneHost, cfg.Search, cfg.ToggleView, cfg.TmuxMenu),
 		Help:           cfg.Help,
 		QuickConnect:   cfg.QuickConnect,
-		ImportSSH:      cfg.ImportSSH,
-		ExportConfig:   cfg.ExportConfig,
 		ShowHidden:     cfg.ShowHidden,
 		HideHost:       cfg.HideHost,
 		SessionHistory: cfg.SessionHistory,

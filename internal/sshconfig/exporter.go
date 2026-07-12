@@ -34,9 +34,21 @@ func ExportConfig(database *gorm.DB) (string, error) {
 	return ExportConfigToPaths(database, MainConfigPath(), ManagedIncludePath())
 }
 
+func ExportConfigByHostIDs(database *gorm.DB, hostIDs []uint) (string, error) {
+	return exportConfigToPaths(database, hostIDs, MainConfigPath(), ManagedIncludePath())
+}
+
 func ExportConfigToPaths(database *gorm.DB, mainPath, includePath string) (string, error) {
+	return exportConfigToPaths(database, nil, mainPath, includePath)
+}
+
+func exportConfigToPaths(database *gorm.DB, hostIDs []uint, mainPath, includePath string) (string, error) {
 	var hosts []db.Host
-	if err := database.Preload("Key").Preload("JumpHost").Find(&hosts).Error; err != nil {
+	query := database.Preload("Key").Preload("JumpHost")
+	if hostIDs != nil {
+		query = query.Where("id IN ?", hostIDs)
+	}
+	if err := query.Find(&hosts).Error; err != nil {
 		return "", err
 	}
 	sort.Slice(hosts, func(i, j int) bool {

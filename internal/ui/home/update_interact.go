@@ -302,10 +302,6 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		logKeyDispatch("QuickConnect")
 		return m, func() tea.Msg { return types.QuickConnectRequestMsg{} }, true
 
-	case viewkeys.MatchKey(msg, m.importSSHKeys):
-		logKeyDispatch("ImportSSHConfig")
-		return m, func() tea.Msg { return types.ImportSSHConfigPreviewMsg{} }, true
-
 	case viewkeys.MatchKey(msg, m.sessionHistoryKeys):
 		logKeyDispatch("SessionHistory")
 		if h := m.SelectedHost(); h != nil {
@@ -339,10 +335,6 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		return m, func() tea.Msg { return types.BatchActionsRequestMsg{HostIDs: ids} }, true
-
-	case viewkeys.MatchKey(msg, m.exportConfigKeys):
-		logKeyDispatch("ExportConfig")
-		return m, func() tea.Msg { return types.ExportConfigMsg{} }, true
 
 	case msg.String() == "esc" || msg.String() == "escape":
 		logKeyDispatch("EscMenu")

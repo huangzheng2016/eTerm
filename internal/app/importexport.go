@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/sshconfig"
@@ -584,10 +585,59 @@ func importSSHConfig(database *gorm.DB, strategy string) types.ImportSSHConfigRe
 	}
 }
 
-func exportConfig(database *gorm.DB) types.ExportConfigResultMsg {
-	path, err := sshconfig.ExportConfig(database)
-	if err != nil {
-		return types.ExportConfigResultMsg{Err: err}
+func runSSHListImport(database *gorm.DB, hosts []importHostEntry, keys []importKeyEntry) tea.Cmd {
+	return func() tea.Msg {
+		imported, skipped := 0, 0
+		keyByPath := make(map[string]uint)
+		for _, item := range keys {
+			if item.blocked && item.existingID != 0 {
+				keyByPath[item.rec.Aliases[0]] = item.existingID
+				continue
+			}
+			if (!item.selected && !item.locked) || item.sshInfo == nil {
+				continue
+			}
+			info := item.sshInfo
+			key := db.SSHKey{Name: item.chosenAlias, Type: info.keyType, PublicKeyData: info.publicKey, PrivatePath: info.path, PublicPath: info.publicPath, Fingerprint: info.fingerprint, StorageMode: "file", CertificatePath: info.certPath}
+			database.Unscoped().Where("name = ? AND deleted_at IS NOT NULL", key.Name).Delete(&db.SSHKey{})
+			if err := database.Create(&key).Error; err != nil {
+				skipped++
+				continue
+			}
+			keyByPath[info.path] = key.ID
+			imported++
+		}
+
+		created := make(map[string]uint)
+		for _, item := range hosts {
+			if item.blocked || !item.selected || item.sshParsed == nil {
+				continue
+			}
+			ph := *item.sshParsed
+			ph.Alias = item.chosenAlias
+			host := hostFromParsed(database, ph)
+			if id, ok := keyByPath[ph.IdentFile]; ok {
+				host.KeyID = &id
+				host.AuthMethod = "key"
+			}
+			database.Unscoped().Where("alias = ? AND deleted_at IS NOT NULL", host.Alias).Delete(&db.Host{})
+			if err := database.Create(&host).Error; err != nil {
+				skipped++
+				continue
+			}
+			created[item.sshParsed.Alias] = host.ID
+			imported++
+		}
+		for _, item := range hosts {
+			if item.sshParsed == nil || item.sshParsed.ProxyJump == "" {
+				continue
+			}
+			hostID := created[item.sshParsed.Alias]
+			jumpID := created[item.sshParsed.ProxyJump]
+			if hostID != 0 && jumpID != 0 && hostID != jumpID {
+				_ = database.Model(&db.Host{}).Where("id = ?", hostID).Update("jump_host_id", jumpID).Error
+			}
+		}
+		return termiusImportResultMsg{imported: imported, skipped: skipped}
 	}
-	return types.ExportConfigResultMsg{Path: path}
 }

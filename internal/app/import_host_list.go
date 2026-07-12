@@ -25,6 +25,8 @@ const importHostListRowWidth = 62
 type importHostListModel struct {
 	items           []importHostEntry
 	allKeys         []parser.KeyRecord
+	sshSource       bool
+	exportMode      bool
 	cursor          int
 	page            int
 	pageSize        int
@@ -113,7 +115,9 @@ func (m *importHostListModel) Update(msg tea.KeyPressMsg) (closed bool, proceed 
 				break
 			}
 			item := &m.items[m.cursor]
-			if len(item.rec.Aliases) > 1 {
+			if m.exportMode {
+				break
+			} else if len(item.rec.Aliases) > 1 {
 				m.state = hostListStateAlias
 				m.aliasCursor = 0
 			} else if item.nameConflict {
@@ -192,8 +196,14 @@ func (m *importHostListModel) View() string {
 }
 
 func (m *importHostListModel) viewList() string {
-	title := ui.TitleStyle.Render("导入主机 (步骤 1/2)")
-	hint := ui.DimStyle.Render("space 选择 · enter 别名 · y 下一步 · ←→ 翻页 · esc 返回")
+	action := "导入"
+	enterHint := " · enter 改名"
+	if m.exportMode {
+		action = "导出"
+		enterHint = ""
+	}
+	title := ui.TitleStyle.Render(action + "主机 (步骤 1/2)")
+	hint := ui.DimStyle.Render("space 选择" + enterHint + " · y 下一步 · ←→ 翻页 · esc 返回")
 
 	totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
 	if totalPages < 1 {
@@ -233,6 +243,8 @@ func (m *importHostListModel) viewList() string {
 		}
 		if item.blocked {
 			line += "  [已存在]"
+		} else if item.existing {
+			line += "  [已导出]"
 		}
 
 		var rowStyle lipgloss.Style

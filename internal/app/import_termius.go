@@ -4,12 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
+	"github.com/huangzheng2016/eTerm/internal/sshconfig"
 	"github.com/huangzheng2016/termius_exporter/pkg/exporter"
 	"github.com/huangzheng2016/termius_exporter/pkg/parser"
 	"golang.org/x/crypto/ssh"
@@ -18,11 +20,14 @@ import (
 
 // Internal message types for the Termius import flow.
 type termiusLoadMsg struct{}
+type sshConfigLoadMsg struct{}
 
 type termiusExportResultMsg struct {
-	hosts []parser.HostRecord
-	keys  []parser.KeyRecord
-	err   error
+	hosts     []parser.HostRecord
+	keys      []parser.KeyRecord
+	sshParsed []sshconfig.ParsedHost
+	sshSource bool
+	err       error
 }
 
 type termiusHostsReadyMsg struct {
@@ -44,15 +49,19 @@ type termiusImportResultMsg struct {
 // importHostEntry is one row in the host list overlay.
 type importHostEntry struct {
 	rec          parser.HostRecord
+	sshParsed    *sshconfig.ParsedHost
 	selected     bool
 	blocked      bool // exact duplicate - not selectable
 	nameConflict bool // same alias, different content - must rename before import
 	chosenAlias  string
+	exportID     uint
+	existing     bool
 }
 
 // importKeyEntry is one row in the key list overlay.
 type importKeyEntry struct {
 	rec          parser.KeyRecord
+	sshInfo      *sshKeyFileInfo
 	selected     bool
 	blocked      bool // exact duplicate - not selectable
 	locked       bool // required by a selected host - cannot deselect
@@ -60,6 +69,7 @@ type importKeyEntry struct {
 	chosenAlias  string
 	fingerprint  string
 	existingID   uint
+	exportID     uint
 }
 
 const unknownImportAlias = "<UNKNOWN>"
@@ -68,6 +78,36 @@ func loadTermiusData() tea.Cmd {
 	return func() tea.Msg {
 		hosts, keys, err := exporter.Export("")
 		return termiusExportResultMsg{hosts: hosts, keys: keys, err: err}
+	}
+}
+
+func loadSSHConfigData() tea.Cmd {
+	return func() tea.Msg {
+		parsed, err := parseSSHConfigForImport()
+		if err != nil {
+			return termiusExportResultMsg{err: err}
+		}
+		hosts := make([]parser.HostRecord, 0, len(parsed))
+		for i := range parsed {
+			ph := &parsed[i]
+			hosts = append(hosts, parser.HostRecord{Aliases: []string{ph.Alias}, Host: ph.Hostname, Port: ph.Port, Username: ph.Username, KeyName: ph.IdentFile})
+		}
+		keys := make([]parser.KeyRecord, 0)
+		for _, path := range discoverSSHKeyImportPaths(parsed) {
+			info, readErr := readSSHKeyFileInfo(path.path)
+			if readErr != nil {
+				continue
+			}
+			data, readErr := os.ReadFile(info.path)
+			if readErr != nil {
+				continue
+			}
+			keys = append(keys, parser.KeyRecord{Aliases: []string{info.path}, PrivateKey: string(data)})
+			security.ClearBytes(data)
+		}
+		msg := termiusExportResultMsg{hosts: hosts, keys: keys, sshSource: true}
+		msg.sshParsed = parsed
+		return msg
 	}
 }
 
@@ -102,6 +142,25 @@ func buildHostItems(database *gorm.DB, hosts []parser.HostRecord) []importHostEn
 	return items
 }
 
+func buildSSHHostItems(database *gorm.DB, parsed []sshconfig.ParsedHost, hosts []parser.HostRecord) []importHostEntry {
+	items := buildHostItems(database, hosts)
+	for i := range items {
+		for j := range parsed {
+			if parsed[j].Alias == items[i].chosenAlias {
+				items[i].sshParsed = &parsed[j]
+				var existing db.Host
+				if err := database.Where("alias = ?", parsed[j].Alias).First(&existing).Error; err == nil {
+					incoming := hostFromParsed(database, parsed[j])
+					items[i].blocked = importComparableHost(existing) == importComparableHost(incoming)
+					items[i].nameConflict = !items[i].blocked
+				}
+				break
+			}
+		}
+	}
+	return items
+}
+
 // buildKeyItems checks each KeyRecord against the DB and returns importKeyEntry rows.
 func buildKeyItems(database *gorm.DB, keys []parser.KeyRecord) []importKeyEntry {
 	fps := make([]string, len(keys))
@@ -109,6 +168,24 @@ func buildKeyItems(database *gorm.DB, keys []parser.KeyRecord) []importKeyEntry 
 		fps[i] = computeKeyFingerprint(k.PrivateKey)
 	}
 	return buildKeyItemsWithFP(database, keys, fps)
+}
+
+func buildSSHKeyItems(database *gorm.DB, keys []parser.KeyRecord) []importKeyEntry {
+	items := buildKeyItems(database, keys)
+	for i := range items {
+		info, err := readSSHKeyFileInfo(keys[i].Aliases[0])
+		if err == nil {
+			items[i].sshInfo = &info
+			items[i].chosenAlias = info.name
+			var existing db.SSHKey
+			if findErr := database.Where("name = ?", info.name).First(&existing).Error; findErr == nil && existing.Fingerprint != info.fingerprint {
+				items[i].nameConflict = true
+				items[i].blocked = false
+				items[i].existingID = 0
+			}
+		}
+	}
+	return items
 }
 
 // buildKeyItemsWithFP is the testable version that accepts pre-computed fingerprints.

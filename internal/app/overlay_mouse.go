@@ -43,7 +43,6 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.snippetPicker = nil
 		a.batchActions = nil
 		a.batchTag = nil
-		a.importStratMenu = nil
 		a.importKeyList = nil
 		a.importHostList = nil
 		a.importSourceMenu = nil
@@ -95,21 +94,6 @@ func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 		closed, cmd := a.escMenu.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		if closed {
 			a.escMenu = nil
-		}
-		return a, cmd
-	}
-	return a, nil
-}
-
-// importStratMenuMouse handles a click inside the import strategy menu.
-// Layout: border(1) + padding(1) + title(1) + blank(1) + message(1) + blank(1) + items at ly=6,7.
-func (a App) importStratMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
-	itemY := ly - 6
-	if itemY >= 0 && itemY <= int(stratOverwrite) {
-		a.importStratMenu.cursor = importStratItem(itemY)
-		closed, cmd := a.importStratMenu.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-		if closed {
-			a.importStratMenu = nil
 		}
 		return a, cmd
 	}

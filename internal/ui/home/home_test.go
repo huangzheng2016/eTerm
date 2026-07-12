@@ -61,8 +61,6 @@ func loadedModel(t *testing.T) (Model, *db.Host) {
 		KmCfg:        keymatch.DefaultConfig(),
 		Keys:         defaultListKeyMap(),
 		QuickConnect: []string{"q"},
-		ImportSSH:    []string{"I"},
-		ExportConfig: []string{"E"},
 		ShowHidden:   []string{"H"},
 		HideHost:     []string{"h"},
 	})

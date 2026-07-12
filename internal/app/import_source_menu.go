@@ -11,7 +11,8 @@ import (
 type importSourceItem int
 
 const (
-	importSourceTermius importSourceItem = iota
+	importSourceSSHConfig importSourceItem = iota
+	importSourceTermius
 )
 
 type importSourceMenuModel struct {
@@ -36,7 +37,11 @@ func (m *importSourceMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd te
 		switch m.cursor {
 		case importSourceTermius:
 			return true, func() tea.Msg { return termiusLoadMsg{} }
+		case importSourceSSHConfig:
+			return true, func() tea.Msg { return sshConfigLoadMsg{} }
 		}
+	case "s":
+		return true, func() tea.Msg { return sshConfigLoadMsg{} }
 	case "t":
 		return true, func() tea.Msg { return termiusLoadMsg{} }
 	case "esc", "escape":
@@ -50,6 +55,7 @@ func (m *importSourceMenuModel) View() string {
 		label string
 		key   string
 	}{
+		{"  .ssh/config   ", "s"},
 		{"  Termius       ", "t"},
 	}
 	var rows string

@@ -97,8 +97,8 @@ func (h homeAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet"), dynamicBinding(h.cfg.ToggleView, "group/tag"), dynamicBinding(h.cfg.TmuxMenu, "tmux")},
 		{h.km.SSHConnect, h.km.SFTPOpen, h.km.NewHost},
 		{h.km.EditHost, h.km.DeleteHost, h.km.Search},
-		{dynamicBinding(h.cfg.CopySSH, "copy"), dynamicBinding(h.cfg.CloneHost, "clone"), dynamicBinding(h.cfg.QuickConnect, "quick"), dynamicBinding(h.cfg.ImportSSH, "import .ssh")},
-		{dynamicBinding(h.cfg.ExportConfig, "export"), dynamicBinding(h.cfg.HideHost, "hide/unhide"), dynamicBinding(h.cfg.ShowHidden, "show hidden")},
+		{dynamicBinding(h.cfg.CopySSH, "copy"), dynamicBinding(h.cfg.CloneHost, "clone"), dynamicBinding(h.cfg.QuickConnect, "quick")},
+		{dynamicBinding(h.cfg.HideHost, "hide/unhide"), dynamicBinding(h.cfg.ShowHidden, "show hidden")},
 		{dynamicBinding(h.cfg.SessionHistory, "session log"), dynamicBinding(h.cfg.ToggleSelect, "toggle select"), dynamicBinding(h.cfg.BatchTag, "batch tag")},
 		{dynamicBinding(h.cfg.BatchActions, "batch actions")},
 	}

@@ -137,8 +137,6 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Home", "Clone Host", "clone_host"},
 		{"Home", "Toggle View", "toggle_view"},
 		{"Home", "Quick Connect", "quick_connect"},
-		{"Home", "Import SSH", "import_ssh"},
-		{"Home", "Export Config", "export_config"},
 		{"Home", "Show Hidden", "show_hidden"},
 		{"Home", "Hide Host", "hide_host"},
 		{"Home", "Snippet Picker", "snippet_picker"},

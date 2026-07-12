@@ -122,9 +122,6 @@ func (a App) View() tea.View {
 		} else if a.importSourceMenu != nil {
 			overlay := a.importSourceMenu.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
-		} else if a.importStratMenu != nil {
-			overlay := a.importStratMenu.View()
-			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.upgradePrompt != nil {
 			overlay := upgradePromptView(a.upgradePrompt)
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)

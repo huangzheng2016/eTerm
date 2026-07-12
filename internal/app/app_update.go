@@ -221,6 +221,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.importKeyList != nil {
 			closed, confirmed, cmd := a.importKeyList.Update(msg)
 			if confirmed {
+				if a.importHostList.exportMode {
+					return a, runSelectedExport(a.db, a.importHostList.items)
+				}
+				if a.importHostList.sshSource {
+					return a, runSSHListImport(a.db, a.importHostList.items, a.importKeyList.items)
+				}
 				return a, runTermiusImport(a.db, a.masterKey, a.importHostList.items, a.importKeyList.items)
 			}
 			if closed {
@@ -233,8 +239,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			closed, proceed, cmd := a.importHostList.Update(msg)
 			if proceed {
 				keyItems := buildKeyItems(a.db, a.importHostList.allKeys)
-				keyItems = lockRequiredKeys(a.importHostList.items, keyItems)
+				if a.importHostList.exportMode {
+					keyItems = buildExportKeyItems(a.importHostList.items, a.importHostList.allKeys)
+				} else if a.importHostList.sshSource {
+					keyItems = buildSSHKeyItems(a.db, a.importHostList.allKeys)
+				}
+				if !a.importHostList.exportMode {
+					keyItems = lockRequiredKeys(a.importHostList.items, keyItems)
+				}
 				a.importKeyList = newImportKeyList(keyItems, a.importHostList.items)
+				a.importKeyList.exportMode = a.importHostList.exportMode
 				a.importKeyList.setPageSize(a.height)
 				return a, cmd
 			}
@@ -249,14 +263,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			closed, cmd := a.importSourceMenu.Update(msg)
 			if closed {
 				a.importSourceMenu = nil
-			}
-			return a, cmd
-		}
-
-		if a.importStratMenu != nil {
-			closed, cmd := a.importStratMenu.Update(msg)
-			if closed {
-				a.importStratMenu = nil
 			}
 			return a, cmd
 		}
@@ -489,11 +495,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.batchActions != nil {
 				return a.handleOverlayMouse(msg, a.batchActions.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
 					return a.batchActionsMouse(lx, ly)
-				})
-			}
-			if a.importStratMenu != nil {
-				return a.handleOverlayMouse(msg, a.importStratMenu.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
-					return a.importStratMenuMouse(lx, ly)
 				})
 			}
 			if a.snippetPicker != nil {
@@ -947,20 +948,36 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.importSourceMenu = newImportSourceMenu()
 		return a, nil
 
+	case openExportConfigMsg:
+		model, err := newExportLists(a.db)
+		if err != nil {
+			return a, func() tea.Msg { return types.ErrorMsg{Err: err} }
+		}
+		model.setPageSize(a.height)
+		a.importHostList = model
+		return a, nil
+
 	case termiusLoadMsg:
 		return a, loadTermiusData()
+
+	case sshConfigLoadMsg:
+		return a, loadSSHConfigData()
 
 	case termiusExportResultMsg:
 		if msg.err != nil {
 			var tc tea.Cmd
-			a.toast, tc = a.toast.Show(fmt.Sprintf("Termius export error: %v", msg.err), components.ToastError, 5*time.Second)
+			a.toast, tc = a.toast.Show(fmt.Sprintf("Import source error: %v", msg.err), components.ToastError, 5*time.Second)
 			a.importSourceMenu = nil
 			return a, tc
 		}
 		hostItems := buildHostItems(a.db, msg.hosts)
+		if msg.sshSource {
+			hostItems = buildSSHHostItems(a.db, msg.sshParsed, msg.hosts)
+		}
 		hl := newImportHostList(hostItems)
 		hl.setPageSize(a.height)
 		hl.allKeys = msg.keys
+		hl.sshSource = msg.sshSource
 		a.importHostList = hl
 		a.importSourceMenu = nil
 		return a, nil
@@ -1292,67 +1309,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.CLIConnectMsg:
 		return a.handleCLIConnect(msg)
 
-	case types.ImportSSHConfigPreviewMsg:
-		return a, func() tea.Msg {
-			parsed, err := parseSSHConfigForImport()
-			if err != nil {
-				return types.ErrorMsg{Err: err}
-			}
-			preview := buildSSHImportPreview(a.db, parsed)
-			return preview
-		}
-
-	case types.ImportSSHConflictCountMsg:
-		if msg.Count == 0 {
-			return a, func() tea.Msg {
-				return importSSHConfig(a.db, "skip")
-			}
-		}
-		a.importStratMenu = newImportStratMenu(types.ImportSSHConfigPreviewResultMsg{Changed: msg.Count})
-		return a, nil
-
-	case types.ImportSSHConfigPreviewResultMsg:
-		if msg.Err != nil {
-			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
-		}
-		if msg.Added == 0 && msg.Changed == 0 && msg.Skipped == 0 && msg.KeysAdded == 0 && msg.KeysSkipped == 0 && msg.KeysFailed == 0 {
-			var tc tea.Cmd
-			a.toast, tc = a.toast.Show("No SSH config hosts or keys found", components.ToastWarning, 3*time.Second)
-			return a, tea.Batch(tc, reflowWindow(a))
-		}
-		if msg.Changed == 0 && msg.Skipped == 0 {
-			return a, func() tea.Msg { return importSSHConfig(a.db, "skip") }
-		}
-		a.importStratMenu = newImportStratMenu(msg)
-		return a, nil
-
-	case types.ImportSSHConfigRunMsg:
-		a.importStratMenu = nil
-		return a, func() tea.Msg {
-			return importSSHConfig(a.db, msg.Strategy)
-		}
-
-	case types.ImportSSHConfigResultMsg:
-		if msg.Err != nil {
-			var tc tea.Cmd
-			a.toast, tc = a.toast.Show(fmt.Sprintf("Import failed: %v", msg.Err), components.ToastError, 5*time.Second)
-			return a, tea.Batch(tc, reflowWindow(a))
-		}
-		var tc tea.Cmd
-		tmsg := fmt.Sprintf("Imported %d hosts, %d keys (%d hosts skipped, %d keys skipped", msg.Imported, msg.KeysImported, msg.Skipped, msg.KeysSkipped)
-		if msg.Overwritten > 0 {
-			tmsg += fmt.Sprintf(", %d overwritten", msg.Overwritten)
-		}
-		if msg.KeysFailed > 0 {
-			tmsg += fmt.Sprintf(", %d keys failed", msg.KeysFailed)
-		}
-		tmsg += ")"
-		if msg.UnresolvedProxyJumps > 0 {
-			tmsg += fmt.Sprintf(" (%d unresolved ProxyJump)", msg.UnresolvedProxyJumps)
-		}
-		a.toast, tc = a.toast.Show(tmsg, components.ToastSuccess, 3*time.Second)
-		return a, tea.Batch(tc, reflowWindow(a), func() tea.Msg { return types.RefreshListMsg{} })
-
 	case types.OpenSessionHistoryMsg:
 		return a.openSessionHistoryTab(msg.HostID)
 
@@ -1395,13 +1351,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.BatchCommandSubmitMsg:
 		return a.openBatchResultTab(msg.HostIDs, msg.Command)
 
-	case types.ExportConfigMsg:
-		database := a.db
-		return a, func() tea.Msg {
-			return exportConfig(database)
-		}
-
 	case types.ExportConfigResultMsg:
+		a.importKeyList = nil
+		a.importHostList = nil
 		if msg.Err != nil {
 			var tc tea.Cmd
 			a.toast, tc = a.toast.Show(fmt.Sprintf("Export failed: %v", msg.Err), components.ToastError, 5*time.Second)

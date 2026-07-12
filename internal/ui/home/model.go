@@ -125,8 +125,6 @@ type Model struct {
 	// Configurable home-specific keys
 	helpKeys           []string
 	quickConnectKeys   []string
-	importSSHKeys      []string
-	exportConfigKeys   []string
 	showHiddenKeys     []string
 	hideHostKeys       []string
 	sessionHistoryKeys []string
@@ -147,8 +145,6 @@ type HomeKeyConfig struct {
 	Keys           listKeyMap
 	Help           []string
 	QuickConnect   []string
-	ImportSSH      []string
-	ExportConfig   []string
 	ShowHidden     []string
 	HideHost       []string
 	SessionHistory []string
@@ -181,8 +177,6 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 		kmCfg:              hkc.KmCfg,
 		helpKeys:           hkc.Help,
 		quickConnectKeys:   hkc.QuickConnect,
-		importSSHKeys:      hkc.ImportSSH,
-		exportConfigKeys:   hkc.ExportConfig,
 		showHiddenKeys:     hkc.ShowHidden,
 		hideHostKeys:       hkc.HideHost,
 		sessionHistoryKeys: hkc.SessionHistory,
@@ -199,8 +193,6 @@ func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
 	m.kmCfg = hkc.KmCfg
 	m.helpKeys = hkc.Help
 	m.quickConnectKeys = hkc.QuickConnect
-	m.importSSHKeys = hkc.ImportSSH
-	m.exportConfigKeys = hkc.ExportConfig
 	m.showHiddenKeys = hkc.ShowHidden
 	m.hideHostKeys = hkc.HideHost
 	m.sessionHistoryKeys = hkc.SessionHistory

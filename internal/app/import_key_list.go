@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 )
@@ -12,7 +12,7 @@ import (
 type keyListState int
 
 const (
-	keyListStateList    keyListState = iota
+	keyListStateList keyListState = iota
 	keyListStateAlias
 	keyListStateRename
 	keyListStateConfirm
@@ -28,6 +28,7 @@ type importKeyListModel struct {
 	aliasCursor     int
 	renameInput     textinput.Model
 	renameFromAlias bool
+	exportMode      bool
 }
 
 func newImportKeyList(items []importKeyEntry, hostItems []importHostEntry) *importKeyListModel {
@@ -100,13 +101,21 @@ func (m *importKeyListModel) Update(msg tea.KeyPressMsg) (closed bool, confirmed
 				m.cursor = m.page * m.pageSize
 			}
 		case "space":
+			if m.cursor >= len(m.items) {
+				break
+			}
 			item := &m.items[m.cursor]
 			if !item.blocked && !item.locked {
 				item.selected = !item.selected
 			}
 		case "enter":
+			if m.cursor >= len(m.items) {
+				break
+			}
 			item := &m.items[m.cursor]
-			if len(item.rec.Aliases) > 1 {
+			if m.exportMode {
+				break
+			} else if len(item.rec.Aliases) > 1 {
 				m.aliasCursor = 0
 				m.state = keyListStateAlias
 			} else if item.nameConflict {
@@ -187,8 +196,14 @@ func (m *importKeyListModel) View() string {
 
 	switch m.state {
 	case keyListStateList:
-		title := ui.TitleStyle.Render("导入密钥 (步骤 2/2)")
-		hint := ui.DimStyle.Render("space 选择 · enter 别名 · y 确认 · ←→ 翻页 · esc 返回")
+		action := "导入"
+		enterHint := " · enter 改名"
+		if m.exportMode {
+			action = "导出"
+			enterHint = ""
+		}
+		title := ui.TitleStyle.Render(action + "密钥 (步骤 2/2)")
+		hint := ui.DimStyle.Render("space 选择" + enterHint + " · y 确认 · ←→ 翻页 · esc 返回")
 		totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
 		if totalPages < 1 {
 			totalPages = 1
@@ -295,7 +310,11 @@ func (m *importKeyListModel) View() string {
 				keyCount++
 			}
 		}
-		title := ui.TitleStyle.Render("导入确认")
+		action := "导入"
+		if m.exportMode {
+			action = "导出"
+		}
+		title := ui.TitleStyle.Render(action + "确认")
 		hostLine := fmt.Sprintf("  主机: %d 个", hostCount)
 		keyLine := fmt.Sprintf("  密钥: %d 个（含 %d 个必须）", keyCount, lockedCount)
 		hint := ui.DimStyle.Render("  y 确认  n/esc 取消")
