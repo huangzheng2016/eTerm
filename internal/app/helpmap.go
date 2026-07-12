@@ -44,8 +44,12 @@ func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, ssh
 		return sshStatusBarHint(km, cfg, sshDisconnected, detachable)
 	case HomeTab:
 		return homeStatusBarHint(km, cfg)
+	case KeyTab:
+		return keyStatusBarHint(cfg)
+	case ForwardTab:
+		return forwardStatusBarHint(cfg)
 	case SnippetTab:
-		return snippetStatusBarHint(km, cfg)
+		return snippetStatusBarHint(cfg)
 	}
 	return strings.Join(statusBarShortcutParts(km, cfg, false, false, false), " · ") + " · " + helpLabel(cfg.Help) + " all keys"
 }
@@ -67,12 +71,36 @@ func homeStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
 	return strings.Join(parts, " · ")
 }
 
-func snippetStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
+func keyStatusBarHint(cfg KeyBindingConfig) string {
+	parts := []string{
+		"enter details",
+		helpLabel(cfg.KeyNew) + " generate",
+		helpLabel(cfg.KeyImport) + " import",
+		helpLabel(cfg.KeyEdit) + " edit",
+		helpLabel(cfg.KeyDelete) + " delete",
+		helpLabel(cfg.KeyCopy) + " copy pubkey",
+		helpLabel(cfg.Help) + " all keys",
+	}
+	return strings.Join(parts, " · ")
+}
+
+func forwardStatusBarHint(cfg KeyBindingConfig) string {
+	parts := []string{
+		helpLabel(cfg.FwdStart) + " start",
+		helpLabel(cfg.FwdStop) + " stop",
+		helpLabel(cfg.FwdNew) + " new",
+		helpLabel(cfg.FwdEdit) + " edit",
+		helpLabel(cfg.FwdDelete) + " delete",
+		helpLabel(cfg.Help) + " all keys",
+	}
+	return strings.Join(parts, " · ")
+}
+
+func snippetStatusBarHint(cfg KeyBindingConfig) string {
 	parts := []string{
 		helpLabel(cfg.SnipNew) + " new",
 		helpLabel(cfg.SnipEdit) + " edit",
 		helpLabel(cfg.SnipDelete) + " delete",
-		helpLabel(cfg.SnippetPicker) + " run",
 		helpLabel(cfg.Help) + " all keys",
 	}
 	return strings.Join(parts, " · ")
