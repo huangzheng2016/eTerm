@@ -20,6 +20,12 @@ var disconnectBannerStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#e0a000")).
 	Bold(true)
 
+var disconnectedBadgeStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#ffffff")).
+	Background(lipgloss.Color("#d20f39")).
+	Bold(true).
+	Padding(0, 1)
+
 var scrollIndicatorStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#7D56F4")).
 	Bold(true)
@@ -37,6 +43,7 @@ func (m *Model) View() tea.View {
 		screen = m.renderScreenWithCursor()
 	}
 	if m.disconnected {
+		screen = overlayFirstLineRight(screen, m.emu.Width(), disconnectedBadgeStyle.Render("DISCONNECTED"))
 		key := viewkeys.HelpLabel(m.vk.Reconnect)
 		if key == "" {
 			key = "r"
@@ -50,6 +57,15 @@ func (m *Model) View() tea.View {
 	}
 	v := tea.NewView(screen)
 	return v
+}
+
+func overlayFirstLineRight(screen string, width int, overlay string) string {
+	lines := strings.Split(screen, "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	lines[0] = overlayRight(lines[0], width, overlay)
+	return strings.Join(lines, "\n")
 }
 
 // renderWithSelection renders the visible body cell-by-cell, highlighting cells that
