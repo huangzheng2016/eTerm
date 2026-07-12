@@ -114,8 +114,10 @@ func renderListLayout(tabType TabType, content string, width, height int) string
 	rows := []string{ui.DimStyle.Render("MENU"), ""}
 	for _, item := range labels {
 		style := lipgloss.NewStyle().
-			Width(listSidebarWidth - 4).
-			Border(lipgloss.NormalBorder()).
+			Width(listSidebarWidth-2).
+			Padding(1, 0, 0, 1).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
 			BorderForeground(lipgloss.Color("#45475A")).
 			Foreground(lipgloss.Color("#888888"))
 		if item.tab == tabType {
