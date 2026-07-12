@@ -102,35 +102,7 @@ func renderListLayout(tabType TabType, content string, width, height int) string
 	if width < 52 {
 		return content
 	}
-	labels := []struct {
-		tab   TabType
-		label string
-	}{
-		{HomeTab, "Hosts"},
-		{KeyTab, "Keys"},
-		{ForwardTab, "Forwards"},
-		{SnippetTab, "Snippets"},
-	}
-	separator := lipgloss.NewStyle().Foreground(lipgloss.Color("#45475A")).Render(strings.Repeat("─", listSidebarWidth-2))
-	rows := []string{ui.DimStyle.Render("MENU"), "", separator}
-	for _, item := range labels {
-		style := lipgloss.NewStyle().
-			Width(listSidebarWidth-3).
-			Padding(1, 0, 0, 1).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(lipgloss.Color("#45475A")).
-			Foreground(lipgloss.Color("#888888"))
-		if item.tab == tabType {
-			style = style.
-				BorderForeground(lipgloss.Color("#7D56F4")).
-				Foreground(lipgloss.Color("#FF79C6")).
-				Bold(true)
-		}
-		rows = append(rows, style.Render(item.label))
-	}
-	rows = append(rows, "", ui.DimStyle.Render("Tab next"), ui.DimStyle.Render("S-Tab prev"))
-	sidebar := lipgloss.NewStyle().Width(listSidebarWidth-2).Height(height).Padding(1, 1).Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+	sidebar := renderListSidebar(tabType, height)
 	dividerRows := make([]string, height)
 	for i := range dividerRows {
 		dividerRows[i] = "│"
@@ -143,4 +115,41 @@ func renderListLayout(tabType TabType, content string, width, height int) string
 	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("#45475A")).Render(strings.Join(dividerRows, "\n"))
 	body := lipgloss.NewStyle().Width(listContentWidth(width)).Height(height).Render(content)
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, divider, body)
+}
+
+func renderListSidebar(tabType TabType, height int) string {
+	labels := []struct {
+		tab   TabType
+		label string
+	}{
+		{HomeTab, "Hosts"},
+		{KeyTab, "Keys"},
+		{ForwardTab, "Forwards"},
+		{SnippetTab, "Snippets"},
+	}
+	line := func(value string) string {
+		return value + strings.Repeat(" ", max(0, listSidebarWidth-lipgloss.Width(value)))
+	}
+	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#45475A"))
+	separator := separatorStyle.Render(strings.Repeat("─", listSidebarWidth))
+	rows := []string{line(""), line("  " + ui.DimStyle.Render("MENU")), line(""), separator}
+	for _, item := range labels {
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		itemSeparator := separator
+		if item.tab == tabType {
+			style = style.
+				Foreground(lipgloss.Color("#FF79C6")).
+				Bold(true)
+			itemSeparator = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(strings.Repeat("─", listSidebarWidth))
+		}
+		rows = append(rows, line(""), line("  "+style.Render(item.label)), itemSeparator)
+	}
+	rows = append(rows, line(""), line("  "+ui.DimStyle.Render("Tab next")), line("  "+ui.DimStyle.Render("S-Tab prev")))
+	for len(rows) < height {
+		rows = append(rows, line(""))
+	}
+	if len(rows) > height {
+		rows = rows[:height]
+	}
+	return strings.Join(rows, "\n")
 }
