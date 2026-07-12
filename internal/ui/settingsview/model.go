@@ -157,7 +157,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		// Keys
 		{"Keys", "New Key", "key_new"},
 		{"Keys", "Import Key", "key_import"},
-		{"Keys", "Export Key", "key_export"},
+		{"Keys", "Edit Key", "key_edit"},
 		{"Keys", "Delete Key", "key_delete"},
 		{"Keys", "Copy Fingerprint", "key_copy"},
 		// Forward

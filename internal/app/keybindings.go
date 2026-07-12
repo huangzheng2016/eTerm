@@ -67,7 +67,7 @@ type KeyBindingConfig struct {
 	// Key management
 	KeyNew    []string `json:"key_new"`
 	KeyImport []string `json:"key_import"`
-	KeyExport []string `json:"key_export"`
+	KeyEdit   []string `json:"key_edit"`
 	KeyDelete []string `json:"key_delete"`
 	KeyCopy   []string `json:"key_copy"`
 
@@ -141,7 +141,7 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		// Key management
 		KeyNew:    []string{"n"},
 		KeyImport: []string{"i"},
-		KeyExport: []string{"e"},
+		KeyEdit:   []string{"e"},
 		KeyDelete: []string{"d"},
 		KeyCopy:   []string{"c"},
 
@@ -373,7 +373,7 @@ func BuildKeyViewKeys(cfg KeyBindingConfig) viewkeys.KeyViewKeys {
 	return viewkeys.KeyViewKeys{
 		New:    cfg.KeyNew,
 		Import: cfg.KeyImport,
-		Export: cfg.KeyExport,
+		Edit:   cfg.KeyEdit,
 		Delete: cfg.KeyDelete,
 		Copy:   cfg.KeyCopy,
 	}

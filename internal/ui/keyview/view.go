@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
@@ -67,9 +68,9 @@ func (m Model) View() tea.View {
 func keyHelpLine(vk viewkeys.KeyViewKeys) string {
 	return viewkeys.HelpLabel(vk.New) + ":generate · " +
 		viewkeys.HelpLabel(vk.Import) + ":import · " +
-		viewkeys.HelpLabel(vk.Export) + ":export · " +
+		viewkeys.HelpLabel(vk.Edit) + ":edit · " +
 		viewkeys.HelpLabel(vk.Delete) + ":delete · " +
-		viewkeys.HelpLabel(vk.Copy) + ":copy pubkey"
+		"enter:details"
 }
 
 func (m Model) maybeOverlay(bg string) string {
@@ -83,8 +84,49 @@ func (m Model) maybeOverlay(bg string) string {
 	case modeDelete:
 		overlay := m.renderDeleteOverlay()
 		return m.placeOverlay(bg, overlay)
+	case modeDetail:
+		return m.placeOverlay(bg, m.renderDetailOverlay())
+	case modeEdit:
+		return m.placeOverlay(bg, m.renderEditOverlay())
 	}
 	return bg
+}
+
+func (m Model) renderDetailOverlay() string {
+	k := m.keyByID(m.activeKeyID)
+	if k == nil {
+		return ""
+	}
+	pubkey := strings.TrimSpace(k.PublicKeyData)
+	if len(pubkey) > 96 {
+		pubkey = pubkey[:96] + "..."
+	}
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		overlayTitleStyle.Render(k.Name),
+		"Type: "+k.Type,
+		"Storage: "+k.StorageMode,
+		"Fingerprint: "+k.Fingerprint,
+		"Public key:",
+		ui.DimStyle.Render(pubkey),
+		"",
+		ui.SelectedStyle.Render("[c Copy public key]")+"  "+ui.SelectedStyle.Render("[e Edit]"),
+		overlayHintStyle.Render("Esc: close"),
+	)
+	return overlayBoxStyle.Width(m.overlayWidth()).Render(content)
+}
+
+func (m Model) renderEditOverlay() string {
+	label, input, hint := "Name:", m.nameInput.View(), "Enter: next  Esc: cancel"
+	if m.step == 1 {
+		label, input, hint = "Certificate path:", m.certPathInput.View(), "Enter: save  Esc: cancel"
+	}
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		overlayTitleStyle.Render("Edit SSH Key"),
+		label,
+		input,
+		overlayHintStyle.Render(hint),
+	)
+	return overlayBoxStyle.Width(m.overlayWidth()).Render(content)
 }
 
 // PLACEHOLDER_OVERLAYS

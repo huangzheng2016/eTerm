@@ -149,7 +149,7 @@ func (h keyTabAppHelpMap) FullHelp() [][]key.Binding {
 		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
-		{dynamicBinding(h.cfg.KeyNew, "new key"), dynamicBinding(h.cfg.KeyImport, "import key"), dynamicBinding(h.cfg.KeyExport, "export key")},
+		{dynamicBinding(h.cfg.KeyNew, "new key"), dynamicBinding(h.cfg.KeyImport, "import key"), dynamicBinding(h.cfg.KeyEdit, "edit key")},
 		{dynamicBinding(h.cfg.KeyDelete, "delete key"), dynamicBinding(h.cfg.KeyCopy, "copy pubkey")},
 	}
 }

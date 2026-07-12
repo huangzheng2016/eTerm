@@ -25,7 +25,7 @@ type SFTPKeys struct {
 type KeyViewKeys struct {
 	New    []string
 	Import []string
-	Export []string
+	Edit   []string
 	Delete []string
 	Copy   []string
 }

@@ -22,6 +22,8 @@ const (
 	modeGenerate inputMode = 1
 	modeImport   inputMode = 2
 	modeDelete   inputMode = 3
+	modeDetail   inputMode = 4
+	modeEdit     inputMode = 5
 )
 
 type keyItem struct {
@@ -59,6 +61,7 @@ type Model struct {
 	vk                viewkeys.KeyViewKeys
 	pendingDeleteID   uint
 	pendingDeleteName string
+	activeKeyID       uint
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.KeyViewKeys) { m.vk = vk }
@@ -143,4 +146,5 @@ func (m *Model) resetMode() {
 	m.certPathInput.Blur()
 	m.keyPaste.SetValue("")
 	m.keyPaste.Blur()
+	m.activeKeyID = 0
 }

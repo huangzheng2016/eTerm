@@ -4,6 +4,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/keys"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
@@ -58,6 +59,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadKeys()
 
+	case keyUpdatedMsg:
+		if msg.err != nil {
+			return m, func() tea.Msg { return types.ErrorMsg{Err: msg.err} }
+		}
+		m.resetMode()
+		return m, tea.Batch(m.loadKeys(), func() tea.Msg { return types.SuccessMsg{Message: "Key updated"} })
+
 	case types.RefreshListMsg:
 		return m, m.loadKeys()
 
@@ -74,6 +82,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "esc":
 				return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
+			case "enter":
+				if k := m.SelectedKey(); k != nil {
+					m.activeKeyID = k.ID
+					m.mode = modeDetail
+				}
+				return m, nil
 			default:
 				switch {
 				case viewkeys.MatchKey(msg, m.vk.New):
@@ -89,19 +103,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.certPathInput.SetValue("")
 					cmd := m.nameInput.Focus()
 					return m, tea.Batch(cmd, textinput.Blink)
-				case viewkeys.MatchKey(msg, m.vk.Export):
-					if k := m.SelectedKey(); k != nil {
-						database := m.db
-						mk := m.masterKey
-						keyID := k.ID
-						return m, func() tea.Msg {
-							err := keys.ExportKey(database, mk, keyID, "exported_key.pem")
-							if err != nil {
-								return types.ErrorMsg{Err: err}
-							}
-							return types.SuccessMsg{Message: "Key exported to exported_key.pem"}
-						}
-					}
+				case viewkeys.MatchKey(msg, m.vk.Edit):
+					return m.startEdit()
 				case viewkeys.MatchKey(msg, m.vk.Delete):
 					if k := m.SelectedKey(); k != nil {
 						m.pendingDeleteID = k.ID
@@ -236,6 +239,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resetMode()
 				return m, nil
 			}
+
+		case modeDetail:
+			switch msg.String() {
+			case "esc":
+				m.resetMode()
+				return m, nil
+			case "c":
+				if k := m.keyByID(m.activeKeyID); k != nil {
+					return m, tea.SetClipboard(k.PublicKeyData)
+				}
+			case "e":
+				return m.startEdit()
+			}
+
+		case modeEdit:
+			switch msg.String() {
+			case "esc":
+				m.resetMode()
+				return m, nil
+			case "enter":
+				if m.step == 0 {
+					if m.nameInput.Value() == "" {
+						return m, nil
+					}
+					m.step = 1
+					m.nameInput.Blur()
+					return m, m.certPathInput.Focus()
+				}
+				database, id := m.db, m.activeKeyID
+				name, certPath := m.nameInput.Value(), m.certPathInput.Value()
+				return m, func() tea.Msg {
+					err := database.Model(&db.SSHKey{}).Where("id = ?", id).Updates(map[string]interface{}{"name": name, "certificate_path": certPath}).Error
+					return keyUpdatedMsg{err: err}
+				}
+			}
+			var cmd tea.Cmd
+			if m.step == 0 {
+				m.nameInput, cmd = m.nameInput.Update(msg)
+			} else {
+				m.certPathInput, cmd = m.certPathInput.Update(msg)
+			}
+			return m, cmd
 		}
 
 	case tea.PasteMsg:
@@ -252,6 +297,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.certPathInput = inputpaste.TextInput(m.certPathInput, msg)
 			case 2:
 				m.keyPaste = inputpaste.TextArea(m.keyPaste, msg)
+			}
+		case modeEdit:
+			if m.step == 0 {
+				m.nameInput = inputpaste.TextInput(m.nameInput, msg)
+			} else {
+				m.certPathInput = inputpaste.TextInput(m.certPathInput, msg)
 			}
 		}
 		return m, nil
@@ -271,4 +322,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+type keyUpdatedMsg struct{ err error }
+
+func (m Model) keyByID(id uint) *db.SSHKey {
+	for i := range m.sshKeys {
+		if m.sshKeys[i].ID == id {
+			return &m.sshKeys[i]
+		}
+	}
+	return nil
+}
+
+func (m Model) startEdit() (tea.Model, tea.Cmd) {
+	k := m.SelectedKey()
+	if m.mode == modeDetail {
+		k = m.keyByID(m.activeKeyID)
+	}
+	if k == nil {
+		return m, nil
+	}
+	m.activeKeyID = k.ID
+	m.nameInput.SetValue(k.Name)
+	m.certPathInput.SetValue(k.CertificatePath)
+	m.step = 0
+	m.mode = modeEdit
+	return m, m.nameInput.Focus()
 }
