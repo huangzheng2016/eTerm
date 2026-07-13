@@ -254,6 +254,20 @@ func TestWaitChunkDoesNotDropChunkAtCoalesceLimit(t *testing.T) {
 	}
 }
 
+func TestChunkWithWideScrollRegionDoesNotPanic(t *testing.T) {
+	m := New(&internalssh.InteractiveSession{}, "test", 0, viewkeys.SSHKeys{})
+	defer m.Close()
+	m.SetSize(39, 10)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("update panic = %v", r)
+		}
+	}()
+
+	_, _ = m.Update(ChunkMsg{StreamID: m.streamID, Data: []byte("\x1b[?69h\x1b[1;43s\x1bM")})
+}
+
 func TestWaitNilClearsReadEOF(t *testing.T) {
 	m := &Model{}
 	m.setReadErr(io.EOF)

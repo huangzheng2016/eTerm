@@ -267,6 +267,31 @@ func TestPumpSessionCoalescesRapidOutput(t *testing.T) {
 	_ = waitDaemonFrame(t, out, relay.FrameClose)
 }
 
+func TestPumpSessionCapsOutputFrameSize(t *testing.T) {
+	done := make(chan error)
+	is := &internalssh.InteractiveSession{
+		Stdout: bytes.NewReader(bytes.Repeat([]byte("x"), 40*1024)),
+		Done:   done,
+	}
+	out := newDaemonSink()
+
+	go pumpSession(context.Background(), 17, is, out.write, func(uint32, *internalssh.InteractiveSession) bool {
+		return true
+	})
+
+	var total int
+	for total < 40*1024 {
+		data := waitDaemonFrame(t, out, relay.FrameData)
+		if len(data.Payload) > 16*1024 {
+			t.Fatalf("payload len = %d, want <= %d", len(data.Payload), 16*1024)
+		}
+		total += len(data.Payload)
+	}
+	if total != 40*1024 {
+		t.Fatalf("total = %d", total)
+	}
+}
+
 func TestHandleOpenTmuxErrorTargetsReturnOpenErr(t *testing.T) {
 	restoreTmuxStubs(t)
 	wantErr := errors.New("tmux failed")

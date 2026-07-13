@@ -50,7 +50,7 @@ const (
 	openRequestTimeout  = 30 * time.Second
 	sessionStartupGrace = 150 * time.Millisecond
 	outputFlushInterval = 8 * time.Millisecond
-	maxOutputFrameBytes = 64 * 1024
+	maxOutputFrameBytes = 16 * 1024
 )
 
 var (

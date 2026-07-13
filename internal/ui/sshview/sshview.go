@@ -585,6 +585,23 @@ func (m *Model) closeResizeQueue() {
 	}
 }
 
+func (m *Model) writeEmulator(data []byte) {
+	defer func() {
+		if recover() == nil {
+			return
+		}
+		w, h := m.width, m.height
+		if w < 1 {
+			w = m.emu.Width()
+		}
+		if h < 1 {
+			h = m.emu.Height()
+		}
+		m.emu.Resize(w, h)
+	}()
+	_, _ = m.emu.Write(data)
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -596,7 +613,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		before := m.emu.ScrollbackLen()
-		_, _ = m.emu.Write(msg.Data)
+		m.writeEmulator(msg.Data)
 		clipCmds := m.takeOSC52ClipboardCommands()
 		// Only follow new output when already at the live view (bottom). When the
 		// user has scrolled up, keep the same lines in view by compensating for the
