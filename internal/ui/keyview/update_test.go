@@ -26,6 +26,13 @@ func TestEnterOpensKeyDetailAndCopyPublicKey(t *testing.T) {
 	}
 }
 
+func TestEscapeDoesNotCloseKeyList(t *testing.T) {
+	_, cmd := (Model{}).Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if cmd != nil {
+		t.Fatal("escape closed the key list")
+	}
+}
+
 func TestEditShortcutOpensEditInsteadOfExport(t *testing.T) {
 	m := New(nil, nil, viewkeys.KeyViewKeys{Edit: []string{"e"}})
 	m.loaded = true

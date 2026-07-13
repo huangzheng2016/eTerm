@@ -7,6 +7,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -56,10 +57,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		delta := 0
 		switch msg.Button {
-		case tea.MouseWheelUp:
-			delta = -1
-		case tea.MouseWheelDown:
-			delta = 1
+		case tea.MouseWheelUp, tea.MouseWheelLeft:
+			delta = -3
+		case tea.MouseWheelDown, tea.MouseWheelRight:
+			delta = 3
 		default:
 			return m, nil
 		}
@@ -82,6 +83,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if viewkeys.MatchKey(msg, m.showEmptyKeys) {
+			m.showEmpty = !m.showEmpty
+			return m, m.reload()
+		}
 		switch msg.String() {
 		case "esc", "escape":
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
@@ -110,18 +115,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			clampTranscriptScroll(m)
 			return m, nil
 		case "pgup":
-			if !m.focusList {
-				m.scroll -= 10
-				if m.scroll < 0 {
-					m.scroll = 0
-				}
-			}
+			m.focusList = false
+			m.scroll -= m.transcriptPageSize()
 			clampTranscriptScroll(m)
 			return m, nil
 		case "pgdown":
-			if !m.focusList {
-				m.scroll += 10
-			}
+			m.focusList = false
+			m.scroll += m.transcriptPageSize()
 			clampTranscriptScroll(m)
 			return m, nil
 		case "home", "g":
@@ -160,11 +160,8 @@ func (m *Model) layoutWidths() (int, int, bool) {
 }
 
 func clampTranscriptScroll(m *Model) {
-	lines := strings.Split(m.selectedTranscript(), "\n")
-	maxS := 0
-	if len(lines) > 0 {
-		maxS = len(lines) - 1
-	}
+	lines := strings.Split(m.selectedDisplayTranscript(), "\n")
+	maxS := max(0, len(lines)-m.transcriptPageSize())
 	if m.scroll > maxS {
 		m.scroll = maxS
 	}

@@ -591,7 +591,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if idx == -1 {
 			idx = a.activeTab
 		}
-		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 {
+		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 && !isListView(a.tabs[idx].Type) {
 			closeCmd := closeTerminalTabCmd(a.db, a.tabs[idx])
 			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
 			if a.activeTab >= len(a.tabs) {

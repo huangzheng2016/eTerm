@@ -6,9 +6,41 @@ import (
 	"time"
 
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
+
+func TestCloseTabMessageKeepsListRoot(t *testing.T) {
+	a := App{
+		tabs: []Tab{
+			{Type: SessionListTab, Title: "List"},
+			{Type: SSHTab, Title: "ssh"},
+		},
+		activeTab: 0,
+	}
+
+	next, _ := a.Update(types.CloseTabMsg{Index: -1})
+	got := next.(App)
+	if len(got.tabs) != 2 || got.tabs[0].Type != SessionListTab {
+		t.Fatalf("tabs=%+v", got.tabs)
+	}
+}
+
+func TestCloseShortcutKeepsListRoot(t *testing.T) {
+	a := App{
+		tabs: []Tab{
+			{Type: SSHTab, Title: "ssh"},
+			{Type: ForwardTab, Title: "List"},
+		},
+		activeTab: 1,
+	}
+
+	got, cmd := a.closeCurrentTabIfAllowed()
+	if len(got.tabs) != 2 || cmd != nil {
+		t.Fatalf("tabs=%+v cmd=%v", got.tabs, cmd)
+	}
+}
 
 type blockingCloser struct {
 	started     chan struct{}

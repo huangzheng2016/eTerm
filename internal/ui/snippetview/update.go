@@ -43,8 +43,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.gridCursor = newCur
 			}
 			return m, nil
-		case "esc":
-			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 		default:
 			switch {
 			case viewkeys.MatchKey(msg, m.vk.New):

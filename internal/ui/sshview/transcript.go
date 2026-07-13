@@ -51,6 +51,47 @@ func (m *Model) PlainTranscript(maxBytes int) string {
 	return s
 }
 
+func (m *Model) ANSITranscript(maxBytes int) string {
+	if m == nil || m.emu == nil {
+		return ""
+	}
+	if maxBytes <= 0 {
+		maxBytes = MaxTranscriptBytes
+	}
+	w := m.emu.Width()
+	h := m.emu.Height()
+	if w <= 0 || h <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(min(maxBytes, 65536))
+	appendLine := func(line string, newline bool) bool {
+		extra := len(line)
+		if newline {
+			extra++
+		}
+		if b.Len()+extra > maxBytes {
+			return false
+		}
+		b.WriteString(line)
+		if newline {
+			b.WriteByte('\n')
+		}
+		return true
+	}
+	for i := 0; i < m.emu.ScrollbackLen(); i++ {
+		if !appendLine(renderScrollbackLine(m, w, i), true) {
+			return b.String()
+		}
+	}
+	for y := 0; y < h; y++ {
+		if !appendLine(renderScreenLine(m, w, y), y < h-1) {
+			break
+		}
+	}
+	return b.String()
+}
+
 func plainLineFromScrollback(m *Model, w, idx int) string {
 	var b strings.Builder
 	for x := 0; x < w; x++ {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func (m *Model) View() tea.View {
@@ -35,12 +36,9 @@ func (m *Model) View() tea.View {
 	listBlock := strings.Join(listLines, "\n")
 	listStyled := lipgloss.NewStyle().Width(listW).Render(listBlock)
 
-	body := m.selectedTranscript()
+	body := m.selectedDisplayTranscript()
 	lines := strings.Split(body, "\n")
-	maxLines := m.height - 2
-	if maxLines < 3 {
-		maxLines = 3
-	}
+	maxLines := m.transcriptPageSize()
 	scroll := m.scroll
 	if scroll > len(lines) {
 		scroll = len(lines)
@@ -57,9 +55,6 @@ func (m *Model) View() tea.View {
 		chunk = lines[scroll:end]
 	}
 	transBody := strings.Join(chunk, "\n")
-	if strings.TrimSpace(transBody) == "" {
-		transBody = "(no transcript saved for this session)"
-	}
 	transBox := lipgloss.NewStyle().Width(transW)
 	if !m.focusList {
 		transBox = transBox.Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#7D56F4"))
@@ -67,7 +62,11 @@ func (m *Model) View() tea.View {
 	transStyled := transBox.Render(transBody)
 
 	title := ui.TitleStyle.Render("Sessions: " + m.hostTitle)
-	hint := ui.DimStyle.Render("tab focus · j/k · pgup/pgdn transcript · esc close")
+	emptyHint := viewkeys.HelpLabel(m.showEmptyKeys) + " show empty"
+	if m.showEmpty {
+		emptyHint = viewkeys.HelpLabel(m.showEmptyKeys) + " hide empty"
+	}
+	hint := ui.DimStyle.Render("tab focus · j/k scroll · pgup/pgdn page · mouse wheel · " + emptyHint + " · esc close")
 
 	var main string
 	if stacked {

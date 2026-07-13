@@ -12,21 +12,24 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 	"gorm.io/gorm"
 )
 
 type Model struct {
-	db           *gorm.DB
-	width        int
-	height       int
-	loaded       bool
-	rows         []db.ConnectionHistory
-	cursor       int
-	grid         components.GridLayout
-	search       textinput.Model
-	searching    bool
-	detail       bool
-	detailScroll int
+	db            *gorm.DB
+	width         int
+	height        int
+	loaded        bool
+	rows          []db.ConnectionHistory
+	cursor        int
+	grid          components.GridLayout
+	search        textinput.Model
+	searching     bool
+	detail        bool
+	detailScroll  int
+	showEmpty     bool
+	showEmptyKeys []string
 }
 
 type loadedMsg struct {
@@ -37,8 +40,10 @@ type loadedMsg struct {
 func New(database *gorm.DB) *Model {
 	input := textinput.New()
 	input.Placeholder = "Search host, status, time, or transcript"
-	return &Model{db: database, search: input}
+	return &Model{db: database, search: input, showEmptyKeys: []string{"h"}}
 }
+
+func (m *Model) SetShowEmptyKeys(keys []string) { m.showEmptyKeys = keys }
 
 func (m *Model) Init() tea.Cmd { return m.reload() }
 
@@ -53,7 +58,11 @@ func (m *Model) AllowsListNavigation() bool { return !m.searching && !m.detail }
 func (m *Model) reload() tea.Cmd {
 	query := strings.TrimSpace(m.search.Value())
 	return func() tea.Msg {
-		q := m.db.Preload("Host").Order("connected_at DESC")
+		q := m.db.Preload("Host")
+		if !m.showEmpty {
+			q = q.Where("length(trim(transcript, char(9) || char(10) || char(13) || ' ')) > 0")
+		}
+		q = q.Order("connected_at DESC")
 		if query != "" {
 			like := "%" + query + "%"
 			hostIDs := m.db.Model(&db.Host{}).Select("id").Where("alias LIKE ? OR hostname LIKE ? OR username LIKE ?", like, like, like)
@@ -104,6 +113,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmd, m.reload())
 		}
 		if m.detail {
+			if viewkeys.MatchKey(msg, m.showEmptyKeys) {
+				m.showEmpty = !m.showEmpty
+				m.detail = false
+				return m, m.reload()
+			}
 			switch msg.String() {
 			case "esc", "escape":
 				m.detail, m.detailScroll = false, 0
@@ -112,9 +126,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "down", "j":
 				m.detailScroll++
 			case "pgup":
-				m.detailScroll -= 10
+				m.detailScroll -= m.detailPageSize()
 			case "pgdown":
-				m.detailScroll += 10
+				m.detailScroll += m.detailPageSize()
 			case "home", "g":
 				m.detailScroll = 0
 			case "end", "G":
@@ -124,6 +138,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.clampDetailScroll()
 			return m, nil
+		}
+		if viewkeys.MatchKey(msg, m.showEmptyKeys) {
+			m.showEmpty = !m.showEmpty
+			return m, m.reload()
 		}
 		switch msg.String() {
 		case "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
@@ -137,8 +155,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			m.searching = true
 			return m, m.search.Focus()
-		case "esc", "escape":
-			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 		}
 	case tea.MouseClickMsg:
 		if !m.detail && !m.searching && msg.Button == tea.MouseLeft {
@@ -153,6 +169,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor = idx
 				}
 			}
+		}
+	case tea.MouseWheelMsg:
+		if m.detail && !m.searching {
+			switch msg.Button {
+			case tea.MouseWheelUp, tea.MouseWheelLeft:
+				m.detailScroll -= 3
+			case tea.MouseWheelDown, tea.MouseWheelRight:
+				m.detailScroll += 3
+			}
+			m.clampDetailScroll()
 		}
 	}
 	return m, nil
@@ -171,6 +197,11 @@ func (m *Model) View() tea.View {
 	} else {
 		header += "  " + ui.DimStyle.Render("/ search")
 	}
+	emptyHint := viewkeys.HelpLabel(m.showEmptyKeys) + " show empty"
+	if m.showEmpty {
+		emptyHint = viewkeys.HelpLabel(m.showEmptyKeys) + " hide empty"
+	}
+	header += "  " + ui.DimStyle.Render(emptyHint)
 	if len(m.rows) == 0 {
 		return tea.NewView(header + "\n" + components.EmptyState(m.width, m.height-1, "No matching saved sessions."))
 	}
@@ -186,11 +217,15 @@ func (m *Model) detailView() string {
 		return ""
 	}
 	row := m.rows[m.cursor]
-	lines := strings.Split(row.Transcript, "\n")
+	transcript := row.Transcript
+	if row.ANSITranscript != "" {
+		transcript = row.ANSITranscript
+	}
+	lines := strings.Split(transcript, "\n")
 	available := max(3, m.height-5)
 	end := min(len(lines), m.detailScroll+available)
-	body := "(no transcript saved for this session)"
-	if m.detailScroll < len(lines) && strings.TrimSpace(row.Transcript) != "" {
+	body := ""
+	if m.detailScroll < len(lines) && strings.TrimSpace(transcript) != "" {
 		body = strings.Join(lines[m.detailScroll:end], "\n")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -199,7 +234,7 @@ func (m *Model) detailView() string {
 		"",
 		body,
 		"",
-		ui.DimStyle.Render("j/k scroll · pgup/pgdown · c copy transcript · esc back"),
+		ui.DimStyle.Render("j/k scroll · pgup/pgdown · mouse wheel · c copy transcript · esc back"),
 	)
 }
 
@@ -211,8 +246,12 @@ func (m *Model) selectedTranscript() string {
 }
 
 func (m *Model) clampDetailScroll() {
-	maxScroll := max(0, len(strings.Split(m.selectedTranscript(), "\n"))-max(3, m.height-5))
+	maxScroll := max(0, len(strings.Split(m.selectedTranscript(), "\n"))-m.detailPageSize())
 	m.detailScroll = min(max(0, m.detailScroll), maxScroll)
+}
+
+func (m *Model) detailPageSize() int {
+	return max(3, m.height-5)
 }
 
 func sessionTitle(row db.ConnectionHistory) string {

@@ -110,7 +110,9 @@ func trySend(ch chan relay.Frame, f relay.Frame) bool {
 }
 
 func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
-	c, err := websocket.Accept(w, r, nil)
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return
 	}
@@ -170,7 +172,9 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
-	c, err := websocket.Accept(w, r, nil)
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return
 	}

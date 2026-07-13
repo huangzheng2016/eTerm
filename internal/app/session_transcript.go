@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -38,8 +39,12 @@ func finalizeSSHSession(gdb *gorm.DB, m *sshview.Model) {
 	vals := map[string]interface{}{"disconnected_at": &now}
 	if saveSessionTranscriptEnabled(gdb) {
 		t := m.PlainTranscript(sshview.MaxTranscriptBytes)
-		if t != "" {
+		if strings.TrimSpace(t) != "" {
 			vals["transcript"] = t
+			ansi := m.ANSITranscript(sshview.MaxTranscriptBytes)
+			if ansi != "" {
+				vals["ansi_transcript"] = ansi
+			}
 		}
 	}
 	_ = gdb.Model(&db.ConnectionHistory{}).Where("id = ?", hid).Updates(vals).Error

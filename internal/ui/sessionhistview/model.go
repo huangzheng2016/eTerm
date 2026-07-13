@@ -11,21 +11,25 @@ import (
 )
 
 type Model struct {
-	db        *gorm.DB
-	hostID    uint
-	hostTitle string
-	rows      []db.ConnectionHistory
-	sel       int
-	scroll    int
-	focusList bool
-	width     int
-	height    int
-	loaded    bool
+	db            *gorm.DB
+	hostID        uint
+	hostTitle     string
+	rows          []db.ConnectionHistory
+	sel           int
+	scroll        int
+	focusList     bool
+	width         int
+	height        int
+	loaded        bool
+	showEmpty     bool
+	showEmptyKeys []string
 }
 
 func New(database *gorm.DB, hostID uint) *Model {
-	return &Model{db: database, hostID: hostID, focusList: true}
+	return &Model{db: database, hostID: hostID, focusList: true, showEmptyKeys: []string{"h"}}
 }
+
+func (m *Model) SetShowEmptyKeys(keys []string) { m.showEmptyKeys = keys }
 
 func (m *Model) Init() tea.Cmd {
 	return m.reload()
@@ -42,7 +46,11 @@ func (m *Model) reload() tea.Cmd {
 			title = fmt.Sprintf("%s@%s", host.Username, host.Hostname)
 		}
 		var rows []db.ConnectionHistory
-		err := m.db.Where("host_id = ?", m.hostID).Order("connected_at DESC").Find(&rows).Error
+		q := m.db.Where("host_id = ?", m.hostID)
+		if !m.showEmpty {
+			q = q.Where("length(trim(transcript, char(9) || char(10) || char(13) || ' ')) > 0")
+		}
+		err := q.Order("connected_at DESC").Find(&rows).Error
 		if err != nil {
 			return types.ErrorMsg{Err: err}
 		}
@@ -65,4 +73,18 @@ func (m *Model) selectedTranscript() string {
 		return ""
 	}
 	return m.rows[m.sel].Transcript
+}
+
+func (m *Model) selectedDisplayTranscript() string {
+	if m.sel < 0 || m.sel >= len(m.rows) {
+		return ""
+	}
+	if m.rows[m.sel].ANSITranscript != "" {
+		return m.rows[m.sel].ANSITranscript
+	}
+	return m.rows[m.sel].Transcript
+}
+
+func (m *Model) transcriptPageSize() int {
+	return max(3, m.height-2)
 }

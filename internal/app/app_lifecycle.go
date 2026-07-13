@@ -145,7 +145,7 @@ func syncTickCmd(database *gorm.DB) tea.Cmd {
 }
 
 func (a App) closeCurrentTabIfAllowed() (App, tea.Cmd) {
-	if len(a.tabs) > 1 && a.activeTab > 0 {
+	if len(a.tabs) > 1 && a.activeTab > 0 && !isListView(a.tabs[a.activeTab].Type) {
 		closeCmd := closeTerminalTabCmd(a.db, a.tabs[a.activeTab])
 		a.tabs = append(a.tabs[:a.activeTab], a.tabs[a.activeTab+1:]...)
 		if a.activeTab >= len(a.tabs) {

@@ -87,7 +87,8 @@ type ConnectionHistory struct {
 	DisconnectedAt *time.Time
 	Status         string `gorm:"default:'success'"`
 	// Transcript is optional plain-text session capture (scrollback + screen), truncated at save time.
-	Transcript string `gorm:"type:text"`
+	Transcript     string `gorm:"type:text"`
+	ANSITranscript string `gorm:"type:text"`
 }
 
 type Snippet struct {

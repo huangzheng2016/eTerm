@@ -84,6 +84,7 @@ func (a App) openListView(tabType TabType) (App, tea.Cmd) {
 		model = m
 	case SessionListTab:
 		m := sessionlistview.New(a.db)
+		m.SetShowEmptyKeys(a.kbConfig.ShowHidden)
 		m.SetSize(width, height)
 		model = m
 	}

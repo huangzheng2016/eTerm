@@ -24,6 +24,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println("eTerm " + version.Version + " (" + version.Commit + ")")
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
 		runDaemon(os.Args[2:])
 		return

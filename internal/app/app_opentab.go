@@ -66,6 +66,7 @@ func (a App) openSnippetsTab() (App, tea.Cmd) {
 
 func (a App) openSessionHistoryTab(hostID uint) (App, tea.Cmd) {
 	sv := sessionhistview.New(a.db, hostID)
+	sv.SetShowEmptyKeys(a.kbConfig.ShowHidden)
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(SessionHistoryTab))
 	}
