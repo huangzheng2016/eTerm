@@ -2,7 +2,6 @@ package syncd
 
 import (
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -38,10 +37,6 @@ func (r *PeerRegistry) Register(tenant string, p PeerInfo, send chan relay.Frame
 	if p.LastSeen.IsZero() {
 		p.LastSeen = time.Now()
 	}
-	baseID := p.ID
-	for i := 2; r.tenants[tenant][p.ID] != nil; i++ {
-		p.ID = baseID + "#" + time.Now().Format("150405") + "-" + strconv.Itoa(i)
-	}
 	r.tenants[tenant][p.ID] = &PeerConn{PeerInfo: p, Send: send}
 	return p.ID
 }
@@ -50,6 +45,22 @@ func (r *PeerRegistry) Unregister(tenant, id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.tenants[tenant] == nil {
+		return
+	}
+	delete(r.tenants[tenant], id)
+	if len(r.tenants[tenant]) == 0 {
+		delete(r.tenants, tenant)
+	}
+}
+
+func (r *PeerRegistry) UnregisterConn(tenant, id string, send chan relay.Frame) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tenants[tenant] == nil {
+		return
+	}
+	p := r.tenants[tenant][id]
+	if p == nil || p.Send != send {
 		return
 	}
 	delete(r.tenants[tenant], id)

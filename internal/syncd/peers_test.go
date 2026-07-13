@@ -38,26 +38,29 @@ func TestPeerRegistryUnregister(t *testing.T) {
 	}
 }
 
-func TestPeerRegistryAllowsDuplicatePeerIDs(t *testing.T) {
+func TestPeerRegistryReplacesDuplicatePeerID(t *testing.T) {
 	r := NewPeerRegistry()
-	first := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, make(chan relay.Frame, 1))
-	second := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, make(chan relay.Frame, 1))
+	firstSend := make(chan relay.Frame, 1)
+	secondSend := make(chan relay.Frame, 1)
+	first := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, firstSend)
+	second := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, secondSend)
 
-	if first == second {
-		t.Fatalf("duplicate registrations used same id %q", first)
+	if first != "peer" || second != "peer" {
+		t.Fatalf("registrations = %q, %q; want stable peer id", first, second)
 	}
 	got := r.List("tenant-a")
-	if len(got) != 2 {
-		t.Fatalf("got %d peers, want 2", len(got))
+	if len(got) != 1 {
+		t.Fatalf("got %d peers, want 1", len(got))
 	}
-	if _, ok := r.Get("tenant-a", first); !ok {
-		t.Fatalf("first id %q not addressable", first)
+	peer, ok := r.Get("tenant-a", "peer")
+	if !ok {
+		t.Fatal("peer not addressable")
 	}
-	if _, ok := r.Get("tenant-a", second); !ok {
-		t.Fatalf("second id %q not addressable", second)
+	if peer.Send != secondSend {
+		t.Fatal("peer did not point to latest connection")
 	}
-	r.Unregister("tenant-a", first)
-	if _, ok := r.Get("tenant-a", second); !ok {
-		t.Fatalf("second id %q removed with first", second)
+	r.UnregisterConn("tenant-a", "peer", firstSend)
+	if peer, ok := r.Get("tenant-a", "peer"); !ok || peer.Send != secondSend {
+		t.Fatal("old connection unregister removed latest peer")
 	}
 }

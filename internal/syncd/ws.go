@@ -124,7 +124,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 	var tenant, peerID string
 	defer func() {
 		if tenant != "" && peerID != "" {
-			h.peers.Unregister(tenant, peerID)
+			h.peers.UnregisterConn(tenant, peerID, send)
 		}
 		h.closeDaemonSessions(send)
 		close(stop)
