@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -73,6 +74,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("eterm daemon starting name=%q peer=%s tenant=%s server=%s", rt.name, rt.peerID, shortID(rt.tenantID), rt.sync.ServerURL)
 	return runLoop(ctx, rt)
 }
 
@@ -150,9 +152,13 @@ func unlock(database *gorm.DB, password string) (*security.MasterKeyManager, err
 
 func runLoop(ctx context.Context, rt *runtimeConfig) error {
 	for {
-		if err := runOnce(ctx, rt); err != nil && ctx.Err() != nil {
-			return ctx.Err()
+		if err := runOnce(ctx, rt); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			log.Printf("eterm daemon relay disconnected: %v", err)
 		}
+		log.Printf("eterm daemon relay reconnecting in 2s")
 		select {
 		case <-time.After(2 * time.Second):
 		case <-ctx.Done():
@@ -170,6 +176,7 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("eterm daemon relay connected")
 	defer c.CloseNow()
 	keepaliveCtx, stopKeepalive := context.WithCancel(ctx)
 	defer stopKeepalive()
@@ -179,6 +186,7 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 	if err := c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
 		return err
 	}
+	log.Printf("eterm daemon relay registered peer=%s tenant=%s", rt.peerID, shortID(rt.tenantID))
 
 	var writeMu sync.Mutex
 	var sessionsMu sync.Mutex
@@ -206,6 +214,13 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 		}
 		handleFrame(rt, f, &sessionsMu, sessions, writeFrame, ctx)
 	}
+}
+
+func shortID(s string) string {
+	if len(s) <= 12 {
+		return s
+	}
+	return s[:12]
 }
 
 func handleFrame(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, writeFrame func(relay.Frame) error, ctx context.Context) {

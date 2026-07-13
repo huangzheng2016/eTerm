@@ -391,6 +391,13 @@ func (m *Model) SetReconnecting(attempt, maxAttempts int) {
 	m.reconnectMax = maxAttempts
 }
 
+func (m *Model) ReconnectingLabel() string {
+	if !m.reconnecting {
+		return ""
+	}
+	return fmt.Sprintf("RECONNECTING (%d/%d)", m.reconnectTry, m.reconnectMax)
+}
+
 // SetSize resizes the VT and notifies the remote PTY. h is mainContentHeightForType(SSHTab):
 // terminal minus tab strip, divider line, status bar (with shortcut hints). Toast shares the divider row in App.
 func (m *Model) SetSize(w, h int) {

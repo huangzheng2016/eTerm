@@ -297,6 +297,47 @@ func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
 	}
 }
 
+func TestRemoteTmuxAutoReconnectDoesNotStealActiveTab(t *testing.T) {
+	oldOpen := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		return &internalssh.InteractiveSession{}, "", nil
+	}
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a := remoteHTTPTestApp(t)
+	a.tabs = []Tab{
+		{Type: SSHTab, Title: "[T]peer-work", Model: tab},
+		{Type: HomeTab, Title: "Home", Model: nil},
+	}
+	a.activeTab = 1
+
+	next, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     1,
+		MaxAttempts: 3,
+	})
+	a = next
+	msg := lastBatchMessage(t, cmd)
+	opened, ok := msg.(remoteTerminalOpenedMsg)
+	if !ok {
+		t.Fatalf("got %T want remoteTerminalOpenedMsg", msg)
+	}
+	a, _ = a.applyRemoteTerminalOpened(opened)
+	if a.activeTab != 1 {
+		t.Fatalf("activeTab = %d want 1", a.activeTab)
+	}
+}
+
 func TestRemoteTmuxRenameAppliedUpdatesTabAndRefreshesList(t *testing.T) {
 	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
 	tab.SetRemoteReconnect(&types.RemoteReconnect{

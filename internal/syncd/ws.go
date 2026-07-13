@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -125,6 +126,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if tenant != "" && peerID != "" {
 			h.peers.UnregisterConn(tenant, peerID, send)
+			log.Printf("syncd relay daemon unregistered tenant=%s peer=%s", shortID(tenant), peerID)
 		}
 		h.closeDaemonSessions(send)
 		close(stop)
@@ -150,6 +152,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 			}
 			tenant = hello.Tenant
 			peerID = h.peers.Register(tenant, PeerInfo{ID: hello.PeerID, Name: hello.Name, LastSeen: time.Now()}, send)
+			log.Printf("syncd relay daemon registered tenant=%s peer=%s name=%q", shortID(tenant), peerID, hello.Name)
 			continue
 		}
 		if s, ok := h.session(f.StreamID); ok {
@@ -204,8 +207,10 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 				_ = trySend(send, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("bad open payload")})
 				continue
 			}
-			peer, ok := h.peers.Get(r.Header.Get("X-ETerm-Tenant"), open.PeerID)
+			tenant := r.Header.Get("X-ETerm-Tenant")
+			peer, ok := h.peers.Get(tenant, open.PeerID)
 			if !ok {
+				log.Printf("syncd relay peer offline tenant=%s peer=%s available=%v", shortID(tenant), open.PeerID, h.peers.IDs(tenant))
 				_ = trySend(send, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("peer offline")})
 				continue
 			}
@@ -230,6 +235,13 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func shortID(s string) string {
+	if len(s) <= 12 {
+		return s
+	}
+	return s[:12]
 }
 
 func writeWS(ctx context.Context, c *websocket.Conn, ch <-chan relay.Frame, stop <-chan struct{}, done chan<- struct{}) {

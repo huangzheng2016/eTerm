@@ -50,9 +50,7 @@ func (m *Model) View() tea.View {
 	}
 	if m.disconnected {
 		if m.reconnecting {
-			label := fmt.Sprintf("RECONNECTING (%d/%d)", m.reconnectTry, m.reconnectMax)
-			screen = overlayFirstLineRight(screen, m.emu.Width(), reconnectingBadgeStyle.Render(label))
-			banner := disconnectBannerStyle.Render("Reconnecting... " + label)
+			banner := disconnectBannerStyle.Render("Reconnecting...")
 			screen = strings.TrimRight(screen, "\n") + "\n\n" + banner
 			return tea.NewView(screen)
 		}

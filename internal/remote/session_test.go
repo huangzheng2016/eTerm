@@ -136,6 +136,70 @@ func TestOpenReadsDataFrames(t *testing.T) {
 	}
 }
 
+func TestOpenSessionSurvivesOpenContextCancel(t *testing.T) {
+	sendData := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		_, data, err := c.Read(r.Context())
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := c.Write(context.Background(), websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})); err != nil {
+			t.Error(err)
+			return
+		}
+		<-sendData
+		if err := c.Write(context.Background(), websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: []byte("after")})); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+	cancel()
+	close(sendData)
+
+	got := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 5)
+		_, err := io.ReadFull(is.Stdout, buf)
+		if err == nil && string(buf) != "after" {
+			err = errUnexpectedPayload(string(buf))
+		}
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stdout")
+	}
+}
+
+type errUnexpectedPayload string
+
+func (e errUnexpectedPayload) Error() string {
+	return "unexpected payload: " + string(e)
+}
+
 func TestOpenWithProgressReportsStages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
@@ -340,6 +404,60 @@ func TestOpenErrReturnsError(t *testing.T) {
 	_, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
 	if err == nil || err.Error() != "tmux not found in PATH" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestOpenRetriesPeerOffline(t *testing.T) {
+	oldDelay := peerOfflineRetryDelay
+	peerOfflineRetryDelay = time.Millisecond
+	t.Cleanup(func() { peerOfflineRetryDelay = oldDelay })
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_, data, err := c.Read(ctx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if attempts < 3 {
+			_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("peer offline")}))
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: []byte("ok")}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	buf := make([]byte, 2)
+	if _, err := io.ReadFull(is.Stdout, buf); err != nil {
+		t.Fatal(err)
+	}
+	if string(buf) != "ok" {
+		t.Fatalf("buf = %q", buf)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d", attempts)
 	}
 }
 

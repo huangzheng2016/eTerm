@@ -142,7 +142,7 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		if spec.Target == relay.TargetLocal {
 			tabType = LocalTab
 		}
-		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy}
+		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy, background: msg.Auto}
 	})
 }
 
@@ -236,7 +236,9 @@ func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cm
 			_ = old.Close()
 		}
 		a.tabs[msg.replaceTabAt] = tab
-		a.activeTab = msg.replaceTabAt
+		if !msg.background {
+			a.activeTab = msg.replaceTabAt
+		}
 	} else {
 		a.tabs = append(a.tabs, tab)
 		a.activeTab = len(a.tabs) - 1

@@ -95,3 +95,15 @@ func (r *PeerRegistry) Get(tenant, id string) (*PeerConn, bool) {
 	p, ok := r.tenants[tenant][id]
 	return p, ok
 }
+
+func (r *PeerRegistry) IDs(tenant string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	peers := r.tenants[tenant]
+	out := make([]string, 0, len(peers))
+	for id := range peers {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}

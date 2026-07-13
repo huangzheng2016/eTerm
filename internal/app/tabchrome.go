@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
 // layoutWidth returns terminal width for tab strip / body layout (minimum 80 when unknown).
@@ -65,17 +66,22 @@ func (a App) buildMainTabChrome(layoutW int) string {
 	tabBar := components.TabStrip(items, a.activeTab, layoutW)
 	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	toastView := strings.TrimSpace(a.toast.View())
+	reconnectView := reconnectBadgeView(a.activeReconnectLabel())
 	var secondLine string
-	if toastView != "" {
+	if toastView != "" || reconnectView != "" {
 		const toastLeftInset = 3
-		paddedToast := lipgloss.NewStyle().PaddingLeft(toastLeftInset).Render(toastView)
-		tw := lipgloss.Width(paddedToast)
-		rest := layoutW - tw
+		left := ""
+		if toastView != "" {
+			left = lipgloss.NewStyle().PaddingLeft(toastLeftInset).Render(toastView)
+		}
+		lw := lipgloss.Width(left)
+		rw := lipgloss.Width(reconnectView)
+		rest := layoutW - lw - rw
 		if rest < 0 {
 			rest = 0
 		}
 		rule := dividerStyle.Render(strings.Repeat("─", rest))
-		secondLine = lipgloss.JoinHorizontal(lipgloss.Top, paddedToast, rule)
+		secondLine = lipgloss.JoinHorizontal(lipgloss.Top, left, rule, reconnectView)
 	} else {
 		line := []rune(strings.Repeat("─", layoutW))
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isListView(a.tabs[a.activeTab].Type) && layoutW >= 52 && listSidebarWidth < len(line) {
@@ -84,6 +90,33 @@ func (a App) buildMainTabChrome(layoutW int) string {
 		secondLine = dividerStyle.Width(layoutW).Render(string(line))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, tabBar, secondLine)
+}
+
+func reconnectBadgeView(label string) string {
+	if label == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#111111")).
+		Background(lipgloss.Color("#f2cc60")).
+		Bold(true).
+		Padding(0, 1).
+		Render(label)
+}
+
+func (a App) activeReconnectLabel() string {
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return ""
+	}
+	tab := a.tabs[a.activeTab]
+	if !isTerminalTab(tab.Type) {
+		return ""
+	}
+	sm, ok := tab.Model.(*sshview.Model)
+	if !ok {
+		return ""
+	}
+	return sm.ReconnectingLabel()
 }
 
 // mainTabChromeTopLines returns the number of screen rows occupied by tab strip + divider.

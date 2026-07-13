@@ -32,6 +32,7 @@ type remoteTerminalOpenedMsg struct {
 	tabType      TabType
 	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
 	reconnect    *types.RemoteReconnect
+	background   bool
 }
 
 type remoteTmuxRenameAppliedMsg struct {

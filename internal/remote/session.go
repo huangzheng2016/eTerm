@@ -106,6 +106,20 @@ func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureT
 	ctx, cancel := openTimeoutContext(ctx)
 	defer cancel()
 
+	for {
+		conn, streamID, payload, err := openStreamOnce(ctx, serverURL, apiKey, tenant, insecureTLS, op, progress)
+		if !isPeerOffline(err) {
+			return conn, streamID, payload, err
+		}
+		select {
+		case <-time.After(peerOfflineRetryDelay):
+		case <-ctx.Done():
+			return nil, 0, nil, err
+		}
+	}
+}
+
+func openStreamOnce(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
 	header := http.Header{}
 	if apiKey != "" {
 		header.Set("Authorization", "Bearer "+apiKey)
@@ -157,6 +171,11 @@ func reportOpenProgress(progress ProgressFunc, stage OpenStage) {
 
 var defaultOpenTimeout = 30 * time.Second
 var defaultWriteTimeout = 10 * time.Second
+var peerOfflineRetryDelay = time.Second
+
+func isPeerOffline(err error) bool {
+	return err != nil && err.Error() == "peer offline"
+}
 
 func openTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Deadline(); ok {
@@ -173,11 +192,12 @@ func writeTimeoutContext(ctx context.Context) (context.Context, context.CancelFu
 }
 
 func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int) *internalssh.InteractiveSession {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
-	keepaliveCtx, stopKeepalive := context.WithCancel(ctx)
+	keepaliveCtx, stopKeepalive := context.WithCancel(sessionCtx)
 	wskeepalive.Start(keepaliveCtx, conn, wsKeepaliveInterval, wsKeepaliveTimeout)
-	stdin := &wsStdin{ctx: ctx, conn: conn, streamID: streamID}
+	stdin := &wsStdin{ctx: sessionCtx, conn: conn, streamID: streamID}
 	is := &internalssh.InteractiveSession{
 		Stdin:  stdin,
 		Stdout: pr,
@@ -185,15 +205,16 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 		Resize: func(rows, cols int) error {
 			stdin.mu.Lock()
 			defer stdin.mu.Unlock()
-			return writeFrame(ctx, conn, relay.Frame{Type: relay.FrameResize, StreamID: streamID, Payload: relay.ResizePayload(rows, cols)})
+			return writeFrame(sessionCtx, conn, relay.Frame{Type: relay.FrameResize, StreamID: streamID, Payload: relay.ResizePayload(rows, cols)})
 		},
 	}
+	is.AddCloser(closerFunc(cancelSession))
 	is.AddCloser(closerFunc(stopKeepalive))
 	go func() {
 		defer pw.Close()
 		sawData := false
 		for {
-			typ, data, err := conn.Read(ctx)
+			typ, data, err := conn.Read(sessionCtx)
 			if err != nil {
 				done <- err
 				return

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os/exec"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -328,8 +327,8 @@ func TestRemoteTmuxDisconnectStartsAutoReconnect(t *testing.T) {
 	if got.Spec.SessionID != "work" || !got.Spec.Tmux || got.StreamID != m.StreamID() || !got.Auto || got.Attempt != 1 || got.MaxAttempts != 3 {
 		t.Fatalf("bad reconnect msg %+v", got)
 	}
-	if !strings.Contains(m.View().Content, "RECONNECTING (1/3)") {
-		t.Fatalf("view missing reconnecting state:\n%s", m.View().Content)
+	if m.ReconnectingLabel() != "RECONNECTING (1/3)" {
+		t.Fatalf("reconnecting label = %q", m.ReconnectingLabel())
 	}
 
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Text: "r"}))
