@@ -59,6 +59,8 @@ type OpenRequest struct {
 
 const HeaderLen = 10
 
+const MaxWebSocketMessageBytes = 1 << 20
+
 type Frame struct {
 	Type     FrameType
 	Flags    byte

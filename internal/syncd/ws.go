@@ -114,6 +114,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	c.SetReadLimit(relay.MaxWebSocketMessageBytes)
 	defer c.CloseNow()
 
 	send := make(chan relay.Frame, relaySendQueueSize)
@@ -173,6 +174,7 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	c.SetReadLimit(relay.MaxWebSocketMessageBytes)
 	defer c.CloseNow()
 
 	send := make(chan relay.Frame, relaySendQueueSize)

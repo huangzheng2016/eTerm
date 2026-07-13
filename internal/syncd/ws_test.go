@@ -28,6 +28,7 @@ func TestWebSocketRelayData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	daemon.SetReadLimit(relay.MaxWebSocketMessageBytes)
 	defer daemon.CloseNow()
 	client, _, err := websocket.Dial(ctx, base+"/api/v1/ws/client", &websocket.DialOptions{
 		HTTPHeader: http.Header{"X-ETerm-Tenant": []string{"tenant-a"}},
@@ -35,6 +36,7 @@ func TestWebSocketRelayData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client.SetReadLimit(relay.MaxWebSocketMessageBytes)
 	defer client.CloseNow()
 
 	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: 1})
@@ -89,6 +91,22 @@ func TestWebSocketRelayData(t *testing.T) {
 	}
 	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, ansiPayload) {
 		t.Fatalf("got frame %#v, want DATA %q", f, ansiPayload)
+	}
+
+	largePayload := bytes.Repeat([]byte("x"), 40*1024)
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: largePayload})); err != nil {
+		t.Fatal(err)
+	}
+	_, data, err = client.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err = relay.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, largePayload) {
+		t.Fatalf("got frame type=%#v len=%d, want DATA len=%d", f.Type, len(f.Payload), len(largePayload))
 	}
 }
 

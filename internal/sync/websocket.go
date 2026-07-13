@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
 func DialWebSocket(ctx context.Context, urls []string, header http.Header, insecureTLS bool) (*websocket.Conn, error) {
@@ -18,6 +19,7 @@ func DialWebSocket(ctx context.Context, urls []string, header http.Header, insec
 			lastErr = err
 			continue
 		}
+		conn.SetReadLimit(relay.MaxWebSocketMessageBytes)
 		return conn, nil
 	}
 	if lastErr != nil {
