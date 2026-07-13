@@ -950,6 +950,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.ConnErrorMsg:
 		appDebugf("ConnErrorMsg: %v", msg.Err)
 		a = a.stopConnectProgress()
+		if retry, ok := msg.Retry.(types.RemoteShellReconnectMsg); ok {
+			for i := range a.tabs {
+				if sm, ok := a.tabs[i].Model.(*sshview.Model); ok && sm.StreamID() == retry.StreamID {
+					sm.SetReconnecting(0, 0)
+					break
+				}
+			}
+		}
 		a.connError = newConnErrorModel(internalssh.Classify(msg.Err), msg.Target, msg.Retry)
 		return a, reflowWindow(a)
 

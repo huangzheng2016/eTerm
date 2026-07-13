@@ -26,6 +26,12 @@ var disconnectedBadgeStyle = lipgloss.NewStyle().
 	Bold(true).
 	Padding(0, 1)
 
+var reconnectingBadgeStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#111111")).
+	Background(lipgloss.Color("#f2cc60")).
+	Bold(true).
+	Padding(0, 1)
+
 var scrollIndicatorStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#7D56F4")).
 	Bold(true)
@@ -43,6 +49,13 @@ func (m *Model) View() tea.View {
 		screen = m.renderScreenWithCursor()
 	}
 	if m.disconnected {
+		if m.reconnecting {
+			label := fmt.Sprintf("RECONNECTING (%d/%d)", m.reconnectTry, m.reconnectMax)
+			screen = overlayFirstLineRight(screen, m.emu.Width(), reconnectingBadgeStyle.Render(label))
+			banner := disconnectBannerStyle.Render("Reconnecting... " + label)
+			screen = strings.TrimRight(screen, "\n") + "\n\n" + banner
+			return tea.NewView(screen)
+		}
 		screen = overlayFirstLineRight(screen, m.emu.Width(), disconnectedBadgeStyle.Render("DISCONNECTED"))
 		key := viewkeys.HelpLabel(m.vk.Reconnect)
 		if key == "" {

@@ -52,6 +52,20 @@ func (w *daemonWriteCloser) Close() error {
 	return nil
 }
 
+type daemonOneByteReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *daemonOneByteReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	p[0] = r.data[r.pos]
+	r.pos++
+	return 1, nil
+}
+
 type daemonFakeSession struct {
 	is      *internalssh.InteractiveSession
 	stdin   *daemonWriteCloser
@@ -232,6 +246,25 @@ func TestPumpSessionSendsClosePayloadOnSessionError(t *testing.T) {
 		t.Fatalf("close payload = %q", closeFrame.Payload)
 	}
 	_ = fake.stdout.Close()
+}
+
+func TestPumpSessionCoalescesRapidOutput(t *testing.T) {
+	done := make(chan error)
+	is := &internalssh.InteractiveSession{
+		Stdout: &daemonOneByteReader{data: []byte("abc")},
+		Done:   done,
+	}
+	out := newDaemonSink()
+
+	go pumpSession(context.Background(), 16, is, out.write, func(uint32, *internalssh.InteractiveSession) bool {
+		return true
+	})
+
+	data := waitDaemonFrame(t, out, relay.FrameData)
+	if string(data.Payload) != "abc" {
+		t.Fatalf("data payload = %q", data.Payload)
+	}
+	_ = waitDaemonFrame(t, out, relay.FrameClose)
 }
 
 func TestHandleOpenTmuxErrorTargetsReturnOpenErr(t *testing.T) {

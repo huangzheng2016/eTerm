@@ -155,8 +155,11 @@ type RemoteReconnect struct {
 }
 
 type RemoteShellReconnectMsg struct {
-	StreamID uint64
-	Spec     RemoteReconnect
+	StreamID    uint64
+	Spec        RemoteReconnect
+	Auto        bool
+	Attempt     int
+	MaxAttempts int
 }
 
 type MasterKeyUnlockedMsg struct {

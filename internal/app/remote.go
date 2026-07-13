@@ -96,10 +96,23 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 	if idx < 0 {
 		return a, nil
 	}
+	if msg.Auto {
+		if msg.Attempt <= 0 {
+			msg.Attempt = 1
+		}
+		if msg.MaxAttempts <= 0 {
+			msg.MaxAttempts = 3
+		}
+		if sm, ok := a.tabs[idx].Model.(*sshview.Model); ok {
+			sm.SetReconnecting(msg.Attempt, msg.MaxAttempts)
+		}
+	}
 	title := a.tabs[idx].Title
 	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
 	spec := msg.Spec
 	streamID := msg.StreamID
+	attempt := msg.Attempt
+	maxAttempts := msg.MaxAttempts
 	prefix := "Remote reconnect"
 	var progress func(string)
 	var progressCh chan string
@@ -119,6 +132,9 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 			})
 		}
 		if err != nil {
+			if msg.Auto && attempt < maxAttempts {
+				return types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec, Auto: true, Attempt: attempt + 1, MaxAttempts: maxAttempts}
+			}
 			return types.ConnErrorMsg{Err: err, Target: title, Retry: types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec}}
 		}
 		specCopy := spec

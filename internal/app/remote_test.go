@@ -250,6 +250,53 @@ func TestApplyRemoteTmuxReconnectReopensTmuxSession(t *testing.T) {
 	}
 }
 
+func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
+	oldOpen := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		return nil, "", errors.New("dial failed")
+	}
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a := remoteHTTPTestApp(t)
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
+
+	_, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     1,
+		MaxAttempts: 3,
+	})
+	msg := lastBatchMessage(t, cmd)
+	next, ok := msg.(types.RemoteShellReconnectMsg)
+	if !ok {
+		t.Fatalf("got %T want RemoteShellReconnectMsg", msg)
+	}
+	if !next.Auto || next.Attempt != 2 || next.MaxAttempts != 3 {
+		t.Fatalf("next reconnect = %+v", next)
+	}
+
+	_, cmd = a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     3,
+		MaxAttempts: 3,
+	})
+	msg = lastBatchMessage(t, cmd)
+	if _, ok := msg.(types.ConnErrorMsg); !ok {
+		t.Fatalf("got %T want ConnErrorMsg", msg)
+	}
+}
+
 func TestRemoteTmuxRenameAppliedUpdatesTabAndRefreshesList(t *testing.T) {
 	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
 	tab.SetRemoteReconnect(&types.RemoteReconnect{

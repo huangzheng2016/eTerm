@@ -36,11 +36,15 @@ const selectionAutoScrollEdgePercent = 20
 
 const maxCoalescedChunkBytes = 64 * 1024
 
+const outputCoalesceInterval = 8 * time.Millisecond
+
 const inputQueueSize = 512
 
 const resizeQueueSize = 4
 
 const scrollIndicatorDuration = 3 * time.Second
+
+const remoteTmuxReconnectAttempts = 3
 
 var xtgettcapValues = map[string]string{
 	"Tc":     "1",
@@ -108,6 +112,9 @@ type Model struct {
 	waitComplete bool
 	doneClosed   chan struct{}
 	disconnected bool
+	reconnecting bool
+	reconnectTry int
+	reconnectMax int
 
 	// Scrollback view: scrollOffset > 0 means viewing history.
 	// 0 = live view (bottom of scrollback), N = N lines scrolled up.
@@ -372,6 +379,18 @@ func (m *Model) PasteText(text string) {
 // Disconnected is true after a network-style drop; press "r" to send [types.SSHReconnectMsg].
 func (m *Model) Disconnected() bool { return m.disconnected }
 
+func (m *Model) SetReconnecting(attempt, maxAttempts int) {
+	if attempt <= 0 || maxAttempts <= 0 {
+		m.reconnecting = false
+		m.reconnectTry = 0
+		m.reconnectMax = 0
+		return
+	}
+	m.reconnecting = true
+	m.reconnectTry = attempt
+	m.reconnectMax = maxAttempts
+}
+
 // SetSize resizes the VT and notifies the remote PTY. h is mainContentHeightForType(SSHTab):
 // terminal minus tab strip, divider line, status bar (with shortcut hints). Toast shares the divider row in App.
 func (m *Model) SetSize(w, h int) {
@@ -496,6 +515,8 @@ func coalesceQueuedChunks(ch <-chan []byte, first []byte) []byte {
 		return first
 	}
 	out := first
+	timer := time.NewTimer(outputCoalesceInterval)
+	defer timer.Stop()
 	for len(out) < maxCoalescedChunkBytes {
 		select {
 		case next, ok := <-ch:
@@ -510,7 +531,7 @@ func coalesceQueuedChunks(ch <-chan []byte, first []byte) []byte {
 				return out
 			}
 			out = append(out, next...)
-		default:
+		case <-timer.C:
 			return out
 		}
 	}
@@ -593,6 +614,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sess != nil {
 				_ = m.sess.Close()
 				m.sess = nil
+			}
+			if m.remote != nil && m.remote.Tmux {
+				m.SetReconnecting(1, remoteTmuxReconnectAttempts)
+				spec := *m.remote
+				return m, func() tea.Msg {
+					return types.RemoteShellReconnectMsg{StreamID: m.streamID, Spec: spec, Auto: true, Attempt: 1, MaxAttempts: remoteTmuxReconnectAttempts}
+				}
 			}
 			alias := m.alias
 			retry := tea.Msg(nil)

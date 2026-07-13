@@ -48,6 +48,8 @@ const (
 	wsWriteTimeout      = 10 * time.Second
 	openRequestTimeout  = 30 * time.Second
 	sessionStartupGrace = 150 * time.Millisecond
+	outputFlushInterval = 8 * time.Millisecond
+	maxOutputFrameBytes = 64 * 1024
 )
 
 var (
@@ -446,16 +448,90 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 }
 
 func pumpSession(ctx context.Context, streamID uint32, is *internalssh.InteractiveSession, writeFrame func(relay.Frame) error, cleanup func(uint32, *internalssh.InteractiveSession) bool) {
+	stopRead := make(chan struct{})
+	chunks, readDone := readSessionOutput(is.Stdout, stopRead)
+	var closeErr error
+	var pending []byte
+	var flushC <-chan time.Time
+	var flushTimer *time.Timer
+	stopFlushTimer := func() {
+		if flushTimer == nil {
+			return
+		}
+		if !flushTimer.Stop() {
+			select {
+			case <-flushTimer.C:
+			default:
+			}
+		}
+		flushTimer = nil
+		flushC = nil
+	}
+	flush := func() bool {
+		if len(pending) == 0 {
+			return true
+		}
+		payload := pending
+		pending = nil
+		stopFlushTimer()
+		if err := writeFrame(relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: payload}); err != nil {
+			closeErr = err
+			return false
+		}
+		return true
+	}
+	startFlushTimer := func() {
+		if flushTimer != nil || len(pending) == 0 {
+			return
+		}
+		flushTimer = time.NewTimer(outputFlushInterval)
+		flushC = flushTimer.C
+	}
+	for closeErr == nil {
+		select {
+		case <-ctx.Done():
+			closeErr = ctx.Err()
+		case closeErr = <-is.Done:
+		case chunk, ok := <-chunks:
+			if !ok {
+				_ = flush()
+				closeErr = sessionDoneErr(<-readDone, is.Done)
+				break
+			}
+			pending = append(pending, chunk...)
+			if len(pending) >= maxOutputFrameBytes {
+				_ = flush()
+				break
+			}
+			startFlushTimer()
+		case <-flushC:
+			_ = flush()
+		}
+	}
+	_ = flush()
+	stopFlushTimer()
+	close(stopRead)
+	if cleanup == nil || cleanup(streamID, is) {
+		_ = is.Close()
+		_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: closePayload(closeErr)})
+	}
+}
+
+func readSessionOutput(stdout io.Reader, stop <-chan struct{}) (<-chan []byte, <-chan error) {
+	chunks := make(chan []byte, 128)
 	done := make(chan error, 1)
 	go func() {
+		defer close(chunks)
 		buf := make([]byte, 8192)
 		for {
-			n, err := is.Stdout.Read(buf)
+			n, err := stdout.Read(buf)
 			if n > 0 {
 				payload := make([]byte, n)
 				copy(payload, buf[:n])
-				if err := writeFrame(relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: payload}); err != nil {
-					done <- err
+				select {
+				case chunks <- payload:
+				case <-stop:
+					done <- nil
 					return
 				}
 			}
@@ -465,18 +541,7 @@ func pumpSession(ctx context.Context, streamID uint32, is *internalssh.Interacti
 			}
 		}
 	}()
-	var closeErr error
-	select {
-	case <-ctx.Done():
-		closeErr = ctx.Err()
-	case closeErr = <-is.Done:
-	case err := <-done:
-		closeErr = sessionDoneErr(err, is.Done)
-	}
-	if cleanup == nil || cleanup(streamID, is) {
-		_ = is.Close()
-		_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: closePayload(closeErr)})
-	}
+	return chunks, done
 }
 
 func sessionDoneErr(readErr error, sessionDone <-chan error) error {

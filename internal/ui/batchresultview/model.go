@@ -19,6 +19,11 @@ import (
 
 var jobIDGen atomic.Uint64
 
+const (
+	outputFlushInterval = 8 * time.Millisecond
+	maxOutputMsgBytes   = 64 * 1024
+)
+
 type hostState struct {
 	HostID     uint
 	Label      string
@@ -242,16 +247,69 @@ func (m *Model) runHost(hostID uint) {
 
 func (m *Model) readPipe(hostID uint, r io.Reader, wg *sync.WaitGroup) {
 	defer wg.Done()
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			m.emit(HostOutputMsg{JobID: m.jobID, HostID: hostID, Data: string(buf[:n])})
-		}
-		if err != nil {
+	chunks := readOutputChunks(r)
+	var pending strings.Builder
+	var flushC <-chan time.Time
+	var flushTimer *time.Timer
+	stopTimer := func() {
+		if flushTimer == nil {
 			return
 		}
+		if !flushTimer.Stop() {
+			select {
+			case <-flushTimer.C:
+			default:
+			}
+		}
+		flushTimer = nil
+		flushC = nil
 	}
+	flush := func() {
+		if pending.Len() == 0 {
+			return
+		}
+		m.emit(HostOutputMsg{JobID: m.jobID, HostID: hostID, Data: pending.String()})
+		pending.Reset()
+		stopTimer()
+	}
+	for {
+		select {
+		case chunk, ok := <-chunks:
+			if !ok {
+				flush()
+				return
+			}
+			pending.WriteString(chunk)
+			if pending.Len() >= maxOutputMsgBytes {
+				flush()
+				continue
+			}
+			if flushTimer == nil {
+				flushTimer = time.NewTimer(outputFlushInterval)
+				flushC = flushTimer.C
+			}
+		case <-flushC:
+			flush()
+		}
+	}
+}
+
+func readOutputChunks(r io.Reader) <-chan string {
+	chunks := make(chan string, 128)
+	go func() {
+		defer close(chunks)
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				chunks <- string(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return chunks
 }
 
 func shellQuote(s string) string {

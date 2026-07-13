@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -220,6 +221,24 @@ func TestWaitChunkCoalescesQueuedChunks(t *testing.T) {
 	}
 }
 
+func TestWaitChunkCoalescesBrieflyDelayedChunks(t *testing.T) {
+	m := &Model{streamID: 7, ch: make(chan []byte, 4)}
+	m.ch <- []byte("a")
+	go func() {
+		time.Sleep(2 * time.Millisecond)
+		m.ch <- []byte("b")
+	}()
+
+	msg := waitChunk(m)()
+	got, ok := msg.(ChunkMsg)
+	if !ok {
+		t.Fatalf("got %T want ChunkMsg", msg)
+	}
+	if got.StreamID != 7 || string(got.Data) != "ab" {
+		t.Fatalf("got stream=%d data=%q", got.StreamID, got.Data)
+	}
+}
+
 func TestWaitChunkDoesNotDropChunkAtCoalesceLimit(t *testing.T) {
 	m := &Model{streamID: 7, ch: make(chan []byte, 2)}
 	first := bytes.Repeat([]byte("a"), maxCoalescedChunkBytes-1)
@@ -293,25 +312,24 @@ func TestRemoteLocalShellAbnormalStreamDoneShowsConnectionError(t *testing.T) {
 	}
 }
 
-func TestRemoteShellReconnectOffersRemoteRetry(t *testing.T) {
+func TestRemoteTmuxDisconnectStartsAutoReconnect(t *testing.T) {
 	m := New(nil, "[T]remote-work", 0, viewkeys.SSHKeys{Reconnect: []string{"r"}})
 	t.Cleanup(func() { _ = m.Close() })
 	m.SetRemoteReconnect(&types.RemoteReconnect{Peer: types.RemotePeer{ID: "p1"}, Tmux: true, Target: relay.TargetTmuxAttach, SessionID: "work"})
 
 	_, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
 	if cmd == nil {
-		t.Fatal("expected connection error command")
+		t.Fatal("expected auto reconnect command")
 	}
-	got, ok := cmd().(types.ConnErrorMsg)
+	got, ok := cmd().(types.RemoteShellReconnectMsg)
 	if !ok {
-		t.Fatalf("got %T want types.ConnErrorMsg", got)
+		t.Fatalf("got %T want types.RemoteShellReconnectMsg", got)
 	}
-	rc, ok := got.Retry.(types.RemoteShellReconnectMsg)
-	if !ok {
-		t.Fatalf("retry = %T want types.RemoteShellReconnectMsg", got.Retry)
+	if got.Spec.SessionID != "work" || !got.Spec.Tmux || got.StreamID != m.StreamID() || !got.Auto || got.Attempt != 1 || got.MaxAttempts != 3 {
+		t.Fatalf("bad reconnect msg %+v", got)
 	}
-	if rc.Spec.SessionID != "work" || !rc.Spec.Tmux || rc.StreamID != m.StreamID() {
-		t.Fatalf("bad reconnect spec %+v stream %d", rc.Spec, rc.StreamID)
+	if !strings.Contains(m.View().Content, "RECONNECTING (1/3)") {
+		t.Fatalf("view missing reconnecting state:\n%s", m.View().Content)
 	}
 
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Text: "r"}))
