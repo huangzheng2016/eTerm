@@ -56,13 +56,14 @@ func TestDefaultSessionNameUsesShortTmuxPrefix(t *testing.T) {
 
 func TestSessionCommandsDisableStatus(t *testing.T) {
 	name := "tmux-abc123"
-	if got := newSessionDetachedArgs(name); !sameStrings(got, []string{"new-session", "-d", "-s", name}) {
+	config := "/tmp/eterm-tmux.conf"
+	if got := newSessionDetachedArgs(config, name); !sameStrings(got, []string{"-f", config, "new-session", "-d", "-s", name}) {
 		t.Fatalf("new args = %#v", got)
 	}
-	if got := statusOffArgs(name); !sameStrings(got, []string{"set-option", "-t", name, "status", "off"}) {
+	if got := statusOffArgs(config, name); !sameStrings(got, []string{"-f", config, "set-option", "-t", name, "status", "off"}) {
 		t.Fatalf("status args = %#v", got)
 	}
-	if got := attachSessionArgs(name); !sameStrings(got, []string{"attach-session", "-t", name}) {
+	if got := attachSessionArgs(config, name); !sameStrings(got, []string{"-f", config, "attach-session", "-t", name}) {
 		t.Fatalf("attach args = %#v", got)
 	}
 }
@@ -79,20 +80,20 @@ func TestNewSessionCleansUpWhenAttachFails(t *testing.T) {
 	created := ""
 	killed := ""
 	runTmuxCmd = func(ctx context.Context, op string, args []string) error {
-		if op == "new-session" && len(args) == 4 {
-			created = args[3]
+		if op == "new-session" && len(args) == 6 {
+			created = args[5]
 		}
 		return nil
 	}
-	attachTmuxSession = func(ctx context.Context, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
+	attachTmuxSession = func(ctx context.Context, configFile, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
 		return nil, errors.New("attach failed")
 	}
-	killTmuxSession = func(ctx context.Context, name string) error {
+	killTmuxSession = func(ctx context.Context, configFile, name string) error {
 		killed = name
 		return nil
 	}
 
-	_, _, err := NewSession(context.Background(), 24, 80)
+	_, _, err := NewSession(context.Background(), "/tmp/tmux.conf", 24, 80)
 	if err == nil || err.Error() != "attach failed" {
 		t.Fatalf("err = %v", err)
 	}
@@ -107,8 +108,8 @@ func TestAttachSessionKeepsProcessAfterOpenContextCancel(t *testing.T) {
 	tmuxPath := filepath.Join(dir, "tmux")
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
-		"if [ \"$1\" = \"set-option\" ]; then exit 0; fi\n" +
-		"if [ \"$1\" = \"attach-session\" ]; then\n" +
+		"if [ \"$3\" = \"set-option\" ]; then exit 0; fi\n" +
+		"if [ \"$3\" = \"attach-session\" ]; then\n" +
 		"  printf 'ready\\n'\n" +
 		"  while IFS= read -r line; do printf 'got:%s\\n' \"$line\"; done\n" +
 		"fi\n"
@@ -118,7 +119,7 @@ func TestAttachSessionKeepsProcessAfterOpenContextCancel(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	is, err := AttachSession(ctx, "work", 24, 80)
+	is, err := AttachSession(ctx, filepath.Join(dir, "tmux.conf"), "work", 24, 80)
 	if err != nil {
 		t.Fatal(err)
 	}

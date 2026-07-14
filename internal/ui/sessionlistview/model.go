@@ -12,6 +12,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 	"gorm.io/gorm"
 )
@@ -30,6 +31,7 @@ type Model struct {
 	detailScroll  int
 	showEmpty     bool
 	showEmptyKeys []string
+	selection     textselection.Selection
 }
 
 type loadedMsg struct {
@@ -120,7 +122,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			switch msg.String() {
 			case "esc", "escape":
-				m.detail, m.detailScroll = false, 0
+				m.detail, m.detailScroll, m.selection = false, 0, textselection.Selection{}
 			case "up", "k":
 				m.detailScroll--
 			case "down", "j":
@@ -157,6 +159,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.search.Focus()
 		}
 	case tea.MouseClickMsg:
+		if m.detail && !m.searching && msg.Button == tea.MouseLeft {
+			if line, col, ok := m.detailTextPoint(msg.X, msg.Y); ok {
+				m.selection.Begin(line, col)
+			}
+			return m, nil
+		}
 		if !m.detail && !m.searching && msg.Button == tea.MouseLeft {
 			page := 0
 			if m.grid.PageSize > 0 {
@@ -174,11 +182,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail && !m.searching {
 			switch msg.Button {
 			case tea.MouseWheelUp, tea.MouseWheelLeft:
-				m.detailScroll -= 3
+				m.detailScroll -= 6
 			case tea.MouseWheelDown, tea.MouseWheelRight:
-				m.detailScroll += 3
+				m.detailScroll += 6
 			}
 			m.clampDetailScroll()
+		}
+	case tea.MouseMotionMsg:
+		if m.detail && m.selection.Dragging {
+			line, col, _ := m.detailTextPoint(msg.X, msg.Y)
+			m.selection.Move(line, col)
+		}
+	case tea.MouseReleaseMsg:
+		if m.detail && m.selection.Dragging {
+			line, col, _ := m.detailTextPoint(msg.X, msg.Y)
+			if m.selection.End(line, col) {
+				return m, tea.SetClipboard(m.selection.Text(strings.Split(m.selectedTranscript(), "\n")))
+			}
 		}
 	}
 	return m, nil
@@ -206,7 +226,9 @@ func (m *Model) View() tea.View {
 		return tea.NewView(header + "\n" + components.EmptyState(m.width, m.height-1, "No matching saved sessions."))
 	}
 	cards := make([]string, len(m.rows))
-	for i, row := range m.rows {
+	start, end := components.GridPageRange(len(m.rows), m.cursor, m.grid)
+	for i := start; i < end; i++ {
+		row := m.rows[i]
 		cards[i] = components.RenderCard(sessionTitle(row), sessionDescription(row), i == m.cursor, m.grid.CardW)
 	}
 	return tea.NewView(header + "\n" + components.RenderGridRows(cards, len(cards), m.cursor, m.grid))
@@ -226,7 +248,11 @@ func (m *Model) detailView() string {
 	end := min(len(lines), m.detailScroll+available)
 	body := ""
 	if m.detailScroll < len(lines) && strings.TrimSpace(transcript) != "" {
-		body = strings.Join(lines[m.detailScroll:end], "\n")
+		visible := append([]string(nil), lines[m.detailScroll:end]...)
+		for i := range visible {
+			visible[i] = m.selection.RenderLine(visible[i], m.detailScroll+i)
+		}
+		body = strings.Join(visible, "\n")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		ui.TitleStyle.Render(sessionTitle(row)),
@@ -236,6 +262,12 @@ func (m *Model) detailView() string {
 		"",
 		ui.DimStyle.Render("j/k scroll · pgup/pgdown · mouse wheel · c copy transcript · esc back"),
 	)
+}
+
+func (m *Model) detailTextPoint(x, y int) (int, int, bool) {
+	line := m.detailScroll + y - 3
+	maxLine := len(strings.Split(m.selectedTranscript(), "\n")) - 1
+	return min(max(0, line), max(0, maxLine)), max(0, x), y >= 3 && y < 3+m.detailPageSize()
 }
 
 func (m *Model) selectedTranscript() string {

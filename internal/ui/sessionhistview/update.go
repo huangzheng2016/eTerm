@@ -37,14 +37,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		row := msg.Y - 2
 		if stacked || msg.X < listW {
-			if row >= 0 && row < len(m.rows) {
-				m.sel = row
+			start, end := m.listPageRange()
+			idx := start + row
+			if idx >= start && idx < end {
+				m.sel = idx
 				m.scroll = 0
 				m.focusList = true
 			}
 			return m, nil
 		}
 		m.focusList = false
+		if line, col, ok := m.transcriptTextPoint(msg.X, msg.Y); ok {
+			m.selection.Begin(line, col)
+		}
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -58,9 +63,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delta := 0
 		switch msg.Button {
 		case tea.MouseWheelUp, tea.MouseWheelLeft:
-			delta = -3
+			delta = -6
 		case tea.MouseWheelDown, tea.MouseWheelRight:
-			delta = 3
+			delta = 6
 		default:
 			return m, nil
 		}
@@ -80,6 +85,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.scroll += delta
 		clampTranscriptScroll(m)
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		if m.selection.Dragging {
+			line, col, _ := m.transcriptTextPoint(msg.X, msg.Y)
+			m.selection.Move(line, col)
+		}
+		return m, nil
+
+	case tea.MouseReleaseMsg:
+		if m.selection.Dragging {
+			line, col, _ := m.transcriptTextPoint(msg.X, msg.Y)
+			if m.selection.End(line, col) {
+				return m, tea.SetClipboard(m.selection.Text(strings.Split(m.selectedTranscript(), "\n")))
+			}
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -138,9 +159,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			clampTranscriptScroll(m)
 			return m, nil
+		case "c":
+			return m, tea.SetClipboard(m.selectedTranscript())
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) transcriptTextPoint(x, y int) (int, int, bool) {
+	listW, _, stacked := m.layoutWidths()
+	top := 3
+	left := listW + 3
+	if stacked {
+		start, end := m.listPageRange()
+		top = end - start + 4
+		left = 1
+	}
+	line := m.scroll + y - top
+	maxLine := len(strings.Split(m.selectedTranscript(), "\n")) - 1
+	return min(max(0, line), max(0, maxLine)), max(0, x-left), y >= top
 }
 
 func (m *Model) layoutWidths() (int, int, bool) {

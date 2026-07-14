@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -139,7 +140,7 @@ func TestDecliningTmuxRestoreClearsSnapshot(t *testing.T) {
 	}
 }
 
-func TestConfirmingTmuxRestoreOpensTabsInSavedOrder(t *testing.T) {
+func TestConfirmingTmuxRestoreCreatesTabsBeforeOpeningInSavedOrder(t *testing.T) {
 	oldAttach := appAttachTmuxSession
 	oldRemoteOpen := remoteOpenTmuxSessionWithProgress
 	t.Cleanup(func() {
@@ -147,7 +148,7 @@ func TestConfirmingTmuxRestoreOpensTabsInSavedOrder(t *testing.T) {
 		remoteOpenTmuxSessionWithProgress = oldRemoteOpen
 	})
 	var opened []string
-	appAttachTmuxSession = func(ctx context.Context, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
+	appAttachTmuxSession = func(ctx context.Context, _ string, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
 		opened = append(opened, "local:"+name)
 		return &internalssh.InteractiveSession{}, nil
 	}
@@ -171,11 +172,29 @@ func TestConfirmingTmuxRestoreOpensTabsInSavedOrder(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected restore command")
 	}
-	msg := cmd()
-	next, _ := a.Update(msg)
-	a = next.(App)
+	if len(a.tabs) != 4 {
+		t.Fatalf("tabs before attach = %#v, want home + 3 restoring tabs", a.tabs)
+	}
+	if a.activeTab != 0 {
+		t.Fatalf("active tab = %d want unchanged home tab", a.activeTab)
+	}
+	for i := 1; i < len(a.tabs); i++ {
+		sm := a.tabs[i].Model.(*sshview.Model)
+		if sm.ReconnectingLabel() == "" {
+			t.Fatalf("tab %d is not marked reconnecting", i)
+		}
+	}
 
-	wantOpened := []string{"local:work", "remote:p1:ops", "local:logs"}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 3 {
+		t.Fatalf("restore command = %T len=%d, want 3-command batch", batch, len(batch))
+	}
+	for i := len(batch) - 1; i >= 0; i-- {
+		next, _ := a.Update(batch[i]())
+		a = next.(App)
+	}
+
+	wantOpened := []string{"local:logs", "remote:p1:ops", "local:work"}
 	if len(opened) != len(wantOpened) {
 		t.Fatalf("opened = %#v, want %#v", opened, wantOpened)
 	}
@@ -195,6 +214,35 @@ func TestConfirmingTmuxRestoreOpensTabsInSavedOrder(t *testing.T) {
 	}
 	if a.tabs[3].Type != LocalTab || a.tabs[3].TmuxSession != "logs" {
 		t.Fatalf("tab3 = %#v", a.tabs[3])
+	}
+}
+
+func TestTmuxRestoreMissingSessionClosesOnlyPlaceholder(t *testing.T) {
+	a := restoreTestApp(t)
+	a.viewState = MainView
+	a.tabs = []Tab{{Type: HomeTab, Title: "List"}}
+	a.activeTab = 0
+
+	cmd := (&a).restoreTmuxSessions([]tmuxRestoreEntry{
+		{Kind: tmuxRestoreLocal, Session: "gone", Title: "[T]gone"},
+		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
+	})
+	if cmd == nil || len(a.tabs) != 3 {
+		t.Fatalf("tabs before result = %#v", a.tabs)
+	}
+	missingID := a.tabs[1].tmuxRestoreID
+	next, _ := a.Update(tmuxRestoreOpenedMsg{
+		id:    missingID,
+		entry: tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "gone", Title: "[T]gone"},
+		err:   errors.New("tmux attach-session: exit status 1: can't find session: gone"),
+	})
+	a = next.(App)
+
+	if len(a.tabs) != 2 || a.tabs[1].Title != "[T]work" {
+		t.Fatalf("tabs after missing session = %#v", a.tabs)
+	}
+	if a.activeTab != 0 || a.connError != nil {
+		t.Fatalf("active tab=%d connError=%v", a.activeTab, a.connError)
 	}
 }
 

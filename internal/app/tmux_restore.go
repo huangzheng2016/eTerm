@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/config"
@@ -40,10 +41,7 @@ type tmuxRestoreFile struct {
 }
 
 type tmuxRestoreOpenedMsg struct {
-	opened []tmuxRestoreOpened
-}
-
-type tmuxRestoreOpened struct {
+	id    uint64
 	entry tmuxRestoreEntry
 	is    *internalssh.InteractiveSession
 	err   error
@@ -173,69 +171,150 @@ func (a App) clearTmuxRestoreFile() {
 	_ = writeTmuxRestoreFile(path, nil)
 }
 
-func (a App) restoreTmuxSessions(entries []tmuxRestoreEntry) tea.Cmd {
+func (a *App) restoreTmuxSessions(entries []tmuxRestoreEntry) tea.Cmd {
 	entries = validTmuxRestoreEntries(entries)
 	if len(entries) == 0 {
 		return nil
 	}
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
-	return func() tea.Msg {
-		opened := make([]tmuxRestoreOpened, 0, len(entries))
-		for _, entry := range entries {
+	var cmds []tea.Cmd
+	for _, entry := range entries {
+		a.tmuxRestoreSeq++
+		id := a.tmuxRestoreSeq
+		title := entry.Title
+		tabType := LocalTab
+		if entry.Kind == tmuxRestoreLocal {
+			if title == "" {
+				title = tmuxTabTitle(entry.Session)
+			}
+		} else {
+			tabType = SSHTab
+			if title == "" {
+				title = remoteTmuxTabTitle(entry.PeerName, entry.Session)
+			}
+		}
+		sv := sshview.New(nil, title, 0, BuildSSHKeys(a.kbConfig))
+		sv.SetReconnecting(1, 1)
+		if entry.Kind == tmuxRestoreRemote {
+			sv.SetRemoteReconnect(&types.RemoteReconnect{
+				Peer:      types.RemotePeer{ID: entry.PeerID, Name: entry.PeerName},
+				Target:    relay.TargetTmuxAttach,
+				Tmux:      true,
+				SessionID: entry.Session,
+			})
+		}
+		if a.width > 0 {
+			sv.SetSize(a.width, a.mainContentHeightForType(tabType))
+		}
+		a.tabs = append(a.tabs, Tab{Type: tabType, Title: title, Model: sv, TmuxSession: localTmuxSession(entry), tmuxRestoreID: id})
+
+		entry := entry
+		cols, rows := ptyFromAppSizeForTab(*a, tabType)
+		cmds = append(cmds, func() tea.Msg {
 			switch entry.Kind {
 			case tmuxRestoreLocal:
-				is, err := appAttachTmuxSession(context.Background(), entry.Session, rows, cols)
-				opened = append(opened, tmuxRestoreOpened{entry: entry, is: is, err: err})
+				configFile, err := a.resolveTmuxConfig()
+				if err != nil {
+					return tmuxRestoreOpenedMsg{id: id, entry: entry, err: err}
+				}
+				is, err := appAttachTmuxSession(context.Background(), configFile, entry.Session, rows, cols)
+				return tmuxRestoreOpenedMsg{id: id, entry: entry, is: is, err: err}
 			case tmuxRestoreRemote:
 				is, _, err := remoteOpenTmuxSessionWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, entry.PeerID, relay.TargetTmuxAttach, entry.Session, rows, cols, nil)
-				opened = append(opened, tmuxRestoreOpened{entry: entry, is: is, err: err})
+				return tmuxRestoreOpenedMsg{id: id, entry: entry, is: is, err: err}
 			}
-		}
-		return tmuxRestoreOpenedMsg{opened: opened}
-	}
-}
-
-func (a App) applyTmuxRestoreOpened(msg tmuxRestoreOpenedMsg) (App, tea.Cmd) {
-	var cmds []tea.Cmd
-	for _, item := range msg.opened {
-		if item.err != nil || item.is == nil {
-			continue
-		}
-		switch item.entry.Kind {
-		case tmuxRestoreLocal:
-			title := item.entry.Title
-			if title == "" {
-				title = tmuxTabTitle(item.entry.Session)
-			}
-			sv := sshview.New(item.is, title, 0, BuildSSHKeys(a.kbConfig))
-			sv.SetHistoryID(createLocalSessionHistory(a.db, title, "tmux"))
-			if a.width > 0 {
-				sv.SetSize(a.width, a.mainContentHeightForType(LocalTab))
-			}
-			a.tabs = append(a.tabs, Tab{Type: LocalTab, Title: title, Model: sv, TmuxSession: item.entry.Session})
-			cmds = append(cmds, sv.Init())
-		case tmuxRestoreRemote:
-			peer := types.RemotePeer{ID: item.entry.PeerID, Name: item.entry.PeerName}
-			spec := &types.RemoteReconnect{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: item.entry.Session}
-			title := item.entry.Title
-			if title == "" {
-				title = remoteTmuxTabTitle(peer.Name, item.entry.Session)
-			}
-			sv := sshview.New(item.is, title, 0, BuildSSHKeys(a.kbConfig))
-			sv.SetHistoryID(createLocalSessionHistory(a.db, title, "remote-tmux"))
-			sv.SetRemoteReconnect(spec)
-			if a.width > 0 {
-				sv.SetSize(a.width, a.mainContentHeightForType(SSHTab))
-			}
-			a.tabs = append(a.tabs, Tab{Type: SSHTab, Title: title, Model: sv})
-			cmds = append(cmds, sv.Init())
-		}
-	}
-	if len(a.tabs) > 0 {
-		a.activeTab = len(a.tabs) - 1
+			return tmuxRestoreOpenedMsg{id: id, entry: entry, err: errors.New("invalid tmux restore entry")}
+		})
 	}
 	a.syncTabBar()
 	a.persistTmuxRestoreSnapshot()
-	return a, tea.Batch(cmds...)
+	return tea.Batch(cmds...)
+}
+
+func (a App) applyTmuxRestoreOpened(msg tmuxRestoreOpenedMsg) (App, tea.Cmd) {
+	idx := -1
+	for i := range a.tabs {
+		if a.tabs[i].tmuxRestoreID == msg.id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		if msg.is != nil {
+			_ = msg.is.Close()
+		}
+		return a, nil
+	}
+	placeholder, _ := a.tabs[idx].Model.(*sshview.Model)
+	if msg.err != nil || msg.is == nil {
+		if isMissingTmuxSession(msg.err) {
+			if placeholder != nil {
+				_ = placeholder.Close()
+			}
+			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
+			if idx < a.activeTab || a.activeTab >= len(a.tabs) {
+				a.activeTab = max(0, a.activeTab-1)
+			}
+			a.syncTabBar()
+			a.persistTmuxRestoreSnapshot()
+			return a, nil
+		}
+		if placeholder != nil {
+			placeholder.SetReconnecting(0, 0)
+			placeholder.SetDisconnected(msg.err)
+		}
+		return a, nil
+	}
+	if placeholder != nil {
+		_ = placeholder.Close()
+	}
+	var sv *sshview.Model
+	switch msg.entry.Kind {
+	case tmuxRestoreLocal:
+		title := msg.entry.Title
+		if title == "" {
+			title = tmuxTabTitle(msg.entry.Session)
+		}
+		sv = sshview.New(msg.is, title, 0, BuildSSHKeys(a.kbConfig))
+		sv.SetHistoryID(createLocalSessionHistory(a.db, title, "tmux"))
+		if a.width > 0 {
+			sv.SetSize(a.width, a.mainContentHeightForType(LocalTab))
+		}
+		a.tabs[idx] = Tab{Type: LocalTab, Title: title, Model: sv, TmuxSession: msg.entry.Session}
+	case tmuxRestoreRemote:
+		peer := types.RemotePeer{ID: msg.entry.PeerID, Name: msg.entry.PeerName}
+		spec := &types.RemoteReconnect{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: msg.entry.Session}
+		title := msg.entry.Title
+		if title == "" {
+			title = remoteTmuxTabTitle(peer.Name, msg.entry.Session)
+		}
+		sv = sshview.New(msg.is, title, 0, BuildSSHKeys(a.kbConfig))
+		sv.SetHistoryID(createLocalSessionHistory(a.db, title, "remote-tmux"))
+		sv.SetRemoteReconnect(spec)
+		if a.width > 0 {
+			sv.SetSize(a.width, a.mainContentHeightForType(SSHTab))
+		}
+		a.tabs[idx] = Tab{Type: SSHTab, Title: title, Model: sv}
+	}
+	a.syncTabBar()
+	a.persistTmuxRestoreSnapshot()
+	return a, sv.Init()
+}
+
+func localTmuxSession(entry tmuxRestoreEntry) string {
+	if entry.Kind == tmuxRestoreLocal {
+		return entry.Session
+	}
+	return ""
+}
+
+func isMissingTmuxSession(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "can't find session") ||
+		strings.Contains(s, "no server running") ||
+		strings.Contains(s, "no sessions") ||
+		(strings.Contains(s, "error connecting to") && strings.Contains(s, "no such file or directory"))
 }

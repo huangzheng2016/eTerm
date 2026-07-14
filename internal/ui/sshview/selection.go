@@ -95,6 +95,14 @@ func (m *Model) cellAtAbs(line, col int) *uv.Cell {
 	return m.emu.CellAt(col, line-sbLen)
 }
 
+func (m *Model) lineWrapped(line int) bool {
+	sbLen := m.emu.ScrollbackLen()
+	if line < sbLen {
+		return m.emu.ScrollbackLineWrapped(line)
+	}
+	return m.emu.LineWrapped(line - sbLen)
+}
+
 // selectedText extracts the highlighted text: full rows for interior lines, partial
 // for the first/last. Wide-char placeholders (Width==0) are skipped and trailing
 // spaces trimmed per line.
@@ -135,7 +143,7 @@ func (m *Model) selectedText() string {
 			row.WriteString(cell.Content)
 		}
 		b.WriteString(strings.TrimRight(row.String(), " "))
-		if line < end.line {
+		if line < end.line && !m.lineWrapped(line) {
 			b.WriteByte('\n')
 		}
 	}

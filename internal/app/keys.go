@@ -15,6 +15,8 @@ type KeyMap struct {
 	CloseTabSafe   key.Binding
 	NextTab        key.Binding
 	PrevTab        key.Binding
+	TabPageLeft    key.Binding
+	TabPageRight   key.Binding
 	SSHConnect     key.Binding
 	SFTPOpen       key.Binding
 	NewHost        key.Binding
@@ -64,6 +66,14 @@ func DefaultKeyMap() KeyMap {
 		PrevTab: key.NewBinding(
 			key.WithKeys("ctrl+shift+tab", "ctrl+pgup", "alt+p", "ctrl+left"),
 			key.WithHelp("C-←/A-p", "prev"),
+		),
+		TabPageLeft: key.NewBinding(
+			key.WithKeys("alt+shift+left"),
+			key.WithHelp("A-S-left", "page tabs left"),
+		),
+		TabPageRight: key.NewBinding(
+			key.WithKeys("alt+shift+right"),
+			key.WithHelp("A-S-right", "page tabs right"),
 		),
 		SSHConnect: key.NewBinding(
 			key.WithKeys("enter"),

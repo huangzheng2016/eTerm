@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 	"gorm.io/gorm"
 )
@@ -23,6 +24,28 @@ func TestEnterOpensKeyDetailAndCopyPublicKey(t *testing.T) {
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'c'}))
 	if cmd == nil {
 		t.Fatal("copy public key command is nil")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("copy command = %T len=%d", batch, len(batch))
+	}
+	if msg, ok := batch[1]().(types.SuccessMsg); !ok || msg.Message != "Public key copied" {
+		t.Fatalf("success message = %#v", msg)
+	}
+}
+
+func TestCopyPublicKeyFromListShowsSuccess(t *testing.T) {
+	m := New(nil, nil, viewkeys.KeyViewKeys{Copy: []string{"c"}})
+	m.loaded = true
+	m.sshKeys = []db.SSHKey{{PublicKeyData: "ssh-ed25519 AAAA"}}
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Text: "c"}))
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("copy command = %T len=%d", batch, len(batch))
+	}
+	if msg, ok := batch[1]().(types.SuccessMsg); !ok || msg.Message != "Public key copied" {
+		t.Fatalf("success message = %#v", msg)
 	}
 }
 

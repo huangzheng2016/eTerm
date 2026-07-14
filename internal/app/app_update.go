@@ -340,6 +340,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var refreshCmd tea.Cmd
 			a, refreshCmd = a.refreshActiveHomeConnectivity()
 			return a, tea.Batch(layoutCmd, refreshCmd)
+		case key.Matches(msg, a.keyMap.TabPageLeft):
+			a.tabBar = a.tabBar.ScrollLeft()
+			return a, nil
+		case key.Matches(msg, a.keyMap.TabPageRight):
+			a.tabBar = a.tabBar.ScrollRight()
+			return a, nil
 		case matchCtrlShiftAnyOf(msg, a.keyMap.LocalTerminal) || key.Matches(msg, a.keyMap.LocalTerminal):
 			return a.openLocalTerminal()
 		case matchCtrlShiftAnyOf(msg, a.keyMap.RenameTab) || key.Matches(msg, a.keyMap.RenameTab):
@@ -530,7 +536,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Tab bar click
 			top := a.MainViewChromeTopLines()
 			if msg.Y >= 0 && msg.Y < top-1 && len(a.tabs) > 0 {
-				a.syncTabBar()
 				updated, changed := a.tabBar.HandleClick(msg.X)
 				a.tabBar = updated
 				if changed {
@@ -562,7 +567,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseWheelMsg:
 		top := a.MainViewChromeTopLines()
 		if a.viewState == MainView && msg.Y >= 0 && msg.Y < top-1 && len(a.tabs) > 0 {
-			a.syncTabBar()
 			switch msg.Button {
 			case tea.MouseWheelLeft, tea.MouseWheelUp:
 				a.tabBar = a.tabBar.ScrollLeft()

@@ -22,7 +22,9 @@ func (m *Model) View() tea.View {
 	listW, transW, stacked := m.layoutWidths()
 
 	var listLines []string
-	for i, r := range m.rows {
+	listStart, listEnd := m.listPageRange()
+	for i := listStart; i < listEnd; i++ {
+		r := m.rows[i]
 		line := formatRowMeta(r)
 		if len(line) > listW-2 {
 			line = truncateUTF8BytesEllipsis(line, max(0, listW-4))
@@ -54,6 +56,9 @@ func (m *Model) View() tea.View {
 	if scroll < len(lines) {
 		chunk = lines[scroll:end]
 	}
+	for i := range chunk {
+		chunk[i] = m.selection.RenderLine(chunk[i], scroll+i)
+	}
 	transBody := strings.Join(chunk, "\n")
 	transBox := lipgloss.NewStyle().Width(transW)
 	if !m.focusList {
@@ -66,7 +71,7 @@ func (m *Model) View() tea.View {
 	if m.showEmpty {
 		emptyHint = viewkeys.HelpLabel(m.showEmptyKeys) + " hide empty"
 	}
-	hint := ui.DimStyle.Render("tab focus · j/k scroll · pgup/pgdn page · mouse wheel · " + emptyHint + " · esc close")
+	hint := ui.DimStyle.Render("tab focus · j/k scroll · pgup/pgdn page · mouse wheel · c copy transcript · " + emptyHint + " · esc close")
 
 	var main string
 	if stacked {

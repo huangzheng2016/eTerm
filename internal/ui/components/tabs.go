@@ -24,6 +24,22 @@ func NewTabs(items []TabItem) TabsModel {
 	}
 }
 
+func (t TabsModel) SetItems(items []TabItem) TabsModel {
+	t.items = items
+	if len(items) == 0 {
+		t.activeIdx = 0
+		t.scrollIdx = 0
+		return t
+	}
+	if t.activeIdx >= len(items) {
+		t.activeIdx = len(items) - 1
+	}
+	if t.scrollIdx >= len(items) {
+		t.scrollIdx = len(items) - 1
+	}
+	return t
+}
+
 // TabStrip renders the tab row for the app chrome. activeIdx is clamped to items.
 // width is the terminal width (pass 0 for natural width without full-width padding).
 func TabStrip(items []TabItem, activeIdx int, width int) string {
@@ -88,33 +104,14 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 	// the tab bar away from the active tab via mouse wheel; we must
 	// compute hit regions based on the current scrollIdx.
 
-	hasLeft := t.scrollIdx > 0
-	// Compute hasRight
-	widths := tabWidths(t.items, t.activeIdx)
-	budget := t.width - tabBarPadLeft*2
-	if hasLeft {
-		budget -= arrowWidth
-	}
-	used := 0
+	layout := t.layout()
 	lastVisible := t.scrollIdx - 1
-	for i := t.scrollIdx; i < len(t.items); i++ {
-		need := widths[i]
-		if i > t.scrollIdx {
-			need += tabGap
-		}
-		if used+need > budget {
-			break
-		}
-		if i < len(t.items)-1 && used+need+arrowWidth > budget {
-			break
-		}
-		lastVisible = i
-		used += need
+	if len(layout.visible) > 0 {
+		lastVisible = layout.visible[len(layout.visible)-1]
 	}
-	hasRight := lastVisible < len(t.items)-1
 
 	// Click on left arrow "< " → scroll left
-	if hasLeft && x >= tabBarPadLeft && x < tabBarPadLeft+arrowWidth {
+	if layout.hasLeft && x >= tabBarPadLeft && x < tabBarPadLeft+arrowWidth {
 		t.scrollIdx--
 		if t.scrollIdx < 0 {
 			t.scrollIdx = 0
@@ -123,10 +120,10 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 	}
 
 	// Click on right arrow " >" → scroll right
-	if hasRight {
+	if layout.hasRight {
 		// Right arrow is at the end of the visible row
-		rightStart := tabBarPadLeft + used
-		if hasLeft {
+		rightStart := tabBarPadLeft + layout.used
+		if layout.hasLeft {
 			rightStart += arrowWidth
 		}
 		// Add gaps between visible tabs
@@ -141,12 +138,12 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 
 	// Click on a tab
 	offset := tabBarPadLeft
-	if hasLeft {
+	if layout.hasLeft {
 		offset += arrowWidth
 	}
 
 	for i := t.scrollIdx; i <= lastVisible; i++ {
-		w := widths[i]
+		w := layout.widths[i]
 		cellStart := offset
 		if i > t.scrollIdx {
 			cellStart++

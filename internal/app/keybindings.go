@@ -25,6 +25,8 @@ type KeyBindingConfig struct {
 	CloseTabSafe   []string `json:"close_tab_safe"`
 	NextTab        []string `json:"next_tab"`
 	PrevTab        []string `json:"prev_tab"`
+	TabPageLeft    []string `json:"tab_page_left"`
+	TabPageRight   []string `json:"tab_page_right"`
 	Lock           []string `json:"lock"`
 	LockApp        []string `json:"lock_app"`
 	ForwardTab     []string `json:"forward_tab"`
@@ -99,6 +101,8 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		CloseTabSafe:   []string{"ctrl+shift+w"},
 		NextTab:        []string{"ctrl+tab", "ctrl+pgdown", "alt+n", "ctrl+right"},
 		PrevTab:        []string{"ctrl+shift+tab", "ctrl+pgup", "alt+p", "ctrl+left"},
+		TabPageLeft:    []string{"alt+shift+left"},
+		TabPageRight:   []string{"alt+shift+right"},
 		Lock:           []string{"ctrl+l"},
 		LockApp:        []string{"ctrl+shift+l"},
 		ForwardTab:     []string{"ctrl+p"},
@@ -252,6 +256,14 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		PrevTab: key.NewBinding(
 			key.WithKeys(cfg.PrevTab...),
 			key.WithHelp(helpLabel(cfg.PrevTab), "prev"),
+		),
+		TabPageLeft: key.NewBinding(
+			key.WithKeys(cfg.TabPageLeft...),
+			key.WithHelp(helpLabel(cfg.TabPageLeft), "page tabs left"),
+		),
+		TabPageRight: key.NewBinding(
+			key.WithKeys(cfg.TabPageRight...),
+			key.WithHelp(helpLabel(cfg.TabPageRight), "page tabs right"),
 		),
 		SSHConnect: key.NewBinding(
 			key.WithKeys(cfg.SSHConnect...),

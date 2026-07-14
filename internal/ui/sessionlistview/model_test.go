@@ -95,13 +95,27 @@ func TestMouseWheelScrollsSessionDetail(t *testing.T) {
 	m := New(nil)
 	m.loaded = true
 	m.detail = true
-	m.rows = []db.ConnectionHistory{{Transcript: "0\n1\n2\n3\n4\n5\n6\n7\n8\n9"}}
+	m.rows = []db.ConnectionHistory{{Transcript: "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11"}}
 	m.SetSize(80, 10)
 
 	updated, _ := m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
 	m = updated.(*Model)
-	if m.detailScroll != 3 {
-		t.Fatalf("detailScroll=%d want 3", m.detailScroll)
+	if m.detailScroll != 6 {
+		t.Fatalf("detailScroll=%d want 6", m.detailScroll)
+	}
+}
+
+func TestMouseDragCopiesSelectedSessionText(t *testing.T) {
+	m := New(nil)
+	m.loaded = true
+	m.detail = true
+	m.rows = []db.ConnectionHistory{{Transcript: "hello world\nsecond line"}}
+	m.SetSize(80, 10)
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: 6, Y: 3, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: 10, Y: 3, Button: tea.MouseLeft}))
+	_, cmd := m.Update(tea.MouseReleaseMsg(tea.Mouse{X: 10, Y: 3, Button: tea.MouseLeft}))
+	if cmd == nil || cmd() == nil {
+		t.Fatal("expected clipboard command")
 	}
 }
 

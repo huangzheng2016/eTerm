@@ -15,8 +15,9 @@ const (
 	cursorSaveTranscript = 0
 	cursorGridStatus     = 1
 	cursorLocalShell     = 2
-	cursorPassword       = 3
-	bindingCursorBase    = 4
+	cursorTmuxConfigFile = 3
+	cursorPassword       = 4
+	bindingCursorBase    = 5
 )
 
 func (m *Model) Init() tea.Cmd {
@@ -108,11 +109,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if li == cursorLocalShell {
 			return m.startShellEdit()
 		}
+		if li == cursorTmuxConfigFile {
+			return m.startTmuxConfigEdit()
+		}
 		return m, nil
 
 	case tea.PasteMsg:
 		if m.state == stateShell {
 			m.shellInput = inputpaste.TextInput(m.shellInput, msg)
+		}
+		if m.state == stateTmuxConfig {
+			m.tmuxConfigInput = inputpaste.TextInput(m.tmuxConfigInput, msg)
 		}
 		return m, nil
 
@@ -124,6 +131,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateShell {
 			return m.handleShellEdit(msg)
+		}
+		if m.state == stateTmuxConfig {
+			return m.handleTmuxConfigEdit(msg)
 		}
 		if m.state == stateCapture || m.state == stateAppend {
 			if m.cursor < bindingCursorBase {
@@ -173,6 +183,9 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.cursor == cursorLocalShell {
 			return m.startShellEdit()
 		}
+		if m.cursor == cursorTmuxConfigFile {
+			return m.startTmuxConfigEdit()
+		}
 		if m.cursor == cursorPassword {
 			return m.openPasswordOverlay()
 		}
@@ -197,6 +210,7 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.saveSessionTranscript = true
 		m.gridStatusWords = false
 		m.localTerminalShell = ""
+		m.tmuxConfigFile = ""
 		m.modified = true
 	case "esc":
 		return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
@@ -262,6 +276,31 @@ func (m *Model) handleShellEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) startTmuxConfigEdit() (tea.Model, tea.Cmd) {
+	m.tmuxConfigInput.SetValue(m.tmuxConfigFile)
+	m.tmuxConfigInput.SetWidth(max(20, m.width-30))
+	m.state = stateTmuxConfig
+	return m, m.tmuxConfigInput.Focus()
+}
+
+func (m *Model) handleTmuxConfigEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "escape":
+		m.state = stateNormal
+		m.tmuxConfigInput.Blur()
+		return m, nil
+	case "enter":
+		m.tmuxConfigFile = strings.TrimSpace(m.tmuxConfigInput.Value())
+		m.modified = true
+		m.state = stateNormal
+		m.tmuxConfigInput.Blur()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.tmuxConfigInput, cmd = m.tmuxConfigInput.Update(msg)
+	return m, cmd
+}
+
 func (m *Model) save() tea.Cmd {
 	database := m.db
 	configData := m.ConfigJSON()
@@ -274,21 +313,23 @@ func (m *Model) save() tea.Cmd {
 		gridW = "true"
 	}
 	localShell := strings.TrimSpace(m.localTerminalShell)
-	return tea.Sequence(
-		func() tea.Msg {
-			if err := db.SetSetting(database, "keybindings", string(configData)); err != nil {
-				return types.SettingsSavedMsg{Err: err}
-			}
-			if err := db.SetSetting(database, "save_session_transcript", saveTr); err != nil {
-				return types.SettingsSavedMsg{Err: err}
-			}
-			if err := db.SetSetting(database, "grid_status_words", gridW); err != nil {
-				return types.SettingsSavedMsg{Err: err}
-			}
-			if err := db.SetSetting(database, localterm.SettingShell, localShell); err != nil {
-				return types.SettingsSavedMsg{Err: err}
-			}
-			return types.SettingsSavedMsg{}
-		},
-	)
+	tmuxConfigFile := strings.TrimSpace(m.tmuxConfigFile)
+	return func() tea.Msg {
+		if err := db.SetSetting(database, "keybindings", string(configData)); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		if err := db.SetSetting(database, "save_session_transcript", saveTr); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		if err := db.SetSetting(database, "grid_status_words", gridW); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		if err := db.SetSetting(database, localterm.SettingShell, localShell); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		if err := db.SetSetting(database, "tmux_config_file", tmuxConfigFile); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		return types.SettingsSavedMsg{}
+	}
 }

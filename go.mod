@@ -1,5 +1,7 @@
 module github.com/huangzheng2016/eTerm
 
+replace github.com/charmbracelet/x/vt => ./third_party/vt
+
 go 1.25.9
 
 require (

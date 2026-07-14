@@ -32,6 +32,45 @@ const (
 	tabGap     = 1 // space between tabs
 )
 
+type tabsLayout struct {
+	widths   []int
+	visible  []int
+	used     int
+	hasLeft  bool
+	hasRight bool
+}
+
+func (t TabsModel) layout() tabsLayout {
+	layout := tabsLayout{
+		widths:  tabWidths(t.items, t.activeIdx),
+		hasLeft: t.scrollIdx > 0,
+	}
+	budget := t.width - tabBarPadLeft*2
+	if layout.hasLeft {
+		budget -= arrowWidth
+	}
+	for i := t.scrollIdx; i < len(t.items); i++ {
+		need := layout.widths[i]
+		if len(layout.visible) > 0 {
+			need += tabGap
+		}
+		if layout.used+need > budget {
+			break
+		}
+		if i < len(t.items)-1 && layout.used+need+arrowWidth > budget {
+			break
+		}
+		layout.visible = append(layout.visible, i)
+		layout.used += need
+	}
+	lastVisible := t.scrollIdx - 1
+	if len(layout.visible) > 0 {
+		lastVisible = layout.visible[len(layout.visible)-1]
+	}
+	layout.hasRight = lastVisible < len(t.items)-1
+	return layout
+}
+
 // ensureActiveVisible adjusts scrollIdx so the active tab is within the visible window.
 func (t *TabsModel) ensureActiveVisible() {
 	if len(t.items) == 0 || t.width <= 0 {

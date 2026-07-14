@@ -32,7 +32,9 @@ func (m *Model) View() tea.View {
 	}
 
 	cards := make([]string, len(m.snippets))
-	for i, s := range m.snippets {
+	start, end := components.GridPageRange(len(m.snippets), m.gridCursor, m.gridLayout)
+	for i := start; i < end; i++ {
+		s := m.snippets[i]
 		cards[i] = components.RenderCard(snippetCardTitle(s.Name), snippetCardDesc(s.Command), i == m.gridCursor, m.gridLayout.CardW)
 	}
 	grid := components.RenderGridRows(cards, len(m.snippets), m.gridCursor, m.gridLayout)

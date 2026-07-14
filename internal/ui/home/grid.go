@@ -100,7 +100,9 @@ func renderGrid(hosts []db.Host, cursor int, gl gridLayout, width int, hostStatu
 		return ""
 	}
 	cards := make([]string, total)
-	for i, h := range hosts {
+	start, end := components.GridPageRange(total, cursor, gl)
+	for i := start; i < end; i++ {
+		h := hosts[i]
 		status := StatusUnknown
 		if hostStatus != nil {
 			if s, ok := hostStatus[h.ID]; ok {
@@ -122,7 +124,9 @@ func renderGridEntries(entries []gridEntry, cursor int, gl gridLayout, width int
 		return ""
 	}
 	cards := make([]string, total)
-	for i, entry := range entries {
+	start, end := components.GridPageRange(total, cursor, gl)
+	for i := start; i < end; i++ {
+		entry := entries[i]
 		if entry.peer != nil {
 			cards[i] = components.RenderCard(peerCardTitle(*entry.peer, false), peerCardDesc(*entry.peer), i == cursor, gl.CardW)
 			continue

@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coder/websocket"
@@ -301,9 +302,22 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 	}
 	rows, cols := req.Rows, req.Cols
 	rows, cols = internalssh.NormalizePTYSize(rows, cols)
+	configFile := ""
+	if req.Target == relay.TargetTmuxList || req.Target == relay.TargetTmuxNew || req.Target == relay.TargetTmuxAttach || req.Target == relay.TargetTmuxKill || req.Target == relay.TargetTmuxRename {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			return
+		}
+		configFile, err = tmux.ResolveConfig(rt.db, config.ConfigDir(), home)
+		if err != nil {
+			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			return
+		}
+	}
 	switch req.Target {
 	case relay.TargetTmuxList:
-		list, err := tmuxListSessions(ctx)
+		list, err := tmuxListSessions(ctx, configFile)
 		if err != nil {
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
@@ -313,14 +327,14 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetTmuxNew:
-		is, name, err := tmuxNewSession(ctx, rows, cols)
+		is, name, err := tmuxNewSession(ctx, configFile, rows, cols)
 		if err != nil {
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
 		}
 		if err := waitSessionStarted(is); err != nil {
 			_ = is.Close()
-			_ = tmuxKillSession(ctx, name)
+			_ = tmuxKillSession(ctx, configFile, name)
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
 		}
@@ -335,7 +349,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			return removeSession(sessionsMu, sessions, streamID, is) != nil
 		})
 	case relay.TargetTmuxAttach:
-		is, err := tmuxAttachSession(ctx, req.SessionID, rows, cols)
+		is, err := tmuxAttachSession(ctx, configFile, req.SessionID, rows, cols)
 		if err != nil {
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
@@ -356,7 +370,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			return removeSession(sessionsMu, sessions, streamID, is) != nil
 		})
 	case relay.TargetTmuxKill:
-		if err := tmuxKillSession(ctx, req.SessionID); err != nil {
+		if err := tmuxKillSession(ctx, configFile, req.SessionID); err != nil {
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
 		}
@@ -364,7 +378,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 			_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetTmuxRename:
-		if err := tmuxRenameSession(ctx, req.SessionID, req.Name); err != nil {
+		if err := tmuxRenameSession(ctx, configFile, req.SessionID, req.Name); err != nil {
 			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
 		}
@@ -569,7 +583,7 @@ func sessionDoneErr(readErr error, sessionDone <-chan error) error {
 }
 
 func closePayload(err error) []byte {
-	if err == nil || errors.Is(err, io.EOF) {
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) {
 		return nil
 	}
 	return []byte(err.Error())

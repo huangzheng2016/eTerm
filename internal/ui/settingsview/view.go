@@ -81,6 +81,25 @@ func shellInputLine(value string, editing bool, input string, selected bool) str
 	return fmt.Sprintf("%s%s  %s", cursor, labelStyle.Render(label), keyStyle.Render(val))
 }
 
+func tmuxConfigInputLine(value string, editing bool, input string, selected bool) string {
+	cursor := "  "
+	if selected {
+		cursor = "> "
+	}
+	label := "tmux config file"
+	val := value
+	if val == "" {
+		val = "(built-in)"
+	}
+	if editing {
+		val = input
+	}
+	if selected {
+		return fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(labelStyle.Render(label)), selectedStyle.Render(val))
+	}
+	return fmt.Sprintf("%s%s  %s", cursor, labelStyle.Render(label), keyStyle.Render(val))
+}
+
 func (m *Model) buildScrollLines() []scrollLine {
 	var out []scrollLine
 	out = append(out, scrollLine{catStyle.Render("  General"), -1})
@@ -95,6 +114,10 @@ func (m *Model) buildScrollLines() []scrollLine {
 	out = append(out, scrollLine{
 		shellInputLine(m.localTerminalShell, m.state == stateShell, m.shellInput.View(), m.cursor == cursorLocalShell),
 		cursorLocalShell,
+	})
+	out = append(out, scrollLine{
+		tmuxConfigInputLine(m.tmuxConfigFile, m.state == stateTmuxConfig, m.tmuxConfigInput.View(), m.cursor == cursorTmuxConfigFile),
+		cursorTmuxConfigFile,
 	})
 	out = append(out, scrollLine{"", -1})
 	out = append(out, scrollLine{catStyle.Render("  Security"), -1})
@@ -158,6 +181,8 @@ func (m *Model) View() tea.View {
 		b.WriteString(captureStyle.Render("  Press a key to add...  (esc to cancel)") + "\n")
 	} else if m.state == stateShell {
 		b.WriteString(captureStyle.Render("  Enter shell path...  (enter to accept, esc to cancel)") + "\n")
+	} else if m.state == stateTmuxConfig {
+		b.WriteString(captureStyle.Render("  Enter tmux config file...  (enter to accept, esc to cancel)") + "\n")
 	} else {
 		b.WriteString("\n")
 	}

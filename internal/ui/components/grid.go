@@ -22,8 +22,8 @@ var (
 	InactiveCardBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("#555"))
-	CardTitleBase = lipgloss.NewStyle().Bold(true)
-	CardDescBase  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
+	CardTitleBase      = lipgloss.NewStyle().Bold(true)
+	CardDescBase       = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
 	PageIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
 	PageNumStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
 )
@@ -61,6 +61,11 @@ func GridPage(cursor, pageSize int) int {
 		return 0
 	}
 	return cursor / pageSize
+}
+
+func GridPageRange(total, cursor int, gl GridLayout) (int, int) {
+	start := GridPage(cursor, gl.PageSize) * gl.PageSize
+	return start, min(total, start+gl.PageSize)
 }
 
 // GridMove computes the new cursor after a direction key press.

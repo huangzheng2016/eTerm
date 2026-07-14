@@ -58,7 +58,9 @@ func (m Model) View() tea.View {
 	}
 
 	cards := make([]string, len(m.sshKeys))
-	for i, k := range m.sshKeys {
+	start, end := components.GridPageRange(len(m.sshKeys), m.gridCursor, m.gridLayout)
+	for i := start; i < end; i++ {
+		k := m.sshKeys[i]
 		cards[i] = components.RenderCard(keyCardTitle(k.Name), keyCardDesc(k.Type, k.Fingerprint, k.CertificatePath), i == m.gridCursor, m.gridLayout.CardW)
 	}
 	grid := components.RenderGridRows(cards, len(m.sshKeys), m.gridCursor, m.gridLayout)

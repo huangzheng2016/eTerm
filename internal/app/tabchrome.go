@@ -62,8 +62,7 @@ func (a App) buildMainTabChrome(layoutW int) string {
 	if len(a.tabs) == 0 {
 		return ""
 	}
-	items := a.tabStripItems()
-	tabBar := components.TabStrip(items, a.activeTab, layoutW)
+	tabBar := strings.TrimRight(a.tabBar.SetWidth(layoutW).View(), "\n")
 	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	toastView := strings.TrimSpace(a.toast.View())
 	reconnectView := reconnectBadgeView(a.activeReconnectLabel())

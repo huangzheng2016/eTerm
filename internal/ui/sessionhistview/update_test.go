@@ -67,15 +67,28 @@ func TestMouseWheelScrollsFocusedTranscript(t *testing.T) {
 		loaded:    true,
 		focusList: false,
 		rows: []db.ConnectionHistory{
-			{ConnectedAt: time.Unix(1, 0), Status: "success", Transcript: "a\nb\nc\nd\ne\nf\ng\nh\ni"},
+			{ConnectedAt: time.Unix(1, 0), Status: "success", Transcript: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no"},
 		},
 	}
 
 	next, _ := m.Update(tea.MouseWheelMsg(tea.Mouse{X: 40, Y: 4, Button: tea.MouseWheelDown}))
 	got := next.(*Model)
 
-	if got.scroll != 3 {
-		t.Fatalf("got scroll %d want 3", got.scroll)
+	if got.scroll != 6 {
+		t.Fatalf("got scroll %d want 6", got.scroll)
+	}
+}
+
+func TestMouseDragCopiesSelectedHistoryText(t *testing.T) {
+	m := &Model{
+		width: 90, height: 10, loaded: true, focusList: false,
+		rows: []db.ConnectionHistory{{Transcript: "hello world\nsecond line"}},
+	}
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: 34, Y: 3, Button: tea.MouseLeft}))
+	m.Update(tea.MouseMotionMsg(tea.Mouse{X: 38, Y: 3, Button: tea.MouseLeft}))
+	_, cmd := m.Update(tea.MouseReleaseMsg(tea.Mouse{X: 38, Y: 3, Button: tea.MouseLeft}))
+	if cmd == nil || cmd() == nil {
+		t.Fatal("expected clipboard command")
 	}
 }
 

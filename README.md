@@ -175,28 +175,19 @@ eterm daemon stop
 `~/.tmux.conf`：
 
 ```tmux
-# 启用鼠标支持：滚轮滚动历史、拖动选择复制
 set -g mouse on
-
-# 复制模式使用 vi 按键
 set -g mode-keys vi
-
-# 通过 OSC52 同步到外层终端剪贴板
 set -g set-clipboard on
 set -as terminal-features ',*:clipboard'
-
-# 鼠标拖动选择后自动复制到系统剪贴板
 bind -T copy-mode-vi MouseDragEnd1Pane send -X copy-selection-and-cancel
 bind -T copy-mode MouseDragEnd1Pane send -X copy-selection-and-cancel
-
-# 在 copy mode 中按 y 复制到系统剪贴板
 bind -T copy-mode-vi y send -X copy-selection-and-cancel
 bind -T copy-mode y send -X copy-selection-and-cancel
-
-# 开启扩展键支持，使 Ctrl+Enter / Shift+Enter 等组合键正常工作
 set -g extended-keys on
 set -g extended-keys-format csi-u
 ```
+
+设置中的 `tmux config file` 留空时使用 eTerm 管理的内置默认配置；填写路径后，本地和远程 daemon 的 tmux 命令都会使用该配置文件。
 
 重载配置：
 

@@ -23,8 +23,8 @@ var (
 	killTmuxSession   = KillSession
 )
 
-func ListSessions(ctx context.Context) ([]types.TmuxSession, error) {
-	cmd := exec.CommandContext(ctx, "tmux", "list-sessions", "-F", listFormat)
+func ListSessions(ctx context.Context, configFile string) ([]types.TmuxSession, error) {
+	cmd := exec.CommandContext(ctx, "tmux", "-f", configFile, "list-sessions", "-F", listFormat)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if isNoServerOutput(out) {
@@ -35,24 +35,24 @@ func ListSessions(ctx context.Context) ([]types.TmuxSession, error) {
 	return parseSessions(out), nil
 }
 
-func NewSession(ctx context.Context, rows, cols int) (*internalssh.InteractiveSession, string, error) {
+func NewSession(ctx context.Context, configFile string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
 	name := defaultSessionName()
-	if err := runTmuxCmd(ctx, "new-session", newSessionDetachedArgs(name)); err != nil {
+	if err := runTmuxCmd(ctx, "new-session", newSessionDetachedArgs(configFile, name)); err != nil {
 		return nil, "", err
 	}
-	is, err := attachTmuxSession(ctx, name, rows, cols)
+	is, err := attachTmuxSession(ctx, configFile, name, rows, cols)
 	if err != nil {
-		_ = killTmuxSession(ctx, name)
+		_ = killTmuxSession(ctx, configFile, name)
 		return nil, "", err
 	}
 	return is, name, nil
 }
 
-func AttachSession(ctx context.Context, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
-	if err := runTmux(ctx, "set-option", statusOffArgs(name)); err != nil {
+func AttachSession(ctx context.Context, configFile, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
+	if err := runTmux(ctx, "set-option", statusOffArgs(configFile, name)); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command("tmux", attachSessionArgs(name)...)
+	cmd := exec.Command("tmux", attachSessionArgs(configFile, name)...)
 	is, err := ptyCommand(cmd, rows, cols)
 	if err != nil {
 		return nil, tmuxCommandError("attach-session", err, nil)
@@ -60,8 +60,8 @@ func AttachSession(ctx context.Context, name string, rows, cols int) (*internals
 	return is, nil
 }
 
-func KillSession(ctx context.Context, name string) error {
-	cmd := exec.CommandContext(ctx, "tmux", "kill-session", "-t", name)
+func KillSession(ctx context.Context, configFile, name string) error {
+	cmd := exec.CommandContext(ctx, "tmux", "-f", configFile, "kill-session", "-t", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return tmuxCommandError("kill-session", err, out)
@@ -69,8 +69,8 @@ func KillSession(ctx context.Context, name string) error {
 	return nil
 }
 
-func RenameSession(ctx context.Context, oldName, newName string) error {
-	cmd := exec.CommandContext(ctx, "tmux", "rename-session", "-t", oldName, newName)
+func RenameSession(ctx context.Context, configFile, oldName, newName string) error {
+	cmd := exec.CommandContext(ctx, "tmux", "-f", configFile, "rename-session", "-t", oldName, newName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return tmuxCommandError("rename-session", err, out)
@@ -90,16 +90,16 @@ func runTmux(ctx context.Context, op string, args []string) error {
 	return nil
 }
 
-func newSessionDetachedArgs(name string) []string {
-	return []string{"new-session", "-d", "-s", name}
+func newSessionDetachedArgs(configFile, name string) []string {
+	return []string{"-f", configFile, "new-session", "-d", "-s", name}
 }
 
-func statusOffArgs(name string) []string {
-	return []string{"set-option", "-t", name, "status", "off"}
+func statusOffArgs(configFile, name string) []string {
+	return []string{"-f", configFile, "set-option", "-t", name, "status", "off"}
 }
 
-func attachSessionArgs(name string) []string {
-	return []string{"attach-session", "-t", name}
+func attachSessionArgs(configFile, name string) []string {
+	return []string{"-f", configFile, "attach-session", "-t", name}
 }
 
 func parseSessions(out []byte) []types.TmuxSession {

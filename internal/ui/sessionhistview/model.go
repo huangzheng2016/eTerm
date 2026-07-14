@@ -8,6 +8,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
 )
 
 type Model struct {
@@ -23,6 +24,7 @@ type Model struct {
 	loaded        bool
 	showEmpty     bool
 	showEmptyKeys []string
+	selection     textselection.Selection
 }
 
 func New(database *gorm.DB, hostID uint) *Model {
@@ -87,4 +89,10 @@ func (m *Model) selectedDisplayTranscript() string {
 
 func (m *Model) transcriptPageSize() int {
 	return max(3, m.height-2)
+}
+
+func (m *Model) listPageRange() (int, int) {
+	pageSize := max(1, m.height-4)
+	start := m.sel / pageSize * pageSize
+	return start, min(len(m.rows), start+pageSize)
 }

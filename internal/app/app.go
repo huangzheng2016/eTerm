@@ -44,10 +44,11 @@ const (
 )
 
 type Tab struct {
-	Type        TabType
-	Title       string
-	Model       tea.Model
-	TmuxSession string
+	Type          TabType
+	Title         string
+	Model         tea.Model
+	TmuxSession   string
+	tmuxRestoreID uint64
 }
 
 type App struct {
@@ -123,6 +124,7 @@ type App struct {
 	renamePrompt *sessionRenameModel
 
 	connectProgressSeq uint64
+	tmuxRestoreSeq     uint64
 
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint

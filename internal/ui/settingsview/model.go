@@ -15,10 +15,11 @@ import (
 type editState int
 
 const (
-	stateNormal  editState = iota
-	stateCapture           // waiting for user to press a key (replaces)
-	stateAppend            // waiting for user to press a key (appends)
-	stateShell             // editing local terminal shell
+	stateNormal     editState = iota
+	stateCapture              // waiting for user to press a key (replaces)
+	stateAppend               // waiting for user to press a key (appends)
+	stateShell                // editing local terminal shell
+	stateTmuxConfig           // editing tmux config file
 )
 
 // bindingEntry represents one configurable keybinding row.
@@ -44,6 +45,8 @@ type Model struct {
 	gridStatusWords       bool
 	localTerminalShell    string
 	shellInput            textinput.Model
+	tmuxConfigFile        string
+	tmuxConfigInput       textinput.Model
 	noPasswordMode        bool
 	pwd                   *passwordOverlay
 }
@@ -58,10 +61,14 @@ func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMo
 	m.saveSessionTranscript = loadSaveSessionTranscript(database)
 	m.gridStatusWords = loadGridStatusWords(database)
 	m.localTerminalShell = loadLocalTerminalShell(database)
+	m.tmuxConfigFile = loadTmuxConfigFile(database)
 	ti := textinput.New()
 	ti.Placeholder = localterm.DefaultShell("")
 	ti.CharLimit = 512
 	m.shellInput = ti
+	ti = textinput.New()
+	ti.CharLimit = 512
+	m.tmuxConfigInput = ti
 	return m
 }
 
@@ -87,6 +94,14 @@ func loadGridStatusWords(gdb *gorm.DB) bool {
 
 func loadLocalTerminalShell(gdb *gorm.DB) string {
 	s, err := db.GetSetting(gdb, localterm.SettingShell)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
+func loadTmuxConfigFile(gdb *gorm.DB) string {
+	s, err := db.GetSetting(gdb, "tmux_config_file")
 	if err != nil {
 		return ""
 	}
@@ -119,6 +134,8 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Close Tab (Safe)", "close_tab_safe"},
 		{"Global", "Next Tab", "next_tab"},
 		{"Global", "Prev Tab", "prev_tab"},
+		{"Global", "Tab Page Left", "tab_page_left"},
+		{"Global", "Tab Page Right", "tab_page_right"},
 		{"Global", "Lock", "lock"},
 		{"Global", "Lock App", "lock_app"},
 		{"Global", "Forwards Tab", "forward_tab"},

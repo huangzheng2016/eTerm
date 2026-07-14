@@ -183,7 +183,7 @@ func (a App) lockSession() (App, tea.Cmd) {
 }
 
 func (a *App) syncTabBar() {
-	a.tabBar = components.NewTabs(a.tabStripItems())
+	a.tabBar = a.tabBar.SetItems(a.tabStripItems())
 	if len(a.tabs) > 0 {
 		if a.activeTab < 0 {
 			a.activeTab = 0

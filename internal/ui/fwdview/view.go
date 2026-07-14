@@ -21,7 +21,9 @@ func (m Model) View() tea.View {
 	}
 
 	cards := make([]string, len(m.rules))
-	for i, r := range m.rules {
+	start, end := components.GridPageRange(len(m.rules), m.gridCursor, m.gridLayout)
+	for i := start; i < end; i++ {
+		r := m.rules[i]
 		running := m.running[r.ID]
 		cards[i] = components.RenderCard(ruleCardTitle(r), ruleCardDesc(r, running), i == m.gridCursor, m.gridLayout.CardW)
 	}

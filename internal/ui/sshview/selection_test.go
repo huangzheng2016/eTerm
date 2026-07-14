@@ -40,6 +40,41 @@ func TestSelectedTextMultiLine(t *testing.T) {
 	}
 }
 
+func TestSelectedTextJoinsSoftWrappedLines(t *testing.T) {
+	e := mkEmu(4, 4, "abcdefgh")
+	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 3})
+	if got := m.selectedText(); got != "abcdefgh" {
+		t.Fatalf("got %q want %q", got, "abcdefgh")
+	}
+}
+
+func TestSelectedTextKeepsHardNewlineAfterFullLine(t *testing.T) {
+	e := mkEmu(4, 4, "abcd\r\nefgh")
+	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 3})
+	if got := m.selectedText(); got != "abcd\nefgh" {
+		t.Fatalf("got %q want %q", got, "abcd\nefgh")
+	}
+}
+
+func TestSelectedTextJoinsSoftWrapAcrossScrollback(t *testing.T) {
+	e := mkEmu(4, 2, "abcdefghijkl")
+	if e.ScrollbackLen() != 1 {
+		t.Fatalf("scrollback length = %d want 1", e.ScrollbackLen())
+	}
+	m := selModel(e, 0, selPoint{0, 0}, selPoint{2, 3})
+	if got := m.selectedText(); got != "abcdefghijkl" {
+		t.Fatalf("got %q want %q", got, "abcdefghijkl")
+	}
+}
+
+func TestSelectedTextJoinsSoftWrapOnAltScreen(t *testing.T) {
+	e := mkEmu(4, 4, "\x1b[?1049habcdefgh")
+	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 3})
+	if got := m.selectedText(); got != "abcdefgh" {
+		t.Fatalf("got %q want %q", got, "abcdefgh")
+	}
+}
+
 func TestSelectedTextTrimsTrailingSpaces(t *testing.T) {
 	e := mkEmu(40, 24, "ab\r\n")
 	m := selModel(e, 0, selPoint{0, 0}, selPoint{0, 39})

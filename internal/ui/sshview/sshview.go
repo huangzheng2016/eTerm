@@ -379,6 +379,11 @@ func (m *Model) PasteText(text string) {
 // Disconnected is true after a network-style drop; press "r" to send [types.SSHReconnectMsg].
 func (m *Model) Disconnected() bool { return m.disconnected }
 
+func (m *Model) SetDisconnected(err error) {
+	m.endErr = err
+	m.disconnected = true
+}
+
 func (m *Model) SetReconnecting(attempt, maxAttempts int) {
 	if attempt <= 0 || maxAttempts <= 0 {
 		m.reconnecting = false

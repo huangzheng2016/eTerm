@@ -112,7 +112,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				case viewkeys.MatchKey(msg, m.vk.Copy):
 					if k := m.SelectedKey(); k != nil {
-						return m, tea.SetClipboard(k.PublicKeyData)
+						return m, copyPublicKey(k.PublicKeyData)
 					}
 				}
 			}
@@ -245,7 +245,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "c":
 				if k := m.keyByID(m.activeKeyID); k != nil {
-					return m, tea.SetClipboard(k.PublicKeyData)
+					return m, copyPublicKey(k.PublicKeyData)
 				}
 			case "e":
 				return m.startEdit()
@@ -320,6 +320,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func copyPublicKey(publicKey string) tea.Cmd {
+	return tea.Batch(
+		tea.SetClipboard(publicKey),
+		func() tea.Msg { return types.SuccessMsg{Message: "Public key copied"} },
+	)
 }
 
 type keyUpdatedMsg struct{ err error }
