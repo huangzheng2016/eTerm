@@ -88,7 +88,7 @@ func keyStatusBarHint(cfg KeyBindingConfig) string {
 
 func forwardStatusBarHint(cfg KeyBindingConfig) string {
 	parts := []string{
-		helpLabel(cfg.FwdStart) + " start",
+		helpLabel(cfg.FwdStart) + " toggle",
 		helpLabel(cfg.FwdStop) + " stop",
 		helpLabel(cfg.FwdNew) + " new",
 		helpLabel(cfg.FwdEdit) + " edit",

@@ -1,12 +1,16 @@
 package fwdview
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
+
+const doubleClickWindow = 450 * time.Millisecond
 
 func (m Model) Init() tea.Cmd {
 	return m.loadRules()
@@ -64,8 +68,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case viewkeys.MatchKey(msg, m.vk.Start):
 				if r := m.SelectedRule(); r != nil && r.ID != 0 {
-					id := r.ID
-					return m, func() tea.Msg { return types.ForwardRuleStartMsg{RuleID: id} }
+					return m, m.toggleRuleCmd(r.ID)
 				}
 				return m, nil
 			case viewkeys.MatchKey(msg, m.vk.Stop):
@@ -107,6 +110,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx, ok := components.GridIndexAtMouse(msg.X, msg.Y, len(m.rules), m.gridLayout, page)
 			if ok {
 				m.gridCursor = idx
+				now := time.Now()
+				if idx == m.lastClickIdx && now.Sub(m.lastClickAt) < doubleClickWindow {
+					m.lastClickAt = time.Time{}
+					m.lastClickIdx = -1
+					if r := m.SelectedRule(); r != nil && r.ID != 0 {
+						return m, m.toggleRuleCmd(r.ID)
+					}
+				} else {
+					m.lastClickAt = now
+					m.lastClickIdx = idx
+				}
 			}
 			return m, nil
 		}

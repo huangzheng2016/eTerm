@@ -40,6 +40,17 @@ type tabsLayout struct {
 	hasRight bool
 }
 
+func (t *TabsModel) clampScroll() {
+	for t.scrollIdx > 0 {
+		candidate := *t
+		candidate.scrollIdx--
+		if candidate.layout().hasRight {
+			break
+		}
+		t.scrollIdx--
+	}
+}
+
 func (t TabsModel) layout() tabsLayout {
 	layout := tabsLayout{
 		widths:  tabWidths(t.items, t.activeIdx),

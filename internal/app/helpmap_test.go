@@ -16,7 +16,7 @@ func TestListStatusBarsMatchDefaultActions(t *testing.T) {
 	}{
 		{name: "hosts", tab: HomeTab, want: []string{"enter connect", "n new", "e edit", "d delete", "/ search"}},
 		{name: "keys", tab: KeyTab, want: []string{"enter details", "n generate", "i import", "e edit", "d delete", "c copy pubkey"}, forbidden: []string{"export"}},
-		{name: "forwards", tab: ForwardTab, want: []string{"enter start", "x stop", "n new", "e edit", "d delete"}},
+		{name: "forwards", tab: ForwardTab, want: []string{"enter toggle", "x stop", "n new", "e edit", "d delete"}},
 		{name: "snippets", tab: SnippetTab, want: []string{"n new", "e edit", "d delete"}, forbidden: []string{"run"}},
 		{name: "sessions", tab: SessionListTab, want: []string{"enter read", "/ search", "c copy transcript"}},
 	}

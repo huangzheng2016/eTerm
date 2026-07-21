@@ -37,6 +37,7 @@ func (t TabsModel) SetItems(items []TabItem) TabsModel {
 	if t.scrollIdx >= len(items) {
 		t.scrollIdx = len(items) - 1
 	}
+	t.clampScroll()
 	return t
 }
 
@@ -61,6 +62,7 @@ func TabStrip(items []TabItem, activeIdx int, width int) string {
 
 func (t TabsModel) SetWidth(w int) TabsModel {
 	t.width = w
+	t.clampScroll()
 	return t
 }
 
@@ -170,7 +172,7 @@ func (t TabsModel) ScrollLeft() TabsModel {
 
 // ScrollRight scrolls the tab bar one position to the right.
 func (t TabsModel) ScrollRight() TabsModel {
-	if t.scrollIdx < len(t.items)-1 {
+	if t.layout().hasRight {
 		t.scrollIdx++
 	}
 	return t

@@ -34,12 +34,17 @@ type GridLayout struct {
 	Rows     int
 	PageSize int
 	CardW    int // total card width (includes border)
+	CardH    int
 }
 
 // PLACEHOLDER_FUNCS
 
 // ComputeGrid calculates grid dimensions for the given terminal size.
 func ComputeGrid(width, height int) GridLayout {
+	return ComputeGridWithCardHeight(width, height, CardOuterH)
+}
+
+func ComputeGridWithCardHeight(width, height, cardH int) GridLayout {
 	cols := (width + GridGap) / (CardMinOuterW + GridGap)
 	if cols < 1 {
 		cols = 1
@@ -48,11 +53,11 @@ func ComputeGrid(width, height int) GridLayout {
 	if cardW < CardMinOuterW {
 		cardW = CardMinOuterW
 	}
-	rows := height / CardOuterH
+	rows := height / cardH
 	if rows < 1 {
 		rows = 1
 	}
-	return GridLayout{Cols: cols, Rows: rows, PageSize: cols * rows, CardW: cardW}
+	return GridLayout{Cols: cols, Rows: rows, PageSize: cols * rows, CardW: cardW, CardH: cardH}
 }
 
 // GridPage returns the page number for a given cursor and pageSize.
@@ -117,8 +122,15 @@ func GridMove(dir string, cursor, total int, gl GridLayout) (int, bool) {
 
 // GridIndexAtMouse returns the item index for a click at (x, y) within the grid area.
 func GridIndexAtMouse(x, y, total int, gl GridLayout, page int) (int, bool) {
+	if x < 0 || y < 0 {
+		return 0, false
+	}
 	col := x / (gl.CardW + GridGap)
-	row := y / CardOuterH
+	cardH := gl.CardH
+	if cardH == 0 {
+		cardH = CardOuterH
+	}
+	row := y / cardH
 	if col >= gl.Cols || row >= gl.Rows {
 		return 0, false
 	}
@@ -168,10 +180,24 @@ func RenderCard(title, desc string, active bool, cardW int) string {
 	return InactiveCardBorder.Width(cardW).Height(2).Render(content)
 }
 
+func RenderThreeLineCard(title, second, third string, active bool, cardW int) string {
+	innerW := max(1, cardW-2)
+	title = truncateToWidth(title, innerW)
+	second = truncateToWidth(second, innerW)
+	third = truncateToWidth(third, innerW)
+	content := CardTitleBase.Width(innerW).Render(title) + "\n" +
+		CardDescBase.Width(innerW).Render(second) + "\n" +
+		CardDescBase.Width(innerW).Render(third)
+	if active {
+		return ActiveCardBorder.Width(cardW).Height(3).Render(content)
+	}
+	return InactiveCardBorder.Width(cardW).Height(3).Render(content)
+}
+
 // EmptyCard returns a blank placeholder the same size as a card.
-func EmptyCard(cardW int) string {
+func EmptyCard(cardW, cardH int) string {
 	line := strings.Repeat(" ", cardW)
-	lines := make([]string, CardOuterH)
+	lines := make([]string, cardH)
 	for i := range lines {
 		lines[i] = line
 	}
@@ -185,6 +211,10 @@ func RenderGridRows(cards []string, total, cursor int, gl GridLayout) string {
 		return ""
 	}
 	page := GridPage(cursor, gl.PageSize)
+	cardH := gl.CardH
+	if cardH == 0 {
+		cardH = CardOuterH
+	}
 	start := page * gl.PageSize
 	if start >= total {
 		start = 0
@@ -198,7 +228,7 @@ func RenderGridRows(cards []string, total, cursor int, gl GridLayout) string {
 			if idx < total {
 				row = append(row, cards[idx])
 			} else {
-				row = append(row, EmptyCard(gl.CardW))
+				row = append(row, EmptyCard(gl.CardW, cardH))
 			}
 		}
 		joined := lipgloss.JoinHorizontal(lipgloss.Top, Intersperse(row, strings.Repeat(" ", GridGap))...)

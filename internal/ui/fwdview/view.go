@@ -35,6 +35,6 @@ func fwdHelpLine(vk viewkeys.FwdKeys) string {
 	return viewkeys.HelpLabel(vk.New) + ":add · " +
 		viewkeys.HelpLabel(vk.Edit) + ":edit · " +
 		viewkeys.HelpLabel(vk.Delete) + ":delete · " +
-		viewkeys.HelpLabel(vk.Start) + ":start · " +
+		viewkeys.HelpLabel(vk.Start) + ":toggle · " +
 		viewkeys.HelpLabel(vk.Stop) + ":stop"
 }

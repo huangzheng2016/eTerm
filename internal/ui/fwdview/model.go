@@ -2,34 +2,40 @@ package fwdview
 
 import (
 	"fmt"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"gorm.io/gorm"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 type Model struct {
-	db         *gorm.DB
-	width      int
-	height     int
-	loaded     bool
-	rules      []db.PortForward
-	running    map[uint]bool
-	gridCursor int
-	gridLayout components.GridLayout
-	vk         viewkeys.FwdKeys
+	db           *gorm.DB
+	width        int
+	height       int
+	loaded       bool
+	rules        []db.PortForward
+	running      map[uint]bool
+	gridCursor   int
+	gridLayout   components.GridLayout
+	lastClickAt  time.Time
+	lastClickIdx int
+	vk           viewkeys.FwdKeys
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.FwdKeys) { m.vk = vk }
 
 func New(database *gorm.DB, vk viewkeys.FwdKeys) Model {
 	return Model{
-		db:      database,
-		running: make(map[uint]bool),
-		vk:      vk,
+		db:           database,
+		running:      make(map[uint]bool),
+		lastClickIdx: -1,
+		vk:           vk,
 	}
 }
 
@@ -84,13 +90,20 @@ func ruleCardTitle(r db.PortForward) string {
 }
 
 func ruleCardDesc(r db.PortForward, running bool) string {
-	st := "○"
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color("#cc0000")).Render("●")
 	if running {
-		st = "●"
+		st = lipgloss.NewStyle().Foreground(lipgloss.Color("#00cc00")).Render("●")
 	}
 	alias := ""
 	if r.Host.ID != 0 {
 		alias = hostAlias(r.Host)
 	}
 	return fmt.Sprintf("%s %s", st, alias)
+}
+
+func (m Model) toggleRuleCmd(id uint) tea.Cmd {
+	if m.running[id] {
+		return func() tea.Msg { return types.ForwardRuleStopMsg{RuleID: id} }
+	}
+	return func() tea.Msg { return types.ForwardRuleStartMsg{RuleID: id} }
 }

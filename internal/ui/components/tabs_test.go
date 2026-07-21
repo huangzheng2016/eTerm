@@ -24,6 +24,35 @@ func TestTabsScrollChangesVisibleRange(t *testing.T) {
 	}
 }
 
+func TestTabsScrollRightStopsWhenLastTabIsVisible(t *testing.T) {
+	tabs := NewTabs(testTabs()).SetWidth(18)
+	for range 10 {
+		tabs = tabs.ScrollRight()
+	}
+	stoppedAt := tabs.scrollIdx
+	tabs = tabs.ScrollRight()
+	if tabs.scrollIdx != stoppedAt {
+		t.Fatalf("scroll index advanced from %d to %d", stoppedAt, tabs.scrollIdx)
+	}
+	if !strings.Contains(tabs.View(), "four") {
+		t.Fatalf("last visible range = %q", tabs.View())
+	}
+}
+
+func TestTabsWideBarDoesNotScroll(t *testing.T) {
+	tabs := NewTabs(testTabs()).SetWidth(80).ScrollRight()
+	if tabs.scrollIdx != 0 {
+		t.Fatalf("scroll index = %d, want 0", tabs.scrollIdx)
+	}
+}
+
+func TestTabsWiderBarClampsExistingScroll(t *testing.T) {
+	tabs := NewTabs(testTabs()).SetWidth(18).ScrollRight().SetWidth(80)
+	if tabs.scrollIdx != 0 {
+		t.Fatalf("scroll index = %d, want 0", tabs.scrollIdx)
+	}
+}
+
 func TestTabsArrowClicksAndScrolledTabHitRegion(t *testing.T) {
 	tabs := NewTabs(testTabs()).SetWidth(18).ScrollRight()
 	tabs, changed := tabs.HandleClick(2)
@@ -45,8 +74,8 @@ func TestTabsArrowClicksAndScrolledTabHitRegion(t *testing.T) {
 func TestTabsSetItemsPreservesAndClampsScroll(t *testing.T) {
 	tabs := NewTabs(testTabs()).SetWidth(18).ScrollRight().ScrollRight()
 	tabs = tabs.SetItems(testTabs()[:2])
-	if tabs.scrollIdx != 1 {
-		t.Fatalf("clamped scroll index = %d, want 1", tabs.scrollIdx)
+	if tabs.scrollIdx != 0 {
+		t.Fatalf("clamped scroll index = %d, want 0", tabs.scrollIdx)
 	}
 	if tabs.ActiveIndex() != 0 {
 		t.Fatalf("active index = %d, want 0", tabs.ActiveIndex())

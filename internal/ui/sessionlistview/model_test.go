@@ -1,12 +1,14 @@
 package sessionlistview
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/db"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"gorm.io/gorm"
 )
 
@@ -114,8 +116,62 @@ func TestMouseDragCopiesSelectedSessionText(t *testing.T) {
 	m.Update(tea.MouseClickMsg(tea.Mouse{X: 6, Y: 3, Button: tea.MouseLeft}))
 	m.Update(tea.MouseMotionMsg(tea.Mouse{X: 10, Y: 3, Button: tea.MouseLeft}))
 	_, cmd := m.Update(tea.MouseReleaseMsg(tea.Mouse{X: 10, Y: 3, Button: tea.MouseLeft}))
-	if cmd == nil || cmd() == nil {
+	if cmd == nil {
 		t.Fatal("expected clipboard command")
+	}
+	msgs := cmd().(tea.BatchMsg)
+	foundSuccess := false
+	for _, next := range msgs {
+		if msg, ok := next().(types.SuccessMsg); ok && msg.Message == "Copied 5 chars" {
+			foundSuccess = true
+		}
+	}
+	if !foundSuccess {
+		t.Fatal("missing copy success message")
+	}
+}
+
+func TestSessionCardsUseThreeContentLines(t *testing.T) {
+	end := time.Date(2026, 7, 21, 13, 20, 0, 0, time.Local)
+	start := end.Add(-time.Hour)
+	m := New(nil)
+	m.loaded = true
+	m.rows = []db.ConnectionHistory{{
+		Label:          "dev-k1",
+		Source:         "ssh",
+		Status:         "success",
+		ConnectedAt:    start,
+		DisconnectedAt: &end,
+		Transcript:     "output",
+	}}
+	m.SetSize(80, 20)
+	view := m.View().Content
+	for _, want := range []string{"dev-k1", "2026-07-21 12:20 · 1h0m0s", "ssh · success · transcript"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("card missing %q: %q", want, view)
+		}
+	}
+	if m.grid.CardH != 5 {
+		t.Fatalf("card height = %d, want 5", m.grid.CardH)
+	}
+}
+
+func TestSessionCardMouseUsesFiveLineRows(t *testing.T) {
+	m := New(nil)
+	m.loaded = true
+	m.rows = []db.ConnectionHistory{{Label: "first"}, {Label: "second"}}
+	m.SetSize(40, 20)
+
+	updated, _ := m.Update(tea.MouseClickMsg(tea.Mouse{X: 1, Y: 6, Button: tea.MouseLeft}))
+	m = updated.(*Model)
+	if m.cursor != 1 || m.detail {
+		t.Fatalf("cursor=%d detail=%v", m.cursor, m.detail)
+	}
+
+	updated, _ = m.Update(tea.MouseClickMsg(tea.Mouse{X: 1, Y: 0, Button: tea.MouseLeft}))
+	m = updated.(*Model)
+	if m.cursor != 1 || m.detail {
+		t.Fatalf("header click changed cursor=%d detail=%v", m.cursor, m.detail)
 	}
 }
 

@@ -51,7 +51,7 @@ func (m *Model) Init() tea.Cmd { return m.reload() }
 
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
-	m.grid = components.ComputeGrid(width, height-2)
+	m.grid = components.ComputeGridWithCardHeight(width, height-2, 5)
 	m.search.SetWidth(max(20, width-12))
 }
 
@@ -136,7 +136,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "end", "G":
 				m.detailScroll = len(strings.Split(m.selectedTranscript(), "\n"))
 			case "c":
-				return m, tea.SetClipboard(m.selectedTranscript())
+				return m, copyTranscriptCmd(m.selectedTranscript())
 			}
 			m.clampDetailScroll()
 			return m, nil
@@ -170,7 +170,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.grid.PageSize > 0 {
 				page = m.cursor / m.grid.PageSize
 			}
-			if idx, ok := components.GridIndexAtMouse(msg.X, msg.Y-2, len(m.rows), m.grid, page); ok {
+			if idx, ok := components.GridIndexAtMouse(msg.X, msg.Y-1, len(m.rows), m.grid, page); ok {
 				if idx == m.cursor {
 					m.detail, m.detailScroll = true, 0
 				} else {
@@ -197,7 +197,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail && m.selection.Dragging {
 			line, col, _ := m.detailTextPoint(msg.X, msg.Y)
 			if m.selection.End(line, col) {
-				return m, tea.SetClipboard(m.selection.Text(strings.Split(m.selectedTranscript(), "\n")))
+				return m, copyTranscriptCmd(m.selection.Text(strings.Split(m.selectedTranscript(), "\n")))
 			}
 		}
 	}
@@ -229,7 +229,7 @@ func (m *Model) View() tea.View {
 	start, end := components.GridPageRange(len(m.rows), m.cursor, m.grid)
 	for i := start; i < end; i++ {
 		row := m.rows[i]
-		cards[i] = components.RenderCard(sessionTitle(row), sessionDescription(row), i == m.cursor, m.grid.CardW)
+		cards[i] = components.RenderThreeLineCard(sessionTitle(row), sessionTime(row), sessionMeta(row), i == m.cursor, m.grid.CardW)
 	}
 	return tea.NewView(header + "\n" + components.RenderGridRows(cards, len(cards), m.cursor, m.grid))
 }
@@ -298,10 +298,18 @@ func sessionTitle(row db.ConnectionHistory) string {
 }
 
 func sessionDescription(row db.ConnectionHistory) string {
+	return sessionTime(row) + " · " + sessionMeta(row)
+}
+
+func sessionTime(row db.ConnectionHistory) string {
 	duration := "open"
 	if row.DisconnectedAt != nil {
 		duration = row.DisconnectedAt.Sub(row.ConnectedAt).Round(time.Second).String()
 	}
+	return fmt.Sprintf("%s · %s", row.ConnectedAt.Format("2006-01-02 15:04"), duration)
+}
+
+func sessionMeta(row db.ConnectionHistory) string {
 	capture := "no transcript"
 	if strings.TrimSpace(row.Transcript) != "" {
 		capture = "transcript"
@@ -310,5 +318,12 @@ func sessionDescription(row db.ConnectionHistory) string {
 	if source == "" {
 		source = "ssh"
 	}
-	return fmt.Sprintf("%s · %s · %s · %s · %s", row.ConnectedAt.Format("2006-01-02 15:04"), duration, source, row.Status, capture)
+	return fmt.Sprintf("%s · %s · %s", source, row.Status, capture)
+}
+
+func copyTranscriptCmd(text string) tea.Cmd {
+	return tea.Batch(
+		tea.SetClipboard(text),
+		func() tea.Msg { return types.SuccessMsg{Message: fmt.Sprintf("Copied %d chars", len([]rune(text)))} },
+	)
 }
