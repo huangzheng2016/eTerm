@@ -414,7 +414,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Alt+s cycles through SSH tabs, Alt+f cycles through SFTP tabs
-		if k := msg.Key(); k.Mod.Contains(tea.ModAlt) {
+		if k := msg.Key(); k.Mod.Contains(tea.ModAlt) && !k.Mod.Contains(tea.ModShift) {
 			var targetType TabType
 			switch k.Code {
 			case 's':
@@ -596,13 +596,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx = a.activeTab
 		}
 		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 && !isListView(a.tabs[idx].Type) {
-			closeCmd := closeTerminalTabCmd(a.db, a.tabs[idx])
-			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
-			if a.activeTab >= len(a.tabs) {
-				a.activeTab = len(a.tabs) - 1
-			}
-			a.syncTabBar()
-			return a, closeCmd
+			return a.closeTabAt(idx)
 		}
 		return a, nil
 
@@ -750,16 +744,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.applySftpOpened(msg)
 
 	case types.HostSavedMsg:
-		// Close the editor tab and refresh the home list
-		idx := a.activeTab
-		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 {
-			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
-			if a.activeTab >= len(a.tabs) {
-				a.activeTab = len(a.tabs) - 1
-			}
-			a.syncTabBar()
-		}
-		return a, func() tea.Msg { return types.RefreshListMsg{} }
+		return a.closeEditorTab(EditorTab)
 
 	case types.HostDeletedMsg:
 		database := a.db
@@ -1275,27 +1260,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, func() tea.Msg { return types.RefreshListMsg{} }
 
 	case types.ForwardRuleSavedMsg:
-		// Close the editor tab and refresh
-		idx := a.activeTab
-		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 {
-			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
-			if a.activeTab >= len(a.tabs) {
-				a.activeTab = len(a.tabs) - 1
-			}
-			a.syncTabBar()
-		}
-		return a, func() tea.Msg { return types.RefreshListMsg{} }
+		return a.closeEditorTab(FwdEditorTab)
 
 	case types.SnippetSavedMsg:
-		idx := a.activeTab
-		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 {
-			a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
-			if a.activeTab >= len(a.tabs) {
-				a.activeTab = len(a.tabs) - 1
-			}
-			a.syncTabBar()
-		}
-		return a, func() tea.Msg { return types.RefreshListMsg{} }
+		return a.closeEditorTab(SnippetEditorTab)
 
 	case types.FingerprintConfirmMsg:
 		a = a.stopConnectProgress()

@@ -2,7 +2,6 @@ package app
 
 import (
 	"charm.land/bubbles/v2/key"
-	"github.com/huangzheng2016/eTerm/internal/keylabels"
 )
 
 type KeyMap struct {
@@ -34,102 +33,5 @@ type KeyMap struct {
 }
 
 func DefaultKeyMap() KeyMap {
-	return KeyMap{
-		QuitApp: key.NewBinding(
-			key.WithKeys("ctrl+shift+q", "ctrl+shift+c"),
-			key.WithHelp("C-S-q", "quit"),
-		),
-		Quit: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("C-c", "quit (list only; SSH sends to host)"),
-		),
-		Help: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
-		),
-		NewTab: key.NewBinding(
-			key.WithKeys("ctrl+t"),
-			key.WithHelp(keylabels.KeysTab, "SSH keys"),
-		),
-		CloseTab: key.NewBinding(
-			key.WithKeys("ctrl+w"),
-			key.WithHelp("C-w", "close tab"),
-		),
-		CloseTabSafe: key.NewBinding(
-			key.WithKeys("ctrl+shift+w"),
-			key.WithHelp("C-S-w", "close tab"),
-		),
-		NextTab: key.NewBinding(
-			key.WithKeys("ctrl+tab", "ctrl+pgdown", "alt+n", "ctrl+right"),
-			key.WithHelp("C-→/A-n", "next"),
-		),
-		PrevTab: key.NewBinding(
-			key.WithKeys("ctrl+shift+tab", "ctrl+pgup", "alt+p", "ctrl+left"),
-			key.WithHelp("C-←/A-p", "prev"),
-		),
-		TabPageLeft: key.NewBinding(
-			key.WithKeys("alt+shift+left"),
-			key.WithHelp("A-S-left", "page tabs left"),
-		),
-		TabPageRight: key.NewBinding(
-			key.WithKeys("alt+shift+right"),
-			key.WithHelp("A-S-right", "page tabs right"),
-		),
-		SSHConnect: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "connect"),
-		),
-		SFTPOpen: key.NewBinding(
-			key.WithKeys("ctrl+f", "s"),
-			key.WithHelp("s/C-f", "open sftp"),
-		),
-		NewHost: key.NewBinding(
-			key.WithKeys("n"),
-			key.WithHelp("n", "new host"),
-		),
-		EditHost: key.NewBinding(
-			key.WithKeys("e"),
-			key.WithHelp("e", "edit host"),
-		),
-		DeleteHost: key.NewBinding(
-			key.WithKeys("d"),
-			key.WithHelp("d", "delete host"),
-		),
-		Search: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "search"),
-		),
-		Lock: key.NewBinding(
-			key.WithKeys("ctrl+l"),
-			key.WithHelp("C-l", "lock"),
-		),
-		LockApp: key.NewBinding(
-			key.WithKeys("ctrl+shift+l"),
-			key.WithHelp("C-S-l", "lock"),
-		),
-		ForwardTab: key.NewBinding(
-			key.WithKeys("ctrl+p"),
-			key.WithHelp("C-p", "port fwds"),
-		),
-		SnippetsTab: key.NewBinding(
-			key.WithKeys("ctrl+shift+b"),
-			key.WithHelp("C-S-b", "snippets"),
-		),
-		CommandPalette: key.NewBinding(
-			key.WithKeys("ctrl+k"),
-			key.WithHelp("C-k", "commands"),
-		),
-		LocalTerminal: key.NewBinding(
-			key.WithKeys("ctrl+shift+t"),
-			key.WithHelp("C-S-t", "local shell"),
-		),
-		RenameTab: key.NewBinding(
-			key.WithKeys("ctrl+shift+r"),
-			key.WithHelp("C-S-r", "rename tab"),
-		),
-		PasteImageURL: key.NewBinding(
-			key.WithKeys("ctrl+shift+i"),
-			key.WithHelp("C-S-i", "paste url"),
-		),
-	}
+	return BuildKeyMap(DefaultKeyBindingConfig())
 }

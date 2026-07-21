@@ -170,6 +170,49 @@ func closeTerminalTabCmd(gdb *gorm.DB, tab Tab) tea.Cmd {
 	}
 }
 
+func (a App) closeTabAt(idx int) (App, tea.Cmd) {
+	if idx < 0 || idx >= len(a.tabs) || len(a.tabs) <= 1 {
+		return a, nil
+	}
+	target := editorListType(a.tabs[idx].Type)
+	closeCmd := closeTerminalTabCmd(a.db, a.tabs[idx])
+	a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
+	if a.activeTab >= len(a.tabs) {
+		a.activeTab = len(a.tabs) - 1
+	}
+	a.syncTabBar()
+	if target == "" {
+		return a, closeCmd
+	}
+	a, listCmd := a.activateListView(target)
+	return a, tea.Batch(closeCmd, listCmd)
+}
+
+func editorListType(tabType TabType) TabType {
+	switch tabType {
+	case EditorTab:
+		return HomeTab
+	case FwdEditorTab:
+		return ForwardTab
+	case SnippetEditorTab:
+		return SnippetTab
+	default:
+		return ""
+	}
+}
+
+func (a App) closeEditorTab(tabType TabType) (App, tea.Cmd) {
+	if a.activeTab >= 0 && a.activeTab < len(a.tabs) && a.tabs[a.activeTab].Type == tabType {
+		return a.closeTabAt(a.activeTab)
+	}
+	for i := len(a.tabs) - 1; i >= 0; i-- {
+		if a.tabs[i].Type == tabType {
+			return a.closeTabAt(i)
+		}
+	}
+	return a, nil
+}
+
 func (a App) lockSession() (App, tea.Cmd) {
 	if a.noPasswordMode {
 		return a, func() tea.Msg {

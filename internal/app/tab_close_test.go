@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
@@ -39,6 +40,84 @@ func TestCloseShortcutKeepsListRoot(t *testing.T) {
 	got, cmd := a.closeCurrentTabIfAllowed()
 	if len(got.tabs) != 2 || cmd != nil {
 		t.Fatalf("tabs=%+v cmd=%v", got.tabs, cmd)
+	}
+}
+
+func TestEditorCloseReturnsToItsList(t *testing.T) {
+	tests := []struct {
+		name   string
+		editor TabType
+		list   TabType
+	}{
+		{name: "host", editor: EditorTab, list: HomeTab},
+		{name: "forward", editor: FwdEditorTab, list: ForwardTab},
+		{name: "snippet", editor: SnippetEditorTab, list: SnippetTab},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := App{
+				tabs: []Tab{
+					{Type: tt.list, Title: "List"},
+					{Type: SSHTab, Title: "shell"},
+					{Type: tt.editor, Title: "Edit"},
+				},
+				activeTab: 2,
+			}
+
+			next, _ := a.Update(types.CloseTabMsg{Index: -1})
+			got := next.(App)
+			if len(got.tabs) != 2 || got.activeTab != 0 || got.tabs[0].Type != tt.list {
+				t.Fatalf("active=%d tabs=%+v", got.activeTab, got.tabs)
+			}
+		})
+	}
+}
+
+func TestEditorSaveReturnsToItsList(t *testing.T) {
+	tests := []struct {
+		name   string
+		editor TabType
+		list   TabType
+		msg    tea.Msg
+	}{
+		{name: "host", editor: EditorTab, list: HomeTab, msg: types.HostSavedMsg{}},
+		{name: "forward", editor: FwdEditorTab, list: ForwardTab, msg: types.ForwardRuleSavedMsg{}},
+		{name: "snippet", editor: SnippetEditorTab, list: SnippetTab, msg: types.SnippetSavedMsg{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := App{
+				tabs: []Tab{
+					{Type: tt.list, Title: "List"},
+					{Type: SSHTab, Title: "shell"},
+					{Type: tt.editor, Title: "Edit"},
+				},
+				activeTab: 2,
+			}
+
+			next, _ := a.Update(tt.msg)
+			got := next.(App)
+			if len(got.tabs) != 2 || got.activeTab != 0 || got.tabs[0].Type != tt.list {
+				t.Fatalf("active=%d tabs=%+v", got.activeTab, got.tabs)
+			}
+		})
+	}
+}
+
+func TestEditorSaveClosesEditorAfterTabSwitch(t *testing.T) {
+	a := App{
+		tabs: []Tab{
+			{Type: ForwardTab, Title: "List"},
+			{Type: FwdEditorTab, Title: "Edit"},
+			{Type: SSHTab, Title: "shell"},
+		},
+		activeTab: 2,
+	}
+
+	next, _ := a.Update(types.ForwardRuleSavedMsg{})
+	got := next.(App)
+	if len(got.tabs) != 2 || got.activeTab != 0 || got.tabs[0].Type != ForwardTab || got.tabs[1].Type != SSHTab {
+		t.Fatalf("active=%d tabs=%+v", got.activeTab, got.tabs)
 	}
 }
 

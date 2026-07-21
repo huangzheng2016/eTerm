@@ -145,6 +145,23 @@ func TestTabPageKeysScrollWithoutChangingActiveTab(t *testing.T) {
 	}
 }
 
+func TestAltShiftSDoesNotCycleSSHTabs(t *testing.T) {
+	cfg := defaultKeyBindingConfig("windows")
+	a := App{
+		viewState: MainView,
+		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
+		tabs:      []Tab{{Type: SSHTab}, {Type: SSHTab}},
+		activeTab: 0,
+		keyMap:    BuildKeyMap(cfg),
+		kbConfig:  cfg,
+	}
+
+	next, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 's', ShiftedCode: 'S', Mod: tea.ModAlt | tea.ModShift}))
+	if next.(App).activeTab != 0 {
+		t.Fatalf("active tab = %d, want 0", next.(App).activeTab)
+	}
+}
+
 type errConnectionResetForTest struct{}
 
 func (errConnectionResetForTest) Error() string { return "read: connection reset by peer" }

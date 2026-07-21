@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"runtime"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -91,7 +92,11 @@ type KeyBindingConfig struct {
 }
 
 func DefaultKeyBindingConfig() KeyBindingConfig {
-	return KeyBindingConfig{
+	return defaultKeyBindingConfig(runtime.GOOS)
+}
+
+func defaultKeyBindingConfig(goos string) KeyBindingConfig {
+	cfg := KeyBindingConfig{
 		// Global
 		QuitApp:        []string{"ctrl+shift+q", "ctrl+shift+c"},
 		Quit:           []string{"ctrl+c"},
@@ -165,6 +170,21 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 		SSHReconnect:     []string{"r"},
 		SSHSnippetPicker: []string{"ctrl+shift+s", "ctrl+S"},
 	}
+	if goos == "windows" {
+		cfg.QuitApp = []string{"alt+shift+q", "alt+shift+c"}
+		cfg.CloseTabSafe = []string{"alt+shift+w"}
+		cfg.LockApp = []string{"alt+shift+l"}
+		cfg.SnippetsTab = []string{"alt+shift+b"}
+		cfg.LocalTerminal = []string{"alt+shift+t"}
+		cfg.RenameTab = []string{"alt+shift+r"}
+		cfg.PasteImageURL = []string{"alt+shift+i"}
+		cfg.SnippetPicker = []string{"alt+shift+s"}
+		cfg.SessionHistory = []string{"alt+shift+h"}
+		cfg.BatchTag = []string{"alt+shift+g"}
+		cfg.BatchActions = []string{"alt+shift+m"}
+		cfg.SSHSnippetPicker = []string{"alt+shift+s"}
+	}
+	return cfg
 }
 
 func LoadKeyBindingConfig(database *gorm.DB) KeyBindingConfig {

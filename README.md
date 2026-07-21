@@ -102,6 +102,8 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 
 快捷键显示使用短写：`C` = Ctrl，`S` = Shift，`A` = Alt，例如 `C-S-i` 表示 `Ctrl+Shift+I`。
 
+Windows 默认使用 `A-S-字母` 代替 `C-S-字母`，因为 Windows 的终端输入可能丢失 Ctrl 与字母组合中的 Shift 状态。
+
 ## 多设备同步
 
 `Esc` -> Sync 打开同步设置。默认使用 HTTP syncd；远程 Shell 和剪贴板托管也依赖 HTTP syncd。

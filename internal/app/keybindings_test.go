@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -19,16 +20,44 @@ func TestBuildKeyMapNewTabHelpUsesConfig(t *testing.T) {
 }
 
 func TestDefaultLocalTerminalKey(t *testing.T) {
-	cfg := DefaultKeyBindingConfig()
+	cfg := defaultKeyBindingConfig("linux")
 	if len(cfg.LocalTerminal) != 1 || cfg.LocalTerminal[0] != "ctrl+shift+t" {
 		t.Fatalf("LocalTerminal = %#v", cfg.LocalTerminal)
 	}
 }
 
 func TestDefaultPasteImageURLKey(t *testing.T) {
-	cfg := DefaultKeyBindingConfig()
+	cfg := defaultKeyBindingConfig("linux")
 	if len(cfg.PasteImageURL) != 1 || cfg.PasteImageURL[0] != "ctrl+shift+i" {
 		t.Fatalf("PasteImageURL = %#v", cfg.PasteImageURL)
+	}
+}
+
+func TestWindowsDefaultsAvoidCtrlShiftLetters(t *testing.T) {
+	cfg := defaultKeyBindingConfig("windows")
+	bindings := [][]string{
+		cfg.QuitApp,
+		cfg.CloseTabSafe,
+		cfg.LockApp,
+		cfg.SnippetsTab,
+		cfg.LocalTerminal,
+		cfg.RenameTab,
+		cfg.PasteImageURL,
+		cfg.SnippetPicker,
+		cfg.SessionHistory,
+		cfg.BatchTag,
+		cfg.BatchActions,
+		cfg.SSHSnippetPicker,
+	}
+	for _, keys := range bindings {
+		for _, key := range keys {
+			if strings.HasPrefix(key, "ctrl+shift+") {
+				t.Fatalf("Windows default still uses %q", key)
+			}
+		}
+	}
+	if cfg.CloseTabSafe[0] != "alt+shift+w" || cfg.RenameTab[0] != "alt+shift+r" {
+		t.Fatalf("close=%v rename=%v", cfg.CloseTabSafe, cfg.RenameTab)
 	}
 }
 
