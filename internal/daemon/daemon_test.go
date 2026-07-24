@@ -11,7 +11,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/security"
 )
 
-func TestLoadRuntimeRejectsSSHSyncMode(t *testing.T) {
+func TestLoadRuntimeRejectsSSHSyncModeWithoutHost(t *testing.T) {
 	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestLoadRuntimeRejectsSSHSyncMode(t *testing.T) {
 	_ = db.SetSetting(database, "sync_mode", "ssh")
 
 	_, err = loadRuntime(database, Config{Password: "pw"})
-	if err == nil || !strings.Contains(err.Error(), "HTTP") {
-		t.Fatalf("got %v, want HTTP mode error", err)
+	if err == nil || !strings.Contains(err.Error(), "no SSH host") {
+		t.Fatalf("got %v, want no SSH host error", err)
 	}
 }

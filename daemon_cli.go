@@ -134,16 +134,17 @@ func (c daemonController) start(out io.Writer, opts daemonOptions) int {
 	if opts.DBPath != "" {
 		args = append(args, "-c", opts.DBPath)
 	}
-	if opts.Password != "" {
-		args = append(args, "-password", opts.Password)
-	}
 	if opts.Name != "" {
 		args = append(args, "-name", opts.Name)
 	}
 	if opts.PProfAddr != "" {
 		args = append(args, "-pprof", opts.PProfAddr)
 	}
-	pid, err := startDetachedDaemon(exe, args, logFile)
+	var env []string
+	if opts.Password != "" {
+		env = append(env, "ETERM_MASTER_PASSWORD="+opts.Password)
+	}
+	pid, err := startDetachedDaemon(exe, args, env, logFile)
 	if err != nil {
 		fmt.Fprintf(out, "start failed: %v\n", err)
 		return 1

@@ -15,13 +15,17 @@ func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 		found := database.Unscoped().Where("sync_id = ?", r.SyncID).First(&existing).Error == nil
 
 		if r.Deleted {
-			if found {
+			if found && !r.UpdatedAt.Before(existing.UpdatedAt) {
 				if err := database.Unscoped().Delete(&existing).Error; err != nil {
 					res.Failed++
 					return res, err
 				}
 			}
 			res.Merged++
+			continue
+		}
+
+		if found && !r.UpdatedAt.After(existing.UpdatedAt) {
 			continue
 		}
 
@@ -66,6 +70,10 @@ func mergeSSHKeys(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 				res.Failed++
 				return res, err
 			}
+		}
+		if err := database.Model(&key).UpdateColumn("updated_at", r.UpdatedAt).Error; err != nil {
+			res.Failed++
+			return res, err
 		}
 		res.Merged++
 	}

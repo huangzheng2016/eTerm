@@ -56,12 +56,17 @@ func (e *Engine) Ping() error {
 }
 
 func (e *Engine) Pull(tenant string, sinceRev int64) ([]SyncEntry, int64, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	var entries []SyncEntry
 	if err := e.DB.Where("tenant = ? AND revision > ?", tenant, sinceRev).Order("revision").Find(&entries).Error; err != nil {
 		return nil, 0, err
 	}
 	var maxRev int64
-	e.DB.Model(&SyncEntry{}).Where("tenant = ?", tenant).Select("COALESCE(MAX(revision), 0)").Row().Scan(&maxRev)
+	if err := e.DB.Model(&SyncEntry{}).Where("tenant = ?", tenant).Select("COALESCE(MAX(revision), 0)").Row().Scan(&maxRev); err != nil {
+		return nil, 0, err
+	}
 	return entries, maxRev, nil
 }
 

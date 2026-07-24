@@ -106,7 +106,7 @@ Windows 默认使用 `A-S-字母` 代替 `C-S-字母`，因为 Windows 的终端
 
 ## 多设备同步
 
-`Esc` -> Sync 打开同步设置。默认使用 HTTP syncd；远程 Shell 和剪贴板托管也依赖 HTTP syncd。
+`Esc` -> Sync 打开同步设置。默认使用 HTTP syncd。
 
 最小启动：
 
@@ -156,17 +156,19 @@ eterm daemon status
 eterm daemon stop
 ```
 
-同步设置里仍可选择 SSH 模式做一次性同步，但远程 Shell 和剪贴板文件托管只支持 HTTP 模式。同步数据在上传前加密，syncd 不保存明文。
+也可以选 SSH 模式：在某台可通过 SSH 登录的主机上常驻 etermsyncd（同上，监听 `127.0.0.1:18443`），同步设置里选 SSH 并填该主机和 Remote Port（默认 18443），API Key 与远端一致。客户端会用 SSH 本地端口映射访问远端的 HTTP API，records 同步、远程 Shell 和剪贴板托管与 HTTP 模式完全一致。注意 SSH 主机需要先交互连接一次以信任指纹。
+
+同步数据在上传前加密，syncd 不保存明文。
 
 ## 剪贴板链接粘贴
 
 在 `[L]` 本地 Shell、`[S]` SSH Shell、`[R]` 远程 Shell 中可使用：
 
-- 普通粘贴：本地 Shell 和本地 tmux 中，剪贴板里的本地文件会粘贴为 `[filename](file:///path)`；SSH 和远程 Shell 会上传到 HTTP syncd 后粘贴链接
-- `C-S-i`：强制读取系统剪贴板文件/图片，上传到 HTTP syncd，向当前 Shell 粘贴 `[filename](url)`
+- 普通粘贴：本地 Shell 和本地 tmux 中，剪贴板里的本地文件会粘贴为 `[filename](file:///path)`；SSH 和远程 Shell 会上传到 syncd 后粘贴链接
+- `C-S-i`：强制读取系统剪贴板文件/图片，上传到 syncd，向当前 Shell 粘贴 `[filename](url)`
 - `C-k` -> `Paste URL`：同样强制上传，适合作为兜底入口
 
-短链格式为 `https://sync.example.com/b/<token>`，有效期 30 分钟。文件/图片最大 10 MiB。上传功能只支持 HTTP syncd。
+短链格式为 `https://sync.example.com/b/<token>`（SSH 模式下为 `http://127.0.0.1:<remote port>/b/<token>`，在远端主机上访问），有效期 30 分钟。文件/图片最大 10 MiB。
 
 普通文本粘贴不受影响。纯图片剪贴板通常不会触发终端文本粘贴事件，请使用 `C-S-i` 或命令面板入口上传。
 

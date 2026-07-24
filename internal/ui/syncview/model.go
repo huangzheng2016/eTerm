@@ -11,25 +11,23 @@ const (
 	fieldEnabled     = 0
 	fieldMode        = 1
 	fieldSSHHost     = 2 // selector (Host)
-	fieldRemoteBin   = 3
-	fieldRemoteDB    = 4
-	fieldServerURL   = 5
-	fieldInsecureTLS = 6
-	fieldAPIKey      = 7
-	fieldPassphrase  = 8
-	fieldInterval    = 9
+	fieldRemotePort  = 3
+	fieldServerURL   = 4
+	fieldInsecureTLS = 5
+	fieldAPIKey      = 6
+	fieldPassphrase  = 7
+	fieldInterval    = 8
 )
 
-const inputCount = 6
+const inputCount = 5
 
 // input array indices
 const (
-	inRemoteBin  = 0
-	inRemoteDB   = 1
-	inServerURL  = 2
-	inAPIKey     = 3
-	inPassphrase = 4
-	inInterval   = 5
+	inRemotePort = 0
+	inServerURL  = 1
+	inAPIKey     = 2
+	inPassphrase = 3
+	inInterval   = 4
 )
 
 var enableOptions = []string{"Off", "On"}

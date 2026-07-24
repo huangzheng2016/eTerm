@@ -12,7 +12,7 @@ import (
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	database, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,13 +88,16 @@ func TestMergeRecordsReportsCreateError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res := MergeRecords(database, mk, "sync-passphrase", []SyncRecord{{
+	res, err := MergeRecords(database, mk, "sync-passphrase", []SyncRecord{{
 		SyncID:    "incoming-key",
 		Type:      TypeSSHKey,
 		Payload:   payload,
 		UpdatedAt: time.Now(),
 	}})
 
+	if err == nil {
+		t.Fatal("expected transaction error")
+	}
 	if res.Failed != 1 || res.Merged != 0 {
 		t.Fatalf("got merged=%d failed=%d, want merged=0 failed=1", res.Merged, res.Failed)
 	}

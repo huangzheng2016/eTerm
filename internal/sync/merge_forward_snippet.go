@@ -14,13 +14,17 @@ func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecor
 		found := database.Unscoped().Where("sync_id = ?", r.SyncID).First(&existing).Error == nil
 
 		if r.Deleted {
-			if found {
+			if found && !r.UpdatedAt.Before(existing.UpdatedAt) {
 				if err := database.Unscoped().Delete(&existing).Error; err != nil {
 					res.Failed++
 					return res, err
 				}
 			}
 			res.Merged++
+			continue
+		}
+
+		if found && !r.UpdatedAt.After(existing.UpdatedAt) {
 			continue
 		}
 
@@ -44,6 +48,8 @@ func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecor
 		}
 		if hid := resolveLocalID(database, "hosts", dto.HostSyncID); hid != nil {
 			fwd.HostID = *hid
+		} else if dto.HostSyncID != "" && found {
+			fwd.HostID = existing.HostID
 		}
 
 		if found {
@@ -59,6 +65,10 @@ func mergePortForwards(database *gorm.DB, passphrase string, records []SyncRecor
 				return res, err
 			}
 		}
+		if err := database.Model(&fwd).UpdateColumn("updated_at", r.UpdatedAt).Error; err != nil {
+			res.Failed++
+			return res, err
+		}
 		res.Merged++
 	}
 	return res, nil
@@ -71,13 +81,17 @@ func mergeSnippets(database *gorm.DB, passphrase string, records []SyncRecord) (
 		found := database.Unscoped().Where("sync_id = ?", r.SyncID).First(&existing).Error == nil
 
 		if r.Deleted {
-			if found {
+			if found && !r.UpdatedAt.Before(existing.UpdatedAt) {
 				if err := database.Unscoped().Delete(&existing).Error; err != nil {
 					res.Failed++
 					return res, err
 				}
 			}
 			res.Merged++
+			continue
+		}
+
+		if found && !r.UpdatedAt.After(existing.UpdatedAt) {
 			continue
 		}
 
@@ -111,6 +125,10 @@ func mergeSnippets(database *gorm.DB, passphrase string, records []SyncRecord) (
 				res.Failed++
 				return res, err
 			}
+		}
+		if err := database.Model(&snip).UpdateColumn("updated_at", r.UpdatedAt).Error; err != nil {
+			res.Failed++
+			return res, err
 		}
 		res.Merged++
 	}

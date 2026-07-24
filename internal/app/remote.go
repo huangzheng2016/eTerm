@@ -22,11 +22,25 @@ var (
 	remoteRenameTmuxSession           = remote.RenameTmuxSession
 )
 
+// syncHTTPBase returns the base URL for sync HTTP APIs. In SSH mode it opens
+// a tunnel; the caller either closes it (short-lived calls) or attaches it to
+// the session via AddCloser (long-lived relay sessions).
+func (a App) syncHTTPBase(cfg esync.Config) (string, *esync.Tunnel, error) {
+	if cfg.Mode != "ssh" {
+		return cfg.ServerURL, nil, nil
+	}
+	if cfg.SSHHostID == 0 {
+		return "", nil, fmt.Errorf("no SSH host configured for sync")
+	}
+	tunnel, err := esync.OpenTunnel(a.db, a.masterKey, cfg.SSHHostID, cfg.RemotePort)
+	if err != nil {
+		return "", nil, err
+	}
+	return tunnel.BaseURL(), tunnel, nil
+}
+
 func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	if cfg.Mode != "http" {
-		return a, func() tea.Msg { return types.ErrorMsg{Err: fmt.Errorf("remote shell requires HTTP sync mode")} }
-	}
 	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
 
 	if msg.Tmux {
@@ -39,11 +53,21 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 		a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
 		return a, tea.Batch(progressCmd, func() tea.Msg {
 			defer close(progressCh)
-			is, newID, err := remoteOpenTmuxSessionWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, sessionID, rows, cols, func(stage remote.OpenStage) {
+			baseURL, tunnel, err := a.syncHTTPBase(cfg)
+			if err != nil {
+				return types.ConnErrorMsg{Err: err, Target: "[T]" + peer.Name}
+			}
+			is, newID, err := remoteOpenTmuxSessionWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, sessionID, rows, cols, func(stage remote.OpenStage) {
 				progress(connectStageText(prefix, string(stage)))
 			})
 			if err != nil {
+				if tunnel != nil {
+					tunnel.Close()
+				}
 				return types.ConnErrorMsg{Err: err, Target: "[T]" + peer.Name}
+			}
+			if tunnel != nil {
+				is.AddCloser(tunnel)
 			}
 			reSessionID := sessionID
 			if target == relay.TargetTmuxNew {
@@ -70,11 +94,21 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
 	return a, tea.Batch(progressCmd, func() tea.Msg {
 		defer close(progressCh)
-		is, err := remoteOpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, hostSyncID, rows, cols, func(stage remote.OpenStage) {
+		baseURL, tunnel, err := a.syncHTTPBase(cfg)
+		if err != nil {
+			return types.ConnErrorMsg{Err: err, Target: title}
+		}
+		is, err := remoteOpenWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, hostSyncID, rows, cols, func(stage remote.OpenStage) {
 			progress(connectStageText(prefix, string(stage)))
 		})
 		if err != nil {
+			if tunnel != nil {
+				tunnel.Close()
+			}
 			return types.ConnErrorMsg{Err: err, Target: title}
+		}
+		if tunnel != nil {
+			is.AddCloser(tunnel)
 		}
 		spec := &types.RemoteReconnect{Peer: peer, Target: target, HostSyncID: hostSyncID}
 		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: -1, reconnect: spec}
@@ -83,9 +117,6 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 
 func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, tea.Cmd) {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	if cfg.Mode != "http" {
-		return a, nil
-	}
 	idx := -1
 	for i := range a.tabs {
 		if sm, ok := a.tabs[i].Model.(*sshview.Model); ok && sm.StreamID() == msg.StreamID && sm.Disconnected() {
@@ -120,22 +151,30 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 	a, progressCh, progressCmd, progress = a.beginConnectProgress(connectStageText(prefix, "connect"))
 	return a, tea.Batch(progressCmd, func() tea.Msg {
 		defer close(progressCh)
+		baseURL, tunnel, err := a.syncHTTPBase(cfg)
 		var is *internalssh.InteractiveSession
-		var err error
-		if spec.Tmux {
-			is, _, err = remoteOpenTmuxSessionWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.SessionID, rows, cols, func(stage remote.OpenStage) {
-				progress(connectStageText(prefix, string(stage)))
-			})
-		} else {
-			is, err = remoteOpenWithProgress(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
-				progress(connectStageText(prefix, string(stage)))
-			})
+		if err == nil {
+			if spec.Tmux {
+				is, _, err = remoteOpenTmuxSessionWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.SessionID, rows, cols, func(stage remote.OpenStage) {
+					progress(connectStageText(prefix, string(stage)))
+				})
+			} else {
+				is, err = remoteOpenWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
+					progress(connectStageText(prefix, string(stage)))
+				})
+			}
 		}
 		if err != nil {
+			if tunnel != nil {
+				tunnel.Close()
+			}
 			if msg.Auto && attempt < maxAttempts {
 				return types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec, Auto: true, Attempt: attempt + 1, MaxAttempts: maxAttempts}
 			}
 			return types.ConnErrorMsg{Err: err, Target: title, Retry: types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec}}
+		}
+		if tunnel != nil {
+			is.AddCloser(tunnel)
 		}
 		specCopy := spec
 		tabType := SSHTab
@@ -148,27 +187,35 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 
 func (a App) loadRemoteTmuxSessions(peer types.RemotePeer) tea.Cmd {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	if cfg.Mode != "http" {
-		return nil
-	}
 	return func() tea.Msg {
-		sessions, err := remoteListTmuxSessions(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
+		baseURL, tunnel, err := a.syncHTTPBase(cfg)
+		if err != nil {
+			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
+		}
+		if tunnel != nil {
+			defer tunnel.Close()
+		}
+		sessions, err := remoteListTmuxSessions(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
 		return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Sessions: sessions, Err: err}
 	}
 }
 
 func (a App) killRemoteTmuxSession(msg types.RemoteTmuxKillMsg) tea.Cmd {
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	if cfg.Mode != "http" {
-		return nil
-	}
 	peer := msg.Peer
 	sessionID := msg.SessionID
 	return func() tea.Msg {
-		if err := remoteKillTmuxSession(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID); err != nil {
+		baseURL, tunnel, err := a.syncHTTPBase(cfg)
+		if err != nil {
 			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
 		}
-		sessions, err := remoteListTmuxSessions(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
+		if tunnel != nil {
+			defer tunnel.Close()
+		}
+		if err := remoteKillTmuxSession(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID); err != nil {
+			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
+		}
+		sessions, err := remoteListTmuxSessions(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID)
 		return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Sessions: sessions, Err: err}
 	}
 }
@@ -179,13 +226,17 @@ func (a App) renameRemoteTmuxSession(msg types.RemoteTmuxRenameMsg) (App, tea.Cm
 		return a, nil
 	}
 	cfg := esync.LoadConfig(a.db, a.masterKey)
-	if cfg.Mode != "http" {
-		return a, nil
-	}
 	peer := msg.Peer
 	sessionID := msg.SessionID
 	return a, func() tea.Msg {
-		if err := remoteRenameTmuxSession(context.Background(), cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID, name); err != nil {
+		baseURL, tunnel, err := a.syncHTTPBase(cfg)
+		if err != nil {
+			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
+		}
+		if tunnel != nil {
+			defer tunnel.Close()
+		}
+		if err := remoteRenameTmuxSession(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID, name); err != nil {
 			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
 		}
 		return remoteTmuxRenameAppliedMsg{Peer: peer, OldSessionID: sessionID, Name: name}

@@ -1,6 +1,10 @@
 package clipboardblob
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,6 +49,55 @@ func TestFromFilePathRejectsTooLarge(t *testing.T) {
 	_, err := fromFilePath(path)
 	if err != ErrBlobTooLarge {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestFromFilePathCompressesPNG(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 256, 256))
+	for y := 0; y < 256; y++ {
+		for x := 0; x < 256; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * y), G: uint8(x), B: uint8(y), A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	blob, err := fromFilePath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blob.Mime != "image/jpeg" || blob.Filename != "shot.jpg" {
+		t.Fatalf("got mime=%q filename=%q", blob.Mime, blob.Filename)
+	}
+	if len(blob.Data) >= buf.Len() {
+		t.Fatalf("jpeg %d bytes >= png %d bytes", len(blob.Data), buf.Len())
+	}
+	if blob.LocalPath != path {
+		t.Fatalf("local path = %q", blob.LocalPath)
+	}
+}
+
+func TestFromFilePathReturnsDirWithoutData(t *testing.T) {
+	dir := t.TempDir()
+	blob, err := fromFilePath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blob.Data) != 0 {
+		t.Fatalf("data = %d bytes", len(blob.Data))
+	}
+	if blob.LocalPath != dir {
+		t.Fatalf("local path = %q", blob.LocalPath)
+	}
+	if blob.Filename != filepath.Base(dir) {
+		t.Fatalf("filename = %q", blob.Filename)
 	}
 }
 

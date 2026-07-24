@@ -12,7 +12,7 @@ type MergeResult struct {
 }
 
 // MergeRecords applies pulled records to the local database inside a transaction.
-func MergeRecords(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) MergeResult {
+func MergeRecords(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) (MergeResult, error) {
 	var keys, hosts, fwds, snippets []SyncRecord
 	for _, r := range records {
 		switch r.Type {
@@ -28,7 +28,7 @@ func MergeRecords(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 	}
 
 	var res MergeResult
-	_ = database.Transaction(func(tx *gorm.DB) error {
+	err := database.Transaction(func(tx *gorm.DB) error {
 		r, err := mergeSSHKeys(tx, mk, passphrase, keys)
 		res.Merged += r.Merged
 		res.Failed += r.Failed
@@ -52,5 +52,8 @@ func MergeRecords(database *gorm.DB, mk *security.MasterKeyManager, passphrase s
 		res.Failed += r.Failed
 		return err
 	})
-	return res
+	if err != nil {
+		res.Merged = 0
+	}
+	return res, err
 }

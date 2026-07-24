@@ -55,8 +55,11 @@ func Read() (*Blob, error) {
 
 func fromFilePath(path string) (*Blob, error) {
 	st, err := os.Stat(path)
-	if err != nil || st.IsDir() {
+	if err != nil {
 		return nil, ErrNoBlob
+	}
+	if st.IsDir() {
+		return &Blob{Filename: filepath.Base(path), LocalPath: path}, nil
 	}
 	if st.Size() > MaxBytes {
 		return nil, ErrBlobTooLarge
@@ -65,10 +68,19 @@ func fromFilePath(path string) (*Blob, error) {
 	if err != nil {
 		return nil, err
 	}
+	mt := fileMime(path, data)
+	filename := filepath.Base(path)
+	if mt == "image/png" || mt == "image/jpeg" {
+		if jpg := clipboardimg.CompressJPEG(data); jpg != nil {
+			data = jpg
+			mt = "image/jpeg"
+			filename = strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
+		}
+	}
 	return &Blob{
 		Data:      data,
-		Mime:      fileMime(path, data),
-		Filename:  filepath.Base(path),
+		Mime:      mt,
+		Filename:  filename,
 		LocalPath: path,
 	}, nil
 }

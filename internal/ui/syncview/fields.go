@@ -5,7 +5,7 @@ import tea "charm.land/bubbletea/v2"
 func (m *Model) visibleFields() []int {
 	fields := []int{fieldEnabled, fieldMode}
 	if m.modeIdx == 1 { // SSH
-		fields = append(fields, fieldSSHHost, fieldRemoteBin, fieldRemoteDB)
+		fields = append(fields, fieldSSHHost, fieldRemotePort, fieldAPIKey)
 	} else { // HTTP
 		fields = append(fields, fieldServerURL, fieldInsecureTLS, fieldAPIKey)
 	}
@@ -27,10 +27,8 @@ func (m *Model) isSelector(field int) bool {
 
 func (m *Model) inputIdxForField(field int) int {
 	switch field {
-	case fieldRemoteBin:
-		return inRemoteBin
-	case fieldRemoteDB:
-		return inRemoteDB
+	case fieldRemotePort:
+		return inRemotePort
 	case fieldServerURL:
 		return inServerURL
 	case fieldAPIKey:

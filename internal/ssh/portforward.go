@@ -16,6 +16,18 @@ type PortForwardCloser struct {
 	once     sync.Once
 }
 
+// LocalPort returns the actual port the listener is bound to
+// (useful when StartLocalForward was called with port 0).
+func (p *PortForwardCloser) LocalPort() int {
+	if p.listener == nil {
+		return 0
+	}
+	if addr, ok := p.listener.Addr().(*net.TCPAddr); ok {
+		return addr.Port
+	}
+	return 0
+}
+
 func (p *PortForwardCloser) Close() error {
 	p.once.Do(func() { close(p.done) })
 	if p.listener != nil {

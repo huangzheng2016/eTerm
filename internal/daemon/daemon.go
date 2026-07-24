@@ -88,10 +88,11 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 	if !sc.Enabled {
 		return nil, errors.New("sync is disabled")
 	}
-	if sc.Mode != "http" {
-		return nil, errors.New("remote shell daemon requires HTTP sync mode")
-	}
-	if sc.ServerURL == "" {
+	if sc.Mode == "ssh" {
+		if sc.SSHHostID == 0 {
+			return nil, errors.New("no SSH host configured for sync")
+		}
+	} else if sc.ServerURL == "" {
 		return nil, errors.New("sync server URL is required")
 	}
 	if sc.Passphrase == "" {
@@ -152,28 +153,50 @@ func unlock(database *gorm.DB, password string) (*security.MasterKeyManager, err
 }
 
 func runLoop(ctx context.Context, rt *runtimeConfig) error {
+	delay := 2 * time.Second
 	for {
+		start := time.Now()
 		if err := runOnce(ctx, rt); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			log.Printf("eterm daemon relay disconnected: %v", err)
 		}
-		log.Printf("eterm daemon relay reconnecting in 2s")
+		if time.Since(start) > 30*time.Second {
+			delay = 2 * time.Second // connection lived; not a connect failure
+		}
+		log.Printf("eterm daemon relay reconnecting in %s", delay)
 		select {
-		case <-time.After(2 * time.Second):
+		case <-time.After(delay):
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+		if delay < 60*time.Second {
+			delay *= 2
+			if delay > 60*time.Second {
+				delay = 60 * time.Second
+			}
 		}
 	}
 }
 
 func runOnce(ctx context.Context, rt *runtimeConfig) error {
+	serverURL := rt.sync.ServerURL
+	insecureTLS := rt.sync.InsecureTLS
+	if rt.sync.Mode == "ssh" {
+		tunnel, err := esync.OpenTunnel(rt.db, rt.mk, rt.sync.SSHHostID, rt.sync.RemotePort)
+		if err != nil {
+			return err
+		}
+		defer tunnel.Close()
+		serverURL = tunnel.BaseURL()
+		insecureTLS = false
+	}
 	header := http.Header{}
 	if rt.sync.APIKey != "" {
 		header.Set("Authorization", "Bearer "+rt.sync.APIKey)
 	}
-	c, err := esync.DialWebSocket(ctx, esync.WSURLCandidates(rt.sync.ServerURL, "/api/v1/ws/daemon"), header, rt.sync.InsecureTLS)
+	c, err := esync.DialWebSocket(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/daemon"), header, insecureTLS)
 	if err != nil {
 		return err
 	}

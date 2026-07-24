@@ -90,10 +90,8 @@ func (m *Model) fieldLabel(f int) string {
 		return "Mode"
 	case fieldSSHHost:
 		return "SSH Host"
-	case fieldRemoteBin:
-		return "Remote Binary"
-	case fieldRemoteDB:
-		return "Remote DB"
+	case fieldRemotePort:
+		return "Remote Port"
 	case fieldServerURL:
 		return "Server URL"
 	case fieldInsecureTLS:

@@ -2,6 +2,9 @@ package app
 
 import (
 	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -17,6 +20,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
+	"gorm.io/gorm"
 )
 
 type testWriteCloser struct {
@@ -153,11 +157,127 @@ func TestLocalFilePasteUsesFileURL(t *testing.T) {
 	}
 
 	ch := make(chan syncblob.Progress, 1)
-	msg := uploadImageURLCmd(ch, esync.Config{}, tab.StreamID(), nil, nil, true)()
+	msg := uploadImageURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, true)()
 	updated, _ := a.Update(msg)
 	a = updated.(App)
 
 	stdin.waitString(t, "[a b.tar.gz](file:///tmp/a%20b.tar.gz) ")
+}
+
+func TestLocalFolderPasteUsesFileURL(t *testing.T) {
+	oldRead := readClipboardBlob
+	readClipboardBlob = func() (*clipboardblob.Blob, error) {
+		return &clipboardblob.Blob{
+			Filename:  "example",
+			LocalPath: "/tmp/example/",
+		}, nil
+	}
+	t.Cleanup(func() { readClipboardBlob = oldRead })
+
+	stdin := &testWriteCloser{}
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "local", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+	a := App{
+		viewState: MainView,
+		activeTab: 0,
+		tabs: []Tab{
+			{Type: LocalTab, Title: "local", Model: tab},
+		},
+	}
+
+	ch := make(chan syncblob.Progress, 1)
+	msg := uploadImageURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, true)()
+	updated, _ := a.Update(msg)
+	a = updated.(App)
+
+	stdin.waitString(t, "[example](file:///tmp/example/) ")
+}
+
+func TestFolderUploadOnSSHTabFails(t *testing.T) {
+	oldRead := readClipboardBlob
+	readClipboardBlob = func() (*clipboardblob.Blob, error) {
+		return &clipboardblob.Blob{
+			Filename:  "example",
+			LocalPath: "/tmp/example/",
+		}, nil
+	}
+	t.Cleanup(func() { readClipboardBlob = oldRead })
+
+	tab := sshview.New(nil, "remote", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+
+	ch := make(chan syncblob.Progress, 1)
+	msg := uploadImageURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, false)()
+	done, ok := msg.(types.ImageUploadDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %T", msg)
+	}
+	if done.Err == nil || done.Err.Error() != "clipboard folder cannot be uploaded" {
+		t.Fatalf("err = %v", done.Err)
+	}
+}
+
+func TestSSHModeUploadUsesTunnelAndRemoteLoopbackURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"id":"b1","url":"/b/tok","mime":"image/png","bytes":3}`))
+	}))
+	defer srv.Close()
+
+	oldRead := readClipboardBlob
+	readClipboardBlob = func() (*clipboardblob.Blob, error) {
+		return &clipboardblob.Blob{Data: []byte("abc"), Mime: "image/png", Filename: "a.png"}, nil
+	}
+	oldTunnel := openTunnel
+	openTunnel = func(database *gorm.DB, mk *security.MasterKeyManager, hostID uint, remotePort int) (string, io.Closer, error) {
+		if hostID != 7 || remotePort != 18443 {
+			t.Fatalf("hostID=%d remotePort=%d", hostID, remotePort)
+		}
+		return srv.URL, io.NopCloser(bytes.NewReader(nil)), nil
+	}
+	t.Cleanup(func() {
+		readClipboardBlob = oldRead
+		openTunnel = oldTunnel
+	})
+
+	tab := sshview.New(nil, "remote", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+
+	cfg := esync.Config{Enabled: true, Mode: "ssh", SSHHostID: 7, RemotePort: 18443, APIKey: "key", Passphrase: "p"}
+	ch := make(chan syncblob.Progress, 1)
+	msg := uploadImageURLCmd(ch, cfg, nil, nil, tab.StreamID(), nil, nil, false)()
+	done, ok := msg.(types.ImageUploadDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %T", msg)
+	}
+	if done.Err != nil {
+		t.Fatal(done.Err)
+	}
+	if done.URL != "http://127.0.0.1:18443/b/tok" {
+		t.Fatalf("url = %q", done.URL)
+	}
+}
+
+func TestSSHModeUploadRequiresHost(t *testing.T) {
+	oldRead := readClipboardBlob
+	readClipboardBlob = func() (*clipboardblob.Blob, error) {
+		return &clipboardblob.Blob{Data: []byte("abc"), Mime: "image/png", Filename: "a.png"}, nil
+	}
+	t.Cleanup(func() { readClipboardBlob = oldRead })
+
+	tab := sshview.New(nil, "remote", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+
+	cfg := esync.Config{Enabled: true, Mode: "ssh", APIKey: "key", Passphrase: "p"}
+	ch := make(chan syncblob.Progress, 1)
+	msg := uploadImageURLCmd(ch, cfg, nil, nil, tab.StreamID(), nil, nil, false)()
+	done, ok := msg.(types.ImageUploadDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %T", msg)
+	}
+	if done.Err == nil || done.Err.Error() != "sync is not configured" {
+		t.Fatalf("err = %v", done.Err)
+	}
 }
 
 func TestPasteImageURLMsgForcesUploadForLocalFiles(t *testing.T) {

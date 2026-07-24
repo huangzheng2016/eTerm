@@ -14,10 +14,27 @@ import (
 
 func (m Model) loadRemoteSummary() ([]types.RemotePeer, []types.RemoteHost, error) {
 	cfg := esync.LoadConfig(m.db, m.masterKey)
-	if !cfg.Enabled || cfg.Mode != "http" || cfg.ServerURL == "" || cfg.Passphrase == "" {
+	if !cfg.Enabled || cfg.Passphrase == "" {
 		return nil, nil, nil
 	}
-	client := esync.HTTPClient(3*time.Second, cfg.InsecureTLS)
+	serverURL := cfg.ServerURL
+	insecureTLS := cfg.InsecureTLS
+	if cfg.Mode == "ssh" {
+		if cfg.SSHHostID == 0 {
+			return nil, nil, nil
+		}
+		tunnel, err := esync.OpenTunnel(m.db, m.masterKey, cfg.SSHHostID, cfg.RemotePort)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer tunnel.Close()
+		serverURL = tunnel.BaseURL()
+		insecureTLS = false
+	}
+	if serverURL == "" {
+		return nil, nil, nil
+	}
+	client := esync.HTTPClient(3*time.Second, insecureTLS)
 	tenant := cfg.TenantID()
 	var peersResp struct {
 		Peers []types.RemotePeer `json:"peers"`

@@ -21,13 +21,17 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 		found := database.Unscoped().Where("sync_id = ?", r.SyncID).First(&existing).Error == nil
 
 		if r.Deleted {
-			if found {
+			if found && !r.UpdatedAt.Before(existing.UpdatedAt) {
 				if err := database.Unscoped().Delete(&existing).Error; err != nil {
 					res.Failed++
 					return res, err
 				}
 			}
 			res.Merged++
+			continue
+		}
+
+		if found && !r.UpdatedAt.After(existing.UpdatedAt) {
 			continue
 		}
 
@@ -40,6 +44,11 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 		if json.Unmarshal(plain, &dto) != nil {
 			res.Failed++
 			continue
+		}
+
+		keyID := resolveLocalID(database, "ssh_keys", dto.KeySyncID)
+		if keyID == nil && dto.KeySyncID != "" && found {
+			keyID = existing.KeyID
 		}
 
 		ea := &encAccum{mk: mk}
@@ -67,7 +76,7 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 			ForwardAgent:    dto.ForwardAgent,
 			RemoteCommand:   dto.RemoteCommand,
 			ExtraSSHOptions: dto.ExtraSSHOptions,
-			KeyID:           resolveLocalID(database, "ssh_keys", dto.KeySyncID),
+			KeyID:           keyID,
 		}
 		if ea.err != nil {
 			res.Failed++
@@ -86,6 +95,10 @@ func mergeHosts(database *gorm.DB, mk *security.MasterKeyManager, passphrase str
 				res.Failed++
 				return res, err
 			}
+		}
+		if err := database.Model(&host).UpdateColumn("updated_at", r.UpdatedAt).Error; err != nil {
+			res.Failed++
+			return res, err
 		}
 
 		if dto.JumpSyncID != "" {

@@ -7,11 +7,14 @@ import (
 	"os/exec"
 )
 
-func startDetachedDaemon(exe string, args []string, logFile *os.File) (int, error) {
+func startDetachedDaemon(exe string, args []string, env []string, logFile *os.File) (int, error) {
 	cmd := exec.Command(exe, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}

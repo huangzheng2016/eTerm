@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
-	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
@@ -125,6 +124,14 @@ func (m *Model) save() tea.Cmd {
 			m.err = "Passphrase is required"
 			return nil
 		}
+		if m.modeIdx == 1 {
+			if p := m.inputs[inRemotePort].Value(); p != "" {
+				if n, err := strconv.Atoi(p); err != nil || n <= 0 || n > 65535 {
+					m.err = "Remote Port must be 1-65535"
+					return nil
+				}
+			}
+		}
 	}
 	m.err = ""
 
@@ -148,8 +155,10 @@ func (m *Model) save() tea.Cmd {
 	if m.hostIdx >= 0 && m.hostIdx < len(m.hostOpts) {
 		hostID = strconv.Itoa(int(m.hostOpts[m.hostIdx].ID))
 	}
-	remoteBin := m.inputs[inRemoteBin].Value()
-	remoteDB := m.inputs[inRemoteDB].Value()
+	remotePort := m.inputs[inRemotePort].Value()
+	if remotePort == "" {
+		remotePort = "18443"
+	}
 	serverURL := m.inputs[inServerURL].Value()
 	apiKeyPlain := m.inputs[inAPIKey].Value()
 	passPlain := m.inputs[inPassphrase].Value()
@@ -163,8 +172,7 @@ func (m *Model) save() tea.Cmd {
 			{"sync_enabled", enabled},
 			{"sync_mode", mode},
 			{"sync_ssh_host_id", hostID},
-			{"sync_remote_bin", remoteBin},
-			{"sync_remote_db", remoteDB},
+			{"sync_remote_port", remotePort},
 			{"sync_server_url", serverURL},
 			{"sync_insecure_tls", insecureTLS},
 			{"sync_interval", interval},
@@ -224,8 +232,11 @@ func (m *Model) testConnection() tea.Cmd {
 	apiKey := m.inputs[inAPIKey].Value()
 	insecureTLS := m.insecureIdx == 1
 	mode := m.modeIdx
-	remoteBin := m.inputs[inRemoteBin].Value()
-	remoteDB := m.inputs[inRemoteDB].Value()
+	remotePort, _ := strconv.Atoi(m.inputs[inRemotePort].Value())
+	if remotePort <= 0 {
+		remotePort = 18443
+	}
+	passphrase := m.inputs[inPassphrase].Value()
 	hostIdx := m.hostIdx
 	hostOpts := m.hostOpts
 	database := m.db
@@ -233,55 +244,18 @@ func (m *Model) testConnection() tea.Cmd {
 
 	return func() tea.Msg {
 		if mode == 1 {
-			if remoteBin == "" {
-				remoteBin = "etermsyncd"
-			}
-			if remoteDB == "" {
-				remoteDB = "~/.config/etermsyncd/sync.db"
-			}
 			if hostIdx < 0 || hostIdx >= len(hostOpts) {
 				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("no SSH host selected")}
 			}
 			if mk.IsLocked() {
 				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("master key locked")}
 			}
-			host := hostOpts[hostIdx]
-			var loaded db.Host
-			if err := database.Preload("Key").First(&loaded, host.ID).Error; err != nil {
-				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("load host: %w", err)}
-			}
-			var hostKey *db.SSHKey
-			if loaded.KeyID != nil {
-				hostKey = &loaded.Key
-			}
-			var jumpHost *db.Host
-			var jumpKey *db.SSHKey
-			if loaded.JumpHostID != nil {
-				var jh db.Host
-				if database.Preload("Key").First(&jh, *loaded.JumpHostID).Error == nil {
-					jumpHost = &jh
-					if jh.KeyID != nil {
-						jumpKey = &jh.Key
-					}
-				}
-			}
-			result, cerr := internalssh.Connect(internalssh.ConnectConfig{
-				Host:                &loaded,
-				Key:                 hostKey,
-				JumpHost:            jumpHost,
-				JumpKey:             jumpKey,
-				MasterKey:           mk,
-				DB:                  database,
-				FingerprintCallback: func(string, int, string, string) bool { return true },
-			})
-			if cerr != nil {
-				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("ssh connect: %w", cerr)}
-			}
-			tr, err := esync.NewSSHTransport(result.Client, result.Closers, remoteBin, remoteDB)
+			tunnel, err := esync.OpenTunnel(database, mk, hostOpts[hostIdx].ID, remotePort)
 			if err != nil {
-				result.Close()
-				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("start syncd: %w", err)}
+				return types.SyncTestResultMsg{OK: false, Err: err}
 			}
+			defer tunnel.Close()
+			tr := esync.NewHTTPTransportWithOptions(tunnel.BaseURL(), apiKey, esync.TenantIDFromPassphrase(passphrase), false)
 			defer tr.Close()
 			if err := tr.Ping(); err != nil {
 				return types.SyncTestResultMsg{OK: false, Err: fmt.Errorf("ping: %w", err)}

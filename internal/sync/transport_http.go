@@ -68,33 +68,50 @@ func (t *httpTransport) Pull(sinceRev int64) ([]SyncRecord, int64, error) {
 	return result.Records, result.Revision, nil
 }
 
-func (t *httpTransport) Push(records []SyncRecord) (int64, error) {
+// maxPushBatchBytes stays below the server's 16 MiB request limit.
+const maxPushBatchBytes = 8 << 20
+
+func (t *httpTransport) Push(records []SyncRecord) error {
+	for start := 0; start < len(records); {
+		size := 0
+		end := start
+		for end < len(records) {
+			data, err := json.Marshal(records[end])
+			if err != nil {
+				return err
+			}
+			if size > 0 && size+len(data) > maxPushBatchBytes {
+				break
+			}
+			size += len(data)
+			end++
+		}
+		if err := t.pushBatch(records[start:end]); err != nil {
+			return err
+		}
+		start = end
+	}
+	return nil
+}
+
+func (t *httpTransport) pushBatch(records []SyncRecord) error {
 	body := struct {
 		Records []SyncRecord `json:"records"`
 	}{Records: records}
 	data, err := json.Marshal(body)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	resp, err := t.do("POST", "/api/v1/records", data, "application/json")
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	var result struct {
-		Revision int64 `json:"revision"`
-	}
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, err
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return 0, err
-	}
-	return result.Revision, nil
+	io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 func (t *httpTransport) Close() error { return nil }

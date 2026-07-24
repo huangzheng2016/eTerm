@@ -1,7 +1,12 @@
 package clipboardimg
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"image/draw"
+	"image/jpeg"
+	_ "image/png"
 	"net/http"
 )
 
@@ -46,5 +51,31 @@ func validate(data []byte) (*Image, error) {
 	case "image/webp":
 		ext = ".webp"
 	}
+	if mime == "image/png" || mime == "image/jpeg" {
+		if jpg := CompressJPEG(data); jpg != nil {
+			return &Image{Data: jpg, Mime: "image/jpeg", Filename: "clipboard.jpg"}, nil
+		}
+	}
 	return &Image{Data: data, Mime: mime, Filename: "clipboard" + ext}, nil
+}
+
+// CompressJPEG re-encodes a PNG/JPEG as JPEG quality 70, flattened onto
+// white. Returns nil when decoding fails or the result is not smaller.
+func CompressJPEG(data []byte) []byte {
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	b := src.Bounds()
+	dst := image.NewRGBA(b)
+	draw.Draw(dst, b, image.White, image.Point{}, draw.Src)
+	draw.Draw(dst, b, src, b.Min, draw.Over)
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 70}); err != nil {
+		return nil
+	}
+	if buf.Len() >= len(data) {
+		return nil
+	}
+	return buf.Bytes()
 }

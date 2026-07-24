@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -23,7 +24,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 	for _, k := range keys {
 		r, err := buildKeyRecord(k, mk, passphrase, deviceID)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		records = append(records, r)
 	}
@@ -36,7 +37,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 	for _, h := range hosts {
 		r, err := buildHostRecord(h, database, mk, passphrase, deviceID)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		records = append(records, r)
 	}
@@ -49,7 +50,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 	for _, f := range fwds {
 		r, err := buildFwdRecord(f, database, passphrase, deviceID)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		records = append(records, r)
 	}
@@ -62,7 +63,7 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 	for _, s := range snippets {
 		r, err := buildSnippetRecord(s, passphrase, deviceID)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		records = append(records, r)
 	}
@@ -70,20 +71,20 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 	return records, nil
 }
 
-func decryptField(encrypted string, mk *security.MasterKeyManager) string {
+func decryptField(encrypted string, mk *security.MasterKeyManager) (string, error) {
 	if encrypted == "" {
-		return ""
+		return "", nil
 	}
 	k := mk.GetKey()
 	if k == nil {
-		return ""
+		return "", errors.New("master key is locked")
 	}
 	defer k.Clear()
 	plain, err := security.Decrypt(encrypted, k.Bytes())
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(plain)
+	return string(plain), nil
 }
 
 func encryptPayload(dto interface{}, passphrase string) (string, error) {
@@ -108,15 +109,23 @@ func buildKeyRecord(k db.SSHKey, mk *security.MasterKeyManager, passphrase, devi
 			UpdatedAt: k.UpdatedAt,
 		}, nil
 	}
+	priv, err := decryptField(k.PrivateKeyData, mk)
+	if err != nil {
+		return SyncRecord{}, err
+	}
+	pass, err := decryptField(k.Passphrase, mk)
+	if err != nil {
+		return SyncRecord{}, err
+	}
 	dto := SSHKeyDTO{
 		SyncID:          k.SyncID,
 		Name:            k.Name,
 		Type:            k.Type,
-		PrivateKey:      decryptField(k.PrivateKeyData, mk),
+		PrivateKey:      priv,
 		PublicKey:       k.PublicKeyData,
 		Fingerprint:     k.Fingerprint,
 		Bits:            k.Bits,
-		Passphrase:      decryptField(k.Passphrase, mk),
+		Passphrase:      pass,
 		CertificatePath: k.CertificatePath,
 	}
 	payload, err := encryptPayload(dto, passphrase)
@@ -158,6 +167,18 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 		}
 	}
 
+	password, err := decryptField(h.Password, mk)
+	if err != nil {
+		return SyncRecord{}, err
+	}
+	passphrasePlain, err := decryptField(h.Passphrase, mk)
+	if err != nil {
+		return SyncRecord{}, err
+	}
+	proxyPassword, err := decryptField(h.ProxyPassword, mk)
+	if err != nil {
+		return SyncRecord{}, err
+	}
 	dto := HostDTO{
 		SyncID:          h.SyncID,
 		Alias:           h.Alias,
@@ -165,9 +186,9 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 		Port:            h.Port,
 		Username:        h.Username,
 		AuthMethod:      h.AuthMethod,
-		Password:        decryptField(h.Password, mk),
+		Password:        password,
 		KeySyncID:       keySyncID,
-		Passphrase:      decryptField(h.Passphrase, mk),
+		Passphrase:      passphrasePlain,
 		JumpSyncID:      jumpSyncID,
 		Tags:            h.Tags,
 		Description:     h.Description,
@@ -176,7 +197,7 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 		ProxyHost:       h.ProxyHost,
 		ProxyPort:       h.ProxyPort,
 		ProxyUser:       h.ProxyUser,
-		ProxyPassword:   decryptField(h.ProxyPassword, mk),
+		ProxyPassword:   proxyPassword,
 		GSSAPISource:    h.GSSAPISource,
 		GSSAPIKeytab:    h.GSSAPIKeytab,
 		KrbPrincipal:    h.KrbPrincipal,

@@ -50,7 +50,7 @@ func (c *Client) Upload(blob *clipboardblob.Blob, progress ProgressCallback) (*U
 		if err == nil {
 			return out, nil
 		}
-		if _, ok := err.(httpStatusError); ok {
+		if statusErr, ok := err.(httpStatusError); ok && statusErr.StatusCode < 500 {
 			return nil, err
 		}
 		lastErr = err

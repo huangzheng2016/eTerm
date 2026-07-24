@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/debugpprof"
@@ -20,7 +21,6 @@ func main() {
 	apiKey := flag.String("api-key", "", "Bearer token for auth (env: ETERMSYNCD_API_KEY)")
 	certFile := flag.String("cert", "", "TLS certificate file")
 	keyFile := flag.String("key", "", "TLS key file")
-	stdio := flag.Bool("stdio", false, "Run in stdio mode (JSON over stdin/stdout)")
 	pprofAddr := flag.String("pprof", "", "enable pprof HTTP server on address (env: ETERMSYNCD_PPROF_ADDR)")
 	flag.Parse()
 
@@ -45,17 +45,18 @@ func main() {
 		log.Fatalf("init engine: %v", err)
 	}
 
-	if *stdio {
-		if err := syncd.RunStdio(engine); err != nil {
-			log.Fatalf("stdio: %v", err)
-		}
-		return
-	}
-
 	// HTTP mode requires an API key
 	if *apiKey == "" {
 		log.Fatal("--api-key or ETERMSYNCD_API_KEY is required in HTTP mode")
 	}
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = engine.CleanupExpiredBlobs()
+		}
+	}()
 
 	handler := syncd.NewHTTPHandler(engine, *apiKey)
 	fmt.Fprintf(os.Stderr, "etermsyncd listening on %s\n", *listen)

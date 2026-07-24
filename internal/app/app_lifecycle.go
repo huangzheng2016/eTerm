@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
-	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
@@ -30,46 +29,18 @@ func (a App) runSync() tea.Cmd {
 
 		var tr esync.Transport
 		var err error
-		switch cfg.Mode {
-		case "ssh":
+		if cfg.Mode == "ssh" {
 			if cfg.SSHHostID == 0 {
 				return types.SyncResultMsg{Err: fmt.Errorf("no SSH host configured for sync")}
 			}
-			var host db.Host
-			if e := database.Preload("Key").First(&host, cfg.SSHHostID).Error; e != nil {
-				return types.SyncResultMsg{Err: fmt.Errorf("load sync host: %w", e)}
+			var tunnel *esync.Tunnel
+			tunnel, err = esync.OpenTunnel(database, mk, cfg.SSHHostID, cfg.RemotePort)
+			if err != nil {
+				return types.SyncResultMsg{Err: err}
 			}
-			var hostKey *db.SSHKey
-			if host.KeyID != nil {
-				hostKey = &host.Key
-			}
-			var jumpHost *db.Host
-			var jumpKey *db.SSHKey
-			if host.JumpHostID != nil {
-				var jh db.Host
-				if database.Preload("Key").First(&jh, *host.JumpHostID).Error == nil {
-					jumpHost = &jh
-					if jh.KeyID != nil {
-						jumpKey = &jh.Key
-					}
-				}
-			}
-			result, cerr := internalssh.Connect(internalssh.ConnectConfig{
-				Host:      &host,
-				Key:       hostKey,
-				JumpHost:  jumpHost,
-				JumpKey:   jumpKey,
-				MasterKey: mk,
-				DB:        database,
-				FingerprintCallback: func(hostname string, port int, algorithm string, fingerprint string) bool {
-					return true
-				},
-			})
-			if cerr != nil {
-				return types.SyncResultMsg{Err: fmt.Errorf("ssh connect: %w", cerr)}
-			}
-			tr, err = esync.NewSSHTransport(result.Client, result.Closers, cfg.RemoteBin, cfg.RemoteDB)
-		default:
+			defer tunnel.Close()
+			tr = esync.NewHTTPTransportWithOptions(tunnel.BaseURL(), cfg.APIKey, cfg.TenantID(), false)
+		} else {
 			tr = esync.NewHTTPTransportWithOptions(cfg.ServerURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS)
 		}
 		if err != nil {
@@ -81,13 +52,9 @@ func (a App) runSync() tea.Cmd {
 		if err != nil {
 			return types.SyncResultMsg{Err: err}
 		}
-		mergeRes := esync.MergeRecords(database, mk, cfg.Passphrase, records)
-		if mergeRes.Failed > 0 {
-			return types.SyncResultMsg{
-				Pulled: mergeRes.Merged,
-				Failed: mergeRes.Failed,
-				Err:    fmt.Errorf("merge failed for %d sync record(s)", mergeRes.Failed),
-			}
+		mergeRes, err := esync.MergeRecords(database, mk, cfg.Passphrase, records)
+		if err != nil {
+			return types.SyncResultMsg{Err: fmt.Errorf("merge: %w", err)}
 		}
 
 		// Collect only records modified since last sync
@@ -95,19 +62,19 @@ func (a App) runSync() tea.Cmd {
 		if ts, err := db.GetSetting(database, "sync_last_sync_at"); err == nil && ts != "" {
 			lastSyncAt, _ = time.Parse(time.RFC3339, ts)
 		}
+		syncStartedAt := time.Now()
 		dirty, err := esync.CollectDirty(database, mk, cfg.Passphrase, cfg.DeviceID, lastSyncAt)
 		if err != nil {
 			return types.SyncResultMsg{Pulled: mergeRes.Merged, Err: err}
 		}
 		if len(dirty) > 0 {
-			newRev, err = tr.Push(dirty)
-			if err != nil {
+			if err := tr.Push(dirty); err != nil {
 				return types.SyncResultMsg{Pulled: mergeRes.Merged, Err: err}
 			}
 		}
 
 		db.SetSetting(database, "sync_last_rev", strconv.FormatInt(newRev, 10))
-		db.SetSetting(database, "sync_last_sync_at", time.Now().Format(time.RFC3339))
+		db.SetSetting(database, "sync_last_sync_at", syncStartedAt.Format(time.RFC3339))
 		return types.SyncResultMsg{Pulled: mergeRes.Merged, Pushed: len(dirty), Failed: mergeRes.Failed}
 	}
 }

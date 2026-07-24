@@ -12,11 +12,8 @@ import (
 func New(database *gorm.DB, mk *security.MasterKeyManager) *Model {
 	m := &Model{db: database, masterKey: mk, hostIdx: -1}
 
-	m.inputs[inRemoteBin] = textinput.New()
-	m.inputs[inRemoteBin].Placeholder = "etermsyncd"
-
-	m.inputs[inRemoteDB] = textinput.New()
-	m.inputs[inRemoteDB].Placeholder = "~/.config/etermsyncd/sync.db"
+	m.inputs[inRemotePort] = textinput.New()
+	m.inputs[inRemotePort].Placeholder = "18443"
 
 	m.inputs[inServerURL] = textinput.New()
 	m.inputs[inServerURL].Placeholder = "https://sync.example.com"
@@ -87,8 +84,7 @@ func (m *Model) loadFromDB() {
 		m.insecureIdx = 1
 	}
 
-	m.inputs[inRemoteBin].SetValue(get("sync_remote_bin", ""))
-	m.inputs[inRemoteDB].SetValue(get("sync_remote_db", ""))
+	m.inputs[inRemotePort].SetValue(get("sync_remote_port", ""))
 	m.inputs[inServerURL].SetValue(get("sync_server_url", ""))
 	m.inputs[inAPIKey].SetValue(decrypt("sync_api_key"))
 	m.inputs[inPassphrase].SetValue(decrypt("sync_passphrase"))

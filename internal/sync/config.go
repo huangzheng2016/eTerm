@@ -12,8 +12,7 @@ type Config struct {
 	Enabled     bool
 	Mode        string // "http", "ssh"
 	SSHHostID   uint
-	RemoteBin   string
-	RemoteDB    string
+	RemotePort  int
 	ServerURL   string
 	InsecureTLS bool
 	APIKey      string // plaintext
@@ -55,6 +54,10 @@ func LoadConfig(database *gorm.DB, mk *security.MasterKeyManager) Config {
 	interval, _ := strconv.Atoi(get("sync_interval", "300"))
 	lastRev, _ := strconv.ParseInt(get("sync_last_rev", "0"), 10, 64)
 	hostID, _ := strconv.ParseUint(get("sync_ssh_host_id", "0"), 10, 64)
+	remotePort, _ := strconv.Atoi(get("sync_remote_port", "18443"))
+	if remotePort <= 0 || remotePort > 65535 {
+		remotePort = 18443
+	}
 
 	mode := get("sync_mode", "http")
 	if mode == "https" {
@@ -64,8 +67,7 @@ func LoadConfig(database *gorm.DB, mk *security.MasterKeyManager) Config {
 		Enabled:     get("sync_enabled", "false") == "true",
 		Mode:        mode,
 		SSHHostID:   uint(hostID),
-		RemoteBin:   get("sync_remote_bin", "etermsyncd"),
-		RemoteDB:    get("sync_remote_db", "~/.config/etermsyncd/sync.db"),
+		RemotePort:  remotePort,
 		ServerURL:   get("sync_server_url", ""),
 		InsecureTLS: get("sync_insecure_tls", "false") == "true",
 		APIKey:      decrypt("sync_api_key"),
