@@ -9,6 +9,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"gorm.io/gorm"
 )
 
@@ -59,6 +60,18 @@ func TestSessionListHidesEmptyTranscripts(t *testing.T) {
 
 	msg := New(database).reload()().(loadedMsg)
 	if msg.err != nil || len(msg.rows) != 1 || msg.rows[0].Label != "visible" {
+		t.Fatalf("rows=%+v err=%v", msg.rows, msg.err)
+	}
+}
+
+func TestSessionListShowsReplayWithoutTranscript(t *testing.T) {
+	database := sessionTestDB(t)
+	row := db.ConnectionHistory{Label: "replay", ConnectedAt: time.Now(), ReplayData: []byte{1}}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	msg := New(database).reload()().(loadedMsg)
+	if msg.err != nil || len(msg.rows) != 1 || msg.rows[0].Label != "replay" {
 		t.Fatalf("rows=%+v err=%v", msg.rows, msg.err)
 	}
 }
@@ -172,6 +185,49 @@ func TestSessionCardMouseUsesFiveLineRows(t *testing.T) {
 	m = updated.(*Model)
 	if m.cursor != 1 || m.detail {
 		t.Fatalf("header click changed cursor=%d detail=%v", m.cursor, m.detail)
+	}
+}
+
+func TestSessionCardMouseOpensReplay(t *testing.T) {
+	r := sshview.NewRecorder(time.Now())
+	r.Output([]byte("recorded"))
+	data, duration, _ := r.Close()
+	m := New(nil)
+	m.loaded = true
+	m.rows = []db.ConnectionHistory{{Label: "replay", ReplayData: data, ReplayDuration: duration.Milliseconds()}}
+	m.SetSize(40, 20)
+	updated, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: 1, Y: 1, Button: tea.MouseLeft}))
+	m = updated.(*Model)
+	if cmd == nil || m.detail || m.replay != nil {
+		t.Fatalf("detail=%v replay=%v cmd=%v", m.detail, m.replay != nil, cmd)
+	}
+	if msg, ok := cmd().(types.OpenSessionReplayMsg); !ok || msg.HistoryID != m.rows[0].ID {
+		t.Fatalf("open replay message = %#v", msg)
+	}
+}
+
+func TestStandaloneReplayLoadsAndEscapeClosesTab(t *testing.T) {
+	database := sessionTestDB(t)
+	recorder := sshview.NewRecorder(time.Now())
+	recorder.Output([]byte("recorded"))
+	data, duration, _ := recorder.Close()
+	row := db.ConnectionHistory{Label: "replay", ConnectedAt: time.Now(), ReplayData: data, ReplayDuration: duration.Milliseconds()}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := NewReplay(database, row.ID)
+	loaded := m.Init()()
+	updated, cmd := m.Update(loaded)
+	m = updated.(*Model)
+	if cmd != nil || !m.detail || m.replay == nil {
+		t.Fatalf("detail=%v replay=%v cmd=%v", m.detail, m.replay != nil, cmd)
+	}
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if cmd == nil {
+		t.Fatal("escape did not close standalone replay tab")
+	}
+	if _, ok := cmd().(types.CloseTabMsg); !ok {
+		t.Fatalf("escape message = %T", cmd())
 	}
 }
 

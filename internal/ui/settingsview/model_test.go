@@ -36,6 +36,22 @@ func TestTmuxConfigFileLoadsAndDisplaysBuiltIn(t *testing.T) {
 	}
 }
 
+func TestReplayRecordingDefaultsOnAndSavesMode(t *testing.T) {
+	m := testSettingsDB(t)
+	if !m.replaySessions {
+		t.Fatal("replay recording is not enabled by default")
+	}
+	m.replaySessions = false
+	msg := m.save()()
+	if saved, ok := msg.(types.SettingsSavedMsg); !ok || saved.Err != nil {
+		t.Fatalf("save message = %#v", msg)
+	}
+	got, err := db.GetSetting(m.db, "session_capture_mode")
+	if err != nil || got != "transcript" {
+		t.Fatalf("mode=%q err=%v", got, err)
+	}
+}
+
 func TestTmuxConfigFileEditAcceptAndCancel(t *testing.T) {
 	m := testSettingsDB(t)
 	m.tmuxConfigFile = "/old.conf"

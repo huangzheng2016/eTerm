@@ -16,8 +16,9 @@ const (
 	cursorGridStatus     = 1
 	cursorLocalShell     = 2
 	cursorTmuxConfigFile = 3
-	cursorPassword       = 4
-	bindingCursorBase    = 5
+	cursorReplaySessions = 4
+	cursorPassword       = 5
+	bindingCursorBase    = 6
 )
 
 func (m *Model) Init() tea.Cmd {
@@ -158,6 +159,11 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case " ":
+		if m.cursor == cursorReplaySessions {
+			m.replaySessions = !m.replaySessions
+			m.modified = true
+			return m, nil
+		}
 		if m.cursor < cursorLocalShell {
 			if m.cursor == cursorSaveTranscript {
 				m.saveSessionTranscript = !m.saveSessionTranscript
@@ -171,6 +177,11 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.openPasswordOverlay()
 		}
 	case "enter":
+		if m.cursor == cursorReplaySessions {
+			m.replaySessions = !m.replaySessions
+			m.modified = true
+			return m, nil
+		}
 		if m.cursor < cursorLocalShell {
 			if m.cursor == cursorSaveTranscript {
 				m.saveSessionTranscript = !m.saveSessionTranscript
@@ -208,6 +219,7 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+r":
 		m.entries = buildEntries(m.defaultsJSON)
 		m.saveSessionTranscript = true
+		m.replaySessions = true
 		m.gridStatusWords = false
 		m.localTerminalShell = ""
 		m.tmuxConfigFile = ""
@@ -313,12 +325,19 @@ func (m *Model) save() tea.Cmd {
 		gridW = "true"
 	}
 	localShell := strings.TrimSpace(m.localTerminalShell)
+	captureMode := "transcript"
+	if m.replaySessions {
+		captureMode = "replay"
+	}
 	tmuxConfigFile := strings.TrimSpace(m.tmuxConfigFile)
 	return func() tea.Msg {
 		if err := db.SetSetting(database, "keybindings", string(configData)); err != nil {
 			return types.SettingsSavedMsg{Err: err}
 		}
 		if err := db.SetSetting(database, "save_session_transcript", saveTr); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		if err := db.SetSetting(database, "session_capture_mode", captureMode); err != nil {
 			return types.SettingsSavedMsg{Err: err}
 		}
 		if err := db.SetSetting(database, "grid_status_words", gridW); err != nil {

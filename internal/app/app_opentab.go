@@ -6,6 +6,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
 	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sessionhistview"
+	"github.com/huangzheng2016/eTerm/internal/ui/sessionlistview"
 	"github.com/huangzheng2016/eTerm/internal/ui/settingsview"
 	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
 	"github.com/huangzheng2016/eTerm/internal/ui/syncview"
@@ -75,6 +76,21 @@ func (a App) openSessionHistoryTab(hostID uint) (App, tea.Cmd) {
 	a.activeTab = len(a.tabs) - 1
 	a.syncTabBar()
 	return a, sv.Init()
+}
+
+func (a App) openSessionReplayTab(historyID uint, title string) (App, tea.Cmd) {
+	m := sessionlistview.NewReplay(a.db, historyID)
+	if a.width > 0 {
+		m.SetSize(a.width, a.mainContentHeightForType(SessionReplayTab))
+	}
+	if title == "" {
+		title = "Session"
+	}
+	tab := Tab{Type: SessionReplayTab, Title: "Replay: " + title, Model: m}
+	a.tabs = append(a.tabs, tab)
+	a.activeTab = len(a.tabs) - 1
+	a.syncTabBar()
+	return a, m.Init()
 }
 
 func (a App) openSettingsTab() (App, tea.Cmd) {

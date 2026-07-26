@@ -50,7 +50,7 @@ func (m *Model) reload() tea.Cmd {
 		var rows []db.ConnectionHistory
 		q := m.db.Where("host_id = ?", m.hostID)
 		if !m.showEmpty {
-			q = q.Where("length(trim(transcript, char(9) || char(10) || char(13) || ' ')) > 0")
+			q = q.Where("length(trim(transcript, char(9) || char(10) || char(13) || ' ')) > 0 OR length(replay_data) > 0")
 		}
 		err := q.Order("connected_at DESC").Find(&rows).Error
 		if err != nil {

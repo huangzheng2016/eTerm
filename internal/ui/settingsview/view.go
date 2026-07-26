@@ -119,6 +119,10 @@ func (m *Model) buildScrollLines() []scrollLine {
 		tmuxConfigInputLine(m.tmuxConfigFile, m.state == stateTmuxConfig, m.tmuxConfigInput.View(), m.cursor == cursorTmuxConfigFile),
 		cursorTmuxConfigFile,
 	})
+	out = append(out, scrollLine{
+		prefToggleLine("Record session replay", m.replaySessions, m.cursor == cursorReplaySessions),
+		cursorReplaySessions,
+	})
 	out = append(out, scrollLine{"", -1})
 	out = append(out, scrollLine{catStyle.Render("  Security"), -1})
 	out = append(out, scrollLine{

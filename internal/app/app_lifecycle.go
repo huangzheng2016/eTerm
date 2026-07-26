@@ -127,14 +127,20 @@ func (a App) closeCurrentTabIfAllowed() (App, tea.Cmd) {
 
 func closeTerminalTabCmd(gdb *gorm.DB, tab Tab) tea.Cmd {
 	m, ok := tab.Model.(*sshview.Model)
-	if !ok || !isTerminalTab(tab.Type) {
-		return nil
+	if ok && isTerminalTab(tab.Type) {
+		return func() tea.Msg {
+			finalizeSSHSession(gdb, m)
+			_ = m.Close()
+			return nil
+		}
 	}
-	return func() tea.Msg {
-		finalizeSSHSession(gdb, m)
-		_ = m.Close()
-		return nil
+	if closer, ok := tab.Model.(interface{ Close() error }); ok {
+		return func() tea.Msg {
+			_ = closer.Close()
+			return nil
+		}
 	}
+	return nil
 }
 
 func (a App) closeTabAt(idx int) (App, tea.Cmd) {

@@ -42,6 +42,7 @@ type Model struct {
 	defaultsJSON []byte // default config for reset
 
 	saveSessionTranscript bool
+	replaySessions        bool
 	gridStatusWords       bool
 	localTerminalShell    string
 	shellInput            textinput.Model
@@ -59,6 +60,7 @@ func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMo
 	}
 	m.entries = buildEntries(configJSON)
 	m.saveSessionTranscript = loadSaveSessionTranscript(database)
+	m.replaySessions = loadReplaySessions(database)
 	m.gridStatusWords = loadGridStatusWords(database)
 	m.localTerminalShell = loadLocalTerminalShell(database)
 	m.tmuxConfigFile = loadTmuxConfigFile(database)
@@ -70,6 +72,11 @@ func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMo
 	ti.CharLimit = 512
 	m.tmuxConfigInput = ti
 	return m
+}
+
+func loadReplaySessions(gdb *gorm.DB) bool {
+	s, err := db.GetSetting(gdb, "session_capture_mode")
+	return err != nil || s != "transcript"
 }
 
 func (m *Model) SetNoPasswordMode(v bool) {

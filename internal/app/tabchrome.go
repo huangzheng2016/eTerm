@@ -45,6 +45,8 @@ func (a App) tabStripItems() []components.TabItem {
 				title = fmt.Sprintf("[B] %s", tab.Title)
 			case SessionHistoryTab:
 				title = fmt.Sprintf("[L] %s", tab.Title)
+			case SessionReplayTab:
+				title = "[R] " + tab.Title
 			}
 		}
 		if i < 9 {

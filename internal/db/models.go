@@ -89,6 +89,9 @@ type ConnectionHistory struct {
 	// Transcript is optional plain-text session capture (scrollback + screen), truncated at save time.
 	Transcript     string `gorm:"type:text"`
 	ANSITranscript string `gorm:"type:text"`
+	ReplayData     []byte `gorm:"type:blob"`
+	ReplayDuration int64
+	ReplayStopped  bool
 }
 
 type Snippet struct {

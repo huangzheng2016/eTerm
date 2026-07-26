@@ -76,6 +76,11 @@ func (a App) View() tea.View {
 				}
 			}
 			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, tabDetaches(tab)))
+			if provider, ok := tab.Model.(interface{ StatusBarHint() string }); ok {
+				if hint := provider.StatusBarHint(); hint != "" {
+					statusBar = statusBar.SetText(hint)
+				}
+			}
 		}
 		statusView := statusBar.View()
 

@@ -41,6 +41,7 @@ const (
 	SyncTab           TabType = "sync"
 	SessionHistoryTab TabType = "session-hist"
 	SessionListTab    TabType = "sessions"
+	SessionReplayTab  TabType = "session-replay"
 )
 
 type Tab struct {

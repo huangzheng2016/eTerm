@@ -37,6 +37,27 @@ func TestHistoryListHidesEmptyTranscripts(t *testing.T) {
 	}
 }
 
+func TestHistoryListShowsReplayWithoutTranscript(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	host := db.Host{Alias: "host"}
+	if err := database.Create(&host).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Create(&db.ConnectionHistory{HostID: host.ID, ConnectedAt: time.Now(), ReplayData: []byte{1}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	msg := New(database, host.ID).reload()().(loadedMsg)
+	if len(msg.rows) != 1 {
+		t.Fatalf("rows=%+v", msg.rows)
+	}
+}
+
 func TestMouseClickSelectsHistoryRow(t *testing.T) {
 	m := &Model{
 		width:     90,

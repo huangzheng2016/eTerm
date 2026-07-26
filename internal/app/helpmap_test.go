@@ -36,3 +36,19 @@ func TestListStatusBarsMatchDefaultActions(t *testing.T) {
 		})
 	}
 }
+
+func TestReplayHelpContainsPlaybackKeys(t *testing.T) {
+	help := replayHelpMap{}.FullHelp()
+	var text string
+	for _, group := range help {
+		for _, binding := range group {
+			key, desc := binding.Help().Key, binding.Help().Desc
+			text += key + " " + desc + "\n"
+		}
+	}
+	for _, want := range []string{"space play/pause", "left/right jump 5s", "[/] speed", "g jump to time"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("help %q missing %q", text, want)
+		}
+	}
+}

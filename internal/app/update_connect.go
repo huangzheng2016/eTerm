@@ -220,6 +220,7 @@ func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
 	sv := sshview.New(msg.is, msg.alias, msg.hostID, BuildSSHKeys(a.kbConfig))
 	sv.SetHistoryID(msg.historyID)
+	configureSessionCapture(a.db, sv)
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(SSHTab))
 	}

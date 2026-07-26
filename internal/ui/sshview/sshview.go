@@ -142,6 +142,7 @@ type Model struct {
 	cursorHidden   bool
 
 	osc52Clipboard []string
+	recorder       *Recorder
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -286,6 +287,9 @@ func (m *Model) queueInput(p []byte) bool {
 	}
 	select {
 	case m.inputCh <- b:
+		if m.recorder != nil {
+			m.recorder.Input(b)
+		}
 		return true
 	default:
 		return false
@@ -364,6 +368,24 @@ func (m *Model) HistoryID() uint { return m.historyID }
 // SetHistoryID sets the connection history record ID.
 func (m *Model) SetHistoryID(id uint) { m.historyID = id }
 
+func (m *Model) EnableReplayRecording() {
+	if m.recorder == nil {
+		m.recorder = NewRecorder(time.Now())
+		m.recorder.Resize(m.emu.Height(), m.emu.Width())
+	}
+}
+
+func (m *Model) ReplayRecording() ([]byte, time.Duration, bool) {
+	if m == nil || m.recorder == nil {
+		return nil, 0, false
+	}
+	return m.recorder.Close()
+}
+
+func (m *Model) ReplayRecordingEnabled() bool {
+	return m != nil && m.recorder != nil
+}
+
 // PasteCommand writes a command string to the SSH session stdin.
 func (m *Model) PasteCommand(cmd string) {
 	if m.disconnected || m.sess == nil || m.sess.Stdin == nil {
@@ -418,6 +440,9 @@ func (m *Model) SetSize(w, h int) {
 		termH = 1
 	}
 	m.emu.Resize(w, termH)
+	if m.recorder != nil {
+		m.recorder.Resize(termH, w)
+	}
 	if m.sess != nil && m.sess.Resize != nil {
 		m.queueResize(termH, w)
 	}
@@ -518,7 +543,11 @@ func waitChunk(m *Model) tea.Cmd {
 			m.mu.Unlock()
 			return StreamDoneMsg{StreamID: m.streamID, Err: err}
 		}
-		return ChunkMsg{StreamID: m.streamID, Data: coalesceQueuedChunks(m.ch, b)}
+		data := coalesceQueuedChunks(m.ch, b)
+		if m.recorder != nil {
+			m.recorder.Output(data)
+		}
+		return ChunkMsg{StreamID: m.streamID, Data: data}
 	}
 }
 

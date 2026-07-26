@@ -37,6 +37,8 @@ func (a App) openLocalTerminal() (App, tea.Cmd) {
 
 func (a App) applyLocalTerminalOpened(msg localTerminalOpenedMsg) (App, tea.Cmd) {
 	sv := sshview.New(msg.is, msg.title, 0, BuildSSHKeys(a.kbConfig))
+	sv.SetHistoryID(createLocalSessionHistory(a.db, msg.title, "local"))
+	configureSessionCapture(a.db, sv)
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(LocalTab))
 	}

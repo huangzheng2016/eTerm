@@ -328,6 +328,11 @@ type OpenSessionHistoryMsg struct {
 	HostID uint
 }
 
+type OpenSessionReplayMsg struct {
+	HistoryID uint
+	Title     string
+}
+
 // BatchTagRequestMsg opens batch tag entry for the given hosts (multi-select).
 type BatchTagRequestMsg struct {
 	HostIDs []uint

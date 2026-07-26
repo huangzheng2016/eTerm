@@ -277,6 +277,7 @@ func (a App) applyTmuxRestoreOpened(msg tmuxRestoreOpenedMsg) (App, tea.Cmd) {
 		}
 		sv = sshview.New(msg.is, title, 0, BuildSSHKeys(a.kbConfig))
 		sv.SetHistoryID(createLocalSessionHistory(a.db, title, "tmux"))
+		configureSessionCapture(a.db, sv)
 		if a.width > 0 {
 			sv.SetSize(a.width, a.mainContentHeightForType(LocalTab))
 		}
@@ -290,6 +291,7 @@ func (a App) applyTmuxRestoreOpened(msg tmuxRestoreOpenedMsg) (App, tea.Cmd) {
 		}
 		sv = sshview.New(msg.is, title, 0, BuildSSHKeys(a.kbConfig))
 		sv.SetHistoryID(createLocalSessionHistory(a.db, title, "remote-tmux"))
+		configureSessionCapture(a.db, sv)
 		sv.SetRemoteReconnect(spec)
 		if a.width > 0 {
 			sv.SetSize(a.width, a.mainContentHeightForType(SSHTab))

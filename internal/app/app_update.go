@@ -1311,6 +1311,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.OpenSessionHistoryMsg:
 		return a.openSessionHistoryTab(msg.HostID)
 
+	case types.OpenSessionReplayMsg:
+		return a.openSessionReplayTab(msg.HistoryID, msg.Title)
+
 	case types.BatchTagRequestMsg:
 		if len(msg.HostIDs) == 0 {
 			return a, nil

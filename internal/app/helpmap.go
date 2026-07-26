@@ -223,6 +223,22 @@ func (emptyHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (emptyHelpMap) FullHelp() [][]key.Binding { return nil }
 
+type replayHelpMap struct{}
+
+func (replayHelpMap) ShortHelp() []key.Binding { return nil }
+
+func (replayHelpMap) FullHelp() [][]key.Binding {
+	binding := func(keys []string, label, desc string) key.Binding {
+		return key.NewBinding(key.WithKeys(keys...), key.WithHelp(label, desc))
+	}
+	return [][]key.Binding{
+		{binding([]string{"space"}, "space", "play/pause"), binding([]string{"left", "right"}, "left/right", "jump 5s")},
+		{binding([]string{"shift+left", "shift+right"}, "shift+left/right", "jump 60s"), binding([]string{"[", "]"}, "[/]", "speed")},
+		{binding([]string{"g"}, "g", "jump to time"), binding([]string{"home", "end"}, "home/end", "start/end")},
+		{binding([]string{"c"}, "c", "copy screen"), binding([]string{"esc"}, "esc", "back")},
+	}
+}
+
 func fullHelpHasAnyBinding(k bubbleshelp.KeyMap) bool {
 	for _, g := range k.FullHelp() {
 		for _, b := range g {
@@ -264,7 +280,12 @@ func (a App) contextualHelpKeyMap() bubbleshelp.KeyMap {
 	case SessionHistoryTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case SessionListTab:
+		if active, ok := a.tabs[a.activeTab].Model.(interface{ ReplayActive() bool }); ok && active.ReplayActive() {
+			return replayHelpMap{}
+		}
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
+	case SessionReplayTab:
+		return replayHelpMap{}
 	case BatchResultTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	default:

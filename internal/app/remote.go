@@ -274,6 +274,7 @@ func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cm
 		source = "remote-tmux"
 	}
 	sv.SetHistoryID(createLocalSessionHistory(a.db, msg.title, source))
+	configureSessionCapture(a.db, sv)
 	if msg.reconnect != nil {
 		sv.SetRemoteReconnect(msg.reconnect)
 	}
