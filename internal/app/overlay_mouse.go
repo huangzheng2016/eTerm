@@ -38,6 +38,7 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 	ly := msg.Y - oy
 	if lx < 0 || ly < 0 || lx >= ow || ly >= oh {
 		// Click outside -- dismiss
+		hadUpgradePrompt := a.upgradePrompt != nil
 		a.escMenu = nil
 		a.quickConnect = nil
 		a.snippetPicker = nil
@@ -54,6 +55,9 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 			a.confirm, _ = a.confirm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 			cmd := a.processConfirmResult()
 			return a, cmd
+		}
+		if hadUpgradePrompt {
+			a.promptDeferredTmuxRestore()
 		}
 		return a, nil
 	}

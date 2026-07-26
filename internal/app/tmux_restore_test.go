@@ -120,6 +120,49 @@ func TestUnlockPromptsForSavedTmuxRestore(t *testing.T) {
 	}
 }
 
+func TestUpgradeCommandDefersTmuxRestoreUntilUpdatePromptFinishes(t *testing.T) {
+	a := restoreTestApp(t)
+	a.forceUpdateCheck = true
+	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
+	if err := writeTmuxRestoreFile(a.tmuxRestorePath, []tmuxRestoreEntry{{Kind: tmuxRestoreLocal, Session: "work"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	next, _ := a.Update(types.MasterKeyUnlockedMsg{NoPassword: true})
+	a = next.(App)
+	if a.confirm.IsActive() || !a.tmuxRestoreDeferred || len(a.pendingTmuxRestore) != 0 {
+		t.Fatalf("restore was not deferred: confirm=%v deferred=%v pending=%#v", a.confirm.IsActive(), a.tmuxRestoreDeferred, a.pendingTmuxRestore)
+	}
+
+	next, _ = a.Update(types.UpdateCheckDoneMsg{Version: "v9.9.9", URL: "https://example.com"})
+	a = next.(App)
+	if a.upgradePrompt == nil || a.confirm.IsActive() || !a.tmuxRestoreDeferred {
+		t.Fatalf("upgrade prompt ordering is wrong: upgrade=%v confirm=%v deferred=%v", a.upgradePrompt != nil, a.confirm.IsActive(), a.tmuxRestoreDeferred)
+	}
+
+	a, _ = a.dismissUpgradePrompt(true)
+	if a.upgradePrompt != nil || !a.confirm.IsActive() || a.tmuxRestoreDeferred || len(a.pendingTmuxRestore) != 1 {
+		t.Fatalf("restore was not prompted after upgrade: upgrade=%v confirm=%v deferred=%v pending=%#v", a.upgradePrompt != nil, a.confirm.IsActive(), a.tmuxRestoreDeferred, a.pendingTmuxRestore)
+	}
+}
+
+func TestUpgradeCommandPromptsTmuxRestoreAfterNoUpdate(t *testing.T) {
+	a := restoreTestApp(t)
+	a.forceUpdateCheck = true
+	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
+	if err := writeTmuxRestoreFile(a.tmuxRestorePath, []tmuxRestoreEntry{{Kind: tmuxRestoreLocal, Session: "work"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	next, _ := a.Update(types.MasterKeyUnlockedMsg{NoPassword: true})
+	a = next.(App)
+	next, _ = a.Update(types.UpdateCheckDoneMsg{})
+	a = next.(App)
+	if !a.confirm.IsActive() || a.tmuxRestoreDeferred || len(a.pendingTmuxRestore) != 1 {
+		t.Fatalf("restore missing after update check: confirm=%v deferred=%v pending=%#v", a.confirm.IsActive(), a.tmuxRestoreDeferred, a.pendingTmuxRestore)
+	}
+}
+
 func TestDecliningTmuxRestoreClearsSnapshot(t *testing.T) {
 	a := restoreTestApp(t)
 	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")

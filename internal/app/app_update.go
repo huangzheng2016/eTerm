@@ -861,7 +861,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: homeModel}}
 		a.activeTab = 0
 		a.syncTabBar()
-		a.promptTmuxRestoreIfAvailable()
+		a.scheduleTmuxRestoreAfterUnlock()
 		unlockCmds := []tea.Cmd{autoLockTick()}
 		if a.width > 0 && a.height > 0 {
 			unlockCmds = append(unlockCmds, tea.Sequence(reflowWindow(a), homeModel.Init()))
@@ -1136,11 +1136,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			var tc tea.Cmd
 			a.toast, tc = a.toast.Show("Update check failed: "+msg.Err.Error(), components.ToastError, 6*time.Second)
+			a.promptDeferredTmuxRestore()
 			return a, tc
 		}
 		if msg.Version == "" {
 			var tc tea.Cmd
 			a.toast, tc = a.toast.Show("Already up to date.", components.ToastInfo, 4*time.Second)
+			a.promptDeferredTmuxRestore()
 			return a, tc
 		}
 		a.upgradePrompt = NewUpgradePrompt(msg.Version, msg.URL)

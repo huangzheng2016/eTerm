@@ -77,6 +77,7 @@ type App struct {
 	pendingFingerprint     *types.FingerprintConfirmMsg
 	pendingQuit            bool
 	pendingTmuxRestore     []tmuxRestoreEntry
+	tmuxRestoreDeferred    bool
 	pendingRemoteTmuxKill  *types.RemoteTmuxKillMsg
 	pendingTmuxKill        *types.TmuxKillMsg
 

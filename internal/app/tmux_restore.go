@@ -156,6 +156,22 @@ func (a *App) promptTmuxRestoreIfAvailable() {
 	a.confirm = components.NewConfirm("Restore tmux sessions", restorePromptMessage(len(entries))).Show()
 }
 
+func (a *App) scheduleTmuxRestoreAfterUnlock() {
+	if a.forceUpdateCheck {
+		a.tmuxRestoreDeferred = true
+		return
+	}
+	a.promptTmuxRestoreIfAvailable()
+}
+
+func (a *App) promptDeferredTmuxRestore() {
+	if !a.tmuxRestoreDeferred {
+		return
+	}
+	a.tmuxRestoreDeferred = false
+	a.promptTmuxRestoreIfAvailable()
+}
+
 func restorePromptMessage(n int) string {
 	if n == 1 {
 		return "Restore 1 tmux session?"

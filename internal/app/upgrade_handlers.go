@@ -19,6 +19,7 @@ func (a App) dismissUpgradePrompt(saveDismissedTag bool) (App, tea.Cmd) {
 		_ = db.SetSetting(a.db, version.SettingUpgradeDismissedTag, a.upgradePrompt.Tag)
 	}
 	a.upgradePrompt = nil
+	a.promptDeferredTmuxRestore()
 	return a, nil
 }
 
@@ -158,6 +159,7 @@ func (a App) handleUpgradeDownloadDone(msg types.UpgradeDownloadDoneMsg) (App, t
 		dirHint = " Opened folder."
 	}
 	a.upgradePrompt = nil
+	a.promptDeferredTmuxRestore()
 	var tc tea.Cmd
 	a.toast, tc = a.toast.Show("Saved: "+msg.BinaryPath+sumNote+dirHint, components.ToastSuccess, 6*time.Second)
 	return a, tc
