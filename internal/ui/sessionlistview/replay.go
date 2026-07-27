@@ -45,7 +45,11 @@ func newReplayState(data []byte, duration time.Duration) (*replayState, error) {
 	j.SetWidth(28)
 	r := &replayState{events: events, duration: duration, speed: 1, jump: j}
 	r.reset()
-	r.seek(0)
+	initial := time.Duration(0)
+	if len(events) > 0 {
+		initial = time.Duration(events[0].At) * time.Millisecond
+	}
+	r.seek(initial)
 	return r, nil
 }
 
