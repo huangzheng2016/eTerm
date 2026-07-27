@@ -445,7 +445,7 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 	}
 	limit := max(1, m.height-reserved)
 	if r.playing {
-		limit = m.height - 2
+		limit = m.height - 1
 	}
 	if len(lines) > limit {
 		lines = lines[len(lines)-limit:]
@@ -470,8 +470,6 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 	parts = append(parts, strings.Join(lines, "\n"))
 	if !r.playing {
 		parts = append(parts, ui.DimStyle.Render(controls))
-	} else {
-		parts = append(parts, ui.DimStyle.Render("[playing]"))
 	}
 	if extra != "" {
 		parts = append(parts, extra)
