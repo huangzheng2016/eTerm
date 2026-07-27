@@ -166,7 +166,8 @@ func TestReplayHidesMetadataWhilePlayingAndRestoresItWhenPaused(t *testing.T) {
 	if strings.Contains(playing, "unique-host-label") {
 		t.Fatalf("playing view contains metadata: %q", playing)
 	}
-	if len(strings.Split(playing, "\n")) != 10 || !strings.Contains(strings.Split(playing, "\n")[9], "[playing]") {
+	playingLines := strings.Split(playing, "\n")
+	if len(playingLines) != 10 || !strings.Contains(playingLines[0], "[playing]") || strings.Contains(playingLines[9], "[playing]") {
 		t.Fatalf("playing viewport is not fixed: %q", playing)
 	}
 	r.playing = false

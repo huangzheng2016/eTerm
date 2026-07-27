@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var archiveHTTPClient = &http.Client{Timeout: 0}
+var archiveHTTPClient = updateHTTPClient(0)
 
 func UpgradeStagingDir(tag string) (string, error) {
 	base, err := os.UserCacheDir()

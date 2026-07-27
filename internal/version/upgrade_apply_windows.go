@@ -11,51 +11,41 @@ import (
 	"syscall"
 )
 
-func batQuote(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func ScheduleDeferredReplace(newBinAbs, targetAbs string) error {
 	dir := filepath.Dir(newBinAbs)
-	f, err := os.CreateTemp(dir, "eterm-replace-*.bat")
+	f, err := os.CreateTemp(dir, "eterm-replace-*.ps1")
 	if err != nil {
 		return err
 	}
-	bat := f.Name()
-
-	newQ := filepath.Clean(newBinAbs)
-	oldQ := filepath.Clean(targetAbs)
-	selfQ := filepath.Clean(bat)
-
-	body := fmt.Sprintf(
-		"ping 127.0.0.1 -n 4 > nul\r\nmove /Y %s %s\r\ndel /F /Q %s\r\n",
-		batQuote(newQ),
-		batQuote(oldQ),
-		batQuote(selfQ),
-	)
-
-	if _, err := f.WriteString("@echo off\r\n"); err != nil {
-		f.Close()
-		_ = os.Remove(bat)
-		return err
-	}
+	script := f.Name()
+	body := fmt.Sprintf(`param([switch]$Elevated)
+Start-Sleep -Seconds 3
+try {
+  Move-Item -LiteralPath %s -Destination %s -Force -ErrorAction Stop
+  Remove-Item -LiteralPath $PSCommandPath -Force
+} catch {
+  if (-not $Elevated) {
+    Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $PSCommandPath + '"'),'-Elevated'
+  }
+}
+`, psQuote(filepath.Clean(newBinAbs)), psQuote(filepath.Clean(targetAbs)))
 	if _, err := f.WriteString(body); err != nil {
 		f.Close()
-		_ = os.Remove(bat)
+		_ = os.Remove(script)
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(bat)
+		_ = os.Remove(script)
 		return err
 	}
-
-	cmd := exec.Command("cmd", "/C", bat)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000,
-	}
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	if err := cmd.Start(); err != nil {
-		_ = os.Remove(bat)
+		_ = os.Remove(script)
 		return err
 	}
 	go func() { _ = cmd.Wait() }()

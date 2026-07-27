@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var httpChecksumClient = &http.Client{Timeout: 120 * time.Second}
+var httpChecksumClient = updateHTTPClient(120 * time.Second)
 
 var ErrChecksumsUnavailable = errors.New("SHA256SUMS not in release")
 

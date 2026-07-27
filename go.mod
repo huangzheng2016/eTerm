@@ -12,9 +12,12 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260303162955-0b88c25f3fff
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/vt v0.0.0-20260608090822-c3ad58c6c9e5
+	github.com/coder/websocket v1.8.15
+	github.com/creack/pty v1.1.24
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/uuid v1.3.0
 	github.com/jcmturner/gokrb5/v8 v8.4.4
+	github.com/klauspost/compress v1.19.1
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.55.0
@@ -22,10 +25,7 @@ require (
 )
 
 require (
-	github.com/coder/websocket v1.8.15 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 // indirect
 )
 
@@ -60,7 +60,7 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sys v0.46.0
 	golang.org/x/text v0.38.0 // indirect
 	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect

@@ -43,7 +43,7 @@ func PollLatestRelease(gdb *gorm.DB, disabled bool) (tag, url string, err error)
 }
 
 func fetchLatestRelease() (tag, url string, responseOK bool, err error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := updateHTTPClient(5 * time.Second)
 	resp, err := client.Get("https://api.github.com/repos/huangzheng2016/eTerm/releases/latest")
 	if err != nil {
 		return "", "", false, err
