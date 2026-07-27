@@ -433,6 +433,9 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 	screen := r.emu.Render()
 	lines := strings.Split(screen, "\n")
 	reserved := 1
+	if r.playing {
+		reserved++
+	}
 	header := !r.playing
 	if header {
 		reserved += 3
@@ -458,7 +461,15 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 			"",
 		)
 	}
-	parts = append(parts, strings.Join(lines, "\n"), ui.DimStyle.Render(controls))
+	if r.playing {
+		parts = append(parts, lipgloss.NewStyle().Width(m.width).Align(lipgloss.Right).Render(formatReplayTime(r.pos)+" / "+formatReplayTime(r.duration)))
+	}
+	parts = append(parts, strings.Join(lines, "\n"))
+	if r.playing {
+		parts = append(parts, ui.DimStyle.Render("[playing]"))
+	} else {
+		parts = append(parts, ui.DimStyle.Render(controls))
+	}
 	if extra != "" {
 		parts = append(parts, extra)
 	}

@@ -267,6 +267,7 @@ func (a *App) processConfirmResult() tea.Cmd {
 	if a.pendingQuit {
 		a.pendingQuit = false
 		if confirmed {
+			a.finalizeTerminalSessions()
 			a.persistTmuxRestoreSnapshot()
 			return tea.Quit
 		}
@@ -384,4 +385,18 @@ func (a *App) processConfirmResult() tea.Cmd {
 	}
 
 	return nil
+}
+
+func (a *App) finalizeTerminalSessions() {
+	for i := range a.tabs {
+		if !isTerminalTab(a.tabs[i].Type) {
+			continue
+		}
+		m, ok := a.tabs[i].Model.(*sshview.Model)
+		if !ok {
+			continue
+		}
+		finalizeSSHSession(a.db, m)
+		_ = m.Close()
+	}
 }

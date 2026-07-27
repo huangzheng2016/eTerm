@@ -2,14 +2,17 @@ package sshview
 
 import (
 	"bytes"
-	"compress/gzip"
-	"encoding/json"
+	"encoding/binary"
+	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-const MaxReplayDuration = 24 * time.Hour
+const MaxReplayDuration = 48 * time.Hour
 
 type ReplayEvent struct {
 	At   int64  `json:"t"`
@@ -25,15 +28,33 @@ type Recorder struct {
 	last    time.Duration
 	stopped bool
 	closed  bool
+	file    *os.File
+	path    string
 	buf     bytes.Buffer
-	zip     *gzip.Writer
-	enc     *json.Encoder
+	zip     *zstd.Encoder
+	lastAt  int64
 }
 
 func NewRecorder(start time.Time) *Recorder {
 	r := &Recorder{start: start}
-	r.zip = gzip.NewWriter(&r.buf)
-	r.enc = json.NewEncoder(r.zip)
+	var dst io.Writer = &r.buf
+	if file, err := os.CreateTemp("", "eterm-replay-*.zst"); err == nil {
+		r.file = file
+		r.path = file.Name()
+		dst = file
+	}
+	var err error
+	r.zip, err = zstd.NewWriter(dst)
+	if err != nil {
+		if r.file != nil {
+			_ = r.file.Close()
+			_ = os.Remove(r.path)
+			r.file = nil
+			r.path = ""
+		}
+		r.zip, _ = zstd.NewWriter(&r.buf)
+	}
+	_, _ = r.zip.Write([]byte("ETR2"))
 	return r
 }
 
@@ -60,7 +81,25 @@ func (r *Recorder) record(event ReplayEvent) {
 	}
 	r.last = elapsed
 	event.At = elapsed.Milliseconds()
-	_ = r.enc.Encode(event)
+	delta := event.At - r.lastAt
+	if delta < 0 {
+		delta = 0
+	}
+	r.lastAt = event.At
+	var b [binary.MaxVarintLen64]byte
+	n := binary.PutUvarint(b[:], uint64(delta))
+	_, _ = r.zip.Write(b[:n])
+	_, _ = r.zip.Write([]byte(event.Kind[:1]))
+	if event.Kind == "r" {
+		n = binary.PutUvarint(b[:], uint64(event.Rows))
+		_, _ = r.zip.Write(b[:n])
+		n = binary.PutUvarint(b[:], uint64(event.Cols))
+		_, _ = r.zip.Write(b[:n])
+	} else {
+		n = binary.PutUvarint(b[:], uint64(len(event.Data)))
+		_, _ = r.zip.Write(b[:n])
+		_, _ = r.zip.Write(event.Data)
+	}
 }
 
 func (r *Recorder) Close() ([]byte, time.Duration, bool) {
@@ -73,27 +112,75 @@ func (r *Recorder) Close() ([]byte, time.Duration, bool) {
 			r.stopped = true
 		}
 		_ = r.zip.Close()
+		if r.file != nil {
+			_ = r.file.Sync()
+			_ = r.file.Close()
+			if data, err := os.ReadFile(r.path); err == nil {
+				r.buf.Write(data)
+			}
+			_ = os.Remove(r.path)
+		}
 		r.closed = true
 	}
 	return append([]byte(nil), r.buf.Bytes()...), r.last, r.stopped
 }
 
+func decodeReplayBinary(data []byte) ([]ReplayEvent, error) {
+	if len(data) < 4 || string(data[:4]) != "ETR2" {
+		return nil, fmt.Errorf("invalid replay format")
+	}
+	data = data[4:]
+	var events []ReplayEvent
+	var at int64
+	for len(data) > 0 {
+		delta, n := binary.Uvarint(data)
+		if n <= 0 {
+			return nil, fmt.Errorf("invalid replay timestamp")
+		}
+		data = data[n:]
+		if len(data) < 1 {
+			return nil, fmt.Errorf("invalid replay event")
+		}
+		kind := string(data[0])
+		data = data[1:]
+		v, n := binary.Uvarint(data)
+		if n <= 0 {
+			return nil, fmt.Errorf("invalid replay payload")
+		}
+		data = data[n:]
+		event := ReplayEvent{At: at + int64(delta), Kind: kind}
+		at = event.At
+		if kind == "r" {
+			event.Rows = int(v)
+			v, n = binary.Uvarint(data)
+			if n <= 0 {
+				return nil, fmt.Errorf("invalid replay resize")
+			}
+			data = data[n:]
+			event.Cols = int(v)
+		} else if kind == "i" || kind == "o" {
+			if v > uint64(len(data)) {
+				return nil, fmt.Errorf("invalid replay data length")
+			}
+			event.Data = append([]byte(nil), data[:int(v)]...)
+			data = data[int(v):]
+		} else {
+			return nil, fmt.Errorf("invalid replay event kind")
+		}
+		events = append(events, event)
+	}
+	return events, nil
+}
+
 func DecodeReplay(data []byte) ([]ReplayEvent, error) {
-	zr, err := gzip.NewReader(bytes.NewReader(data))
+	zr, err := zstd.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer zr.Close()
-	dec := json.NewDecoder(zr)
-	var events []ReplayEvent
-	for {
-		var event ReplayEvent
-		if err := dec.Decode(&event); err != nil {
-			if err == io.EOF {
-				return events, nil
-			}
-			return nil, err
-		}
-		events = append(events, event)
+	decoded, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, err
 	}
+	return decodeReplayBinary(decoded)
 }

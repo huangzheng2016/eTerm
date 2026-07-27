@@ -337,6 +337,13 @@ func TestConfirmedQuitPersistsTmuxRestoreSnapshot(t *testing.T) {
 	a.viewState = MainView
 	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
 	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]work", 0, viewkeys.SSHKeys{})
+	history := db.ConnectionHistory{Label: "[T]work", ConnectedAt: time.Now()}
+	if err := a.db.Create(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	tab.SetHistoryID(history.ID)
+	tab.EnableReplayRecording()
+	tab.Update(sshview.ChunkMsg{StreamID: tab.StreamID(), Data: []byte("quit output")})
 	t.Cleanup(func() { _ = tab.Close() })
 	a.tabs = []Tab{
 		{Type: HomeTab, Title: "List"},
@@ -357,6 +364,12 @@ func TestConfirmedQuitPersistsTmuxRestoreSnapshot(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Session != "work" {
 		t.Fatalf("entries = %#v", entries)
+	}
+	if err := a.db.First(&history, history.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(history.ReplayData) == 0 || history.Transcript == "" {
+		t.Fatalf("quit did not finalize session: replay=%d transcript=%q", len(history.ReplayData), history.Transcript)
 	}
 }
 
