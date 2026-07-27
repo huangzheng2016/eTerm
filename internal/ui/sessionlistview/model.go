@@ -228,8 +228,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.MouseClickMsg:
 		if m.detail && m.replay != nil && !m.searching && msg.Button == tea.MouseLeft {
-			if msg.Y >= m.height-2 && m.width > 0 {
-				m.replay.seek(time.Duration(float64(m.replay.duration) * float64(min(max(0, msg.X), m.width)) / float64(m.width)))
+			if !m.replay.playing && msg.Y == m.height-1 && m.width > 0 {
+				prefixWidth := ansi.StringWidth(fmt.Sprintf("[paused]  %s / %s  ", formatReplayTime(m.replay.pos), formatReplayTime(m.replay.duration)))
+				timelineWidth := max(3, m.width-prefixWidth-ansi.StringWidth(fmt.Sprintf("  %.1gx", m.replay.speed))-2)
+				x := min(max(0, msg.X-prefixWidth-1), timelineWidth-1)
+				m.replay.seek(time.Duration(float64(m.replay.duration) * float64(x) / float64(max(1, timelineWidth-1))))
 			}
 			return m, nil
 		}
@@ -433,9 +436,6 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 	screen := r.emu.Render()
 	lines := strings.Split(screen, "\n")
 	reserved := 1
-	if r.playing {
-		reserved++
-	}
 	header := !r.playing
 	if header {
 		reserved += 3
@@ -444,6 +444,9 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 		reserved++
 	}
 	limit := max(1, m.height-reserved)
+	if r.playing {
+		limit = m.height - 2
+	}
 	if len(lines) > limit {
 		lines = lines[len(lines)-limit:]
 	}
@@ -462,13 +465,13 @@ func (m *Model) replayView(row db.ConnectionHistory) string {
 		)
 	}
 	if r.playing {
-		parts = append(parts, lipgloss.NewStyle().Width(m.width).Align(lipgloss.Right).Render(formatReplayTime(r.pos)+" / "+formatReplayTime(r.duration)))
+		parts = append(parts, lipgloss.NewStyle().Width(m.width).Align(lipgloss.Right).Render("[playing]  "+formatReplayTime(r.pos)+" / "+formatReplayTime(r.duration)))
 	}
 	parts = append(parts, strings.Join(lines, "\n"))
-	if r.playing {
-		parts = append(parts, ui.DimStyle.Render("[playing]"))
-	} else {
+	if !r.playing {
 		parts = append(parts, ui.DimStyle.Render(controls))
+	} else {
+		parts = append(parts, ui.DimStyle.Render("[playing]"))
 	}
 	if extra != "" {
 		parts = append(parts, extra)
