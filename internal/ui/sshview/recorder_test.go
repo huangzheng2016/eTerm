@@ -30,7 +30,7 @@ func TestRecorderCapturesInputOutputAndResize(t *testing.T) {
 	}
 }
 
-func TestRecorderStopsAt24Hours(t *testing.T) {
+func TestRecorderStopsAtMaxDuration(t *testing.T) {
 	r := NewRecorder(time.Now().Add(-MaxReplayDuration - time.Second))
 	r.Output([]byte("discarded"))
 	data, duration, stopped := r.Close()

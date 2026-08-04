@@ -3,23 +3,18 @@
 package clipboardblob
 
 import (
-	"os/exec"
 	"strings"
+
+	"golang.design/x/clipboard"
 )
 
 func clipboardFilePath() (string, error) {
-	out, err := exec.Command("osascript", "-e", `try
-set f to the clipboard as «class furl»
-return POSIX path of f
-on error
-return ""
-end try`).Output()
-	if err != nil {
+	if err := clipboard.Init(); err != nil {
 		return "", ErrNoBlob
 	}
-	path := strings.TrimSpace(string(out))
-	if path == "" {
+	data := strings.TrimRight(string(clipboard.Read(clipboard.Register("public.file-url"))), "\x00")
+	if data == "" {
 		return "", ErrNoBlob
 	}
-	return path, nil
+	return filePathFromURIList(data)
 }

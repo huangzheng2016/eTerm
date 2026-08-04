@@ -86,18 +86,18 @@ func (r *Recorder) record(event ReplayEvent) {
 		delta = 0
 	}
 	r.lastAt = event.At
-	var b [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(b[:], uint64(delta))
-	_, _ = r.zip.Write(b[:n])
-	_, _ = r.zip.Write([]byte(event.Kind[:1]))
+	var header [3*binary.MaxVarintLen64 + 1]byte
+	n := binary.PutUvarint(header[:], uint64(delta))
+	header[n] = event.Kind[0]
+	n++
 	if event.Kind == "r" {
-		n = binary.PutUvarint(b[:], uint64(event.Rows))
-		_, _ = r.zip.Write(b[:n])
-		n = binary.PutUvarint(b[:], uint64(event.Cols))
-		_, _ = r.zip.Write(b[:n])
+		n += binary.PutUvarint(header[n:], uint64(event.Rows))
+		n += binary.PutUvarint(header[n:], uint64(event.Cols))
 	} else {
-		n = binary.PutUvarint(b[:], uint64(len(event.Data)))
-		_, _ = r.zip.Write(b[:n])
+		n += binary.PutUvarint(header[n:], uint64(len(event.Data)))
+	}
+	_, _ = r.zip.Write(header[:n])
+	if event.Kind != "r" {
 		_, _ = r.zip.Write(event.Data)
 	}
 }
@@ -122,7 +122,7 @@ func (r *Recorder) Close() ([]byte, time.Duration, bool) {
 		}
 		r.closed = true
 	}
-	return append([]byte(nil), r.buf.Bytes()...), r.last, r.stopped
+	return r.buf.Bytes(), r.last, r.stopped
 }
 
 func decodeReplayBinary(data []byte) ([]ReplayEvent, error) {

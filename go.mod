@@ -19,14 +19,20 @@ require (
 	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/klauspost/compress v1.19.1
 	github.com/pkg/sftp v1.13.10
+	golang.design/x/clipboard v0.8.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.55.0
 	gorm.io/gorm v1.31.1
 )
 
 require (
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 // indirect
+	golang.design/x/x11 v0.2.0 // indirect
+	golang.org/x/exp/shiny v0.0.0-20250606033433-dcc06ee1d476 // indirect
+	golang.org/x/image v0.28.0 // indirect
+	golang.org/x/mobile v0.0.0-20250606033058-a2a15c67f36f // indirect
 )
 
 require (

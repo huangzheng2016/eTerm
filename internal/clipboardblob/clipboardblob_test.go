@@ -130,3 +130,9 @@ func TestFilePathFromURIList(t *testing.T) {
 		t.Fatalf("path = %q", path)
 	}
 }
+
+func TestFilePathFromURIListRejectsText(t *testing.T) {
+	if _, err := filePathFromURIList("normal clipboard text"); err != ErrNoBlob {
+		t.Fatalf("err = %v", err)
+	}
+}
