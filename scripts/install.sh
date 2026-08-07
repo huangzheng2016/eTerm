@@ -27,16 +27,6 @@ case "$UNAME_M" in
   *) echo "Unsupported CPU: $UNAME_M" >&2; exit 1 ;;
 esac
 
-if [ "$OS" = "linux" ] && [ "$GOARCH" != "amd64" ]; then
-  echo "No prebuilt Linux ARM release. Install with: go install github.com/${OWNER}/${REPO}@latest" >&2
-  exit 1
-fi
-
-if [ "$OS" = "windows" ] && [ "$GOARCH" != "amd64" ]; then
-  echo "No prebuilt Windows non-amd64 release." >&2
-  exit 1
-fi
-
 if [ "$OS" = "darwin" ] && [ "$GOARCH" = "arm64" ]; then
   ASSET_BASE="eterm_darwin_arm64"
   ARCHIVE="eterm_darwin_arm64.tar.gz"
@@ -44,11 +34,11 @@ elif [ "$OS" = "darwin" ] && [ "$GOARCH" = "amd64" ]; then
   ASSET_BASE="eterm_darwin_amd64"
   ARCHIVE="eterm_darwin_amd64.tar.gz"
 elif [ "$OS" = "linux" ]; then
-  ASSET_BASE="eterm_linux_amd64"
-  ARCHIVE="eterm_linux_amd64.tar.gz"
+  ASSET_BASE="eterm_linux_${GOARCH}"
+  ARCHIVE="eterm_linux_${GOARCH}.tar.gz"
 else
-  ASSET_BASE="eterm_windows_amd64"
-  ARCHIVE="eterm_windows_amd64.zip"
+  ASSET_BASE="eterm_windows_${GOARCH}"
+  ARCHIVE="eterm_windows_${GOARCH}.zip"
 fi
 
 URL="${BASE}/${TAG}/${ARCHIVE}"

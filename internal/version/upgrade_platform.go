@@ -13,10 +13,12 @@ func ReleaseArchiveNames() (archive string, inner string, ok bool) {
 	goarch := runtime.GOARCH
 	switch goos {
 	case "linux":
-		if goarch != "amd64" {
+		switch goarch {
+		case "amd64", "arm64":
+			return fmt.Sprintf("eterm_linux_%s.tar.gz", goarch), fmt.Sprintf("eterm_linux_%s", goarch), true
+		default:
 			return "", "", false
 		}
-		return "eterm_linux_amd64.tar.gz", "eterm_linux_amd64", true
 	case "darwin":
 		switch goarch {
 		case "amd64":
@@ -27,10 +29,10 @@ func ReleaseArchiveNames() (archive string, inner string, ok bool) {
 			return "", "", false
 		}
 	case "windows":
-		if goarch != "amd64" {
+		if goarch != "amd64" && goarch != "arm64" {
 			return "", "", false
 		}
-		return "eterm_windows_amd64.zip", "eterm_windows_amd64.exe", true
+		return fmt.Sprintf("eterm_windows_%s.zip", goarch), fmt.Sprintf("eterm_windows_%s.exe", goarch), true
 	default:
 		return "", "", false
 	}

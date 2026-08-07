@@ -26,24 +26,27 @@ jobs:
   build-linux:
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-      - name: Build for Linux AMD64
+      - name: Build for Linux ${{ matrix.goarch }}
         run: |
           VERSION="${GITHUB_REF_NAME:-dev}"
           COMMIT="${GITHUB_SHA::8}"
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} go build \
             -ldflags="-s -w -X github.com/huangzheng2016/eTerm/internal/version.Version=${VERSION} -X github.com/huangzheng2016/eTerm/internal/version.Commit=${COMMIT}" \
-            -o eterm_linux_amd64 .
+            -o eterm_linux_${{ matrix.goarch }} .
       - name: Create archive
-        run: tar -czf eterm_linux_amd64.tar.gz eterm_linux_amd64
+        run: tar -czf eterm_linux_${{ matrix.goarch }}.tar.gz eterm_linux_${{ matrix.goarch }}
       - uses: actions/upload-artifact@v7
         with:
-          name: linux-amd64
-          path: eterm_linux_amd64.tar.gz
+          name: linux-${{ matrix.goarch }}
+          path: eterm_linux_${{ matrix.goarch }}.tar.gz
 
   build-darwin:
     needs: test
@@ -75,25 +78,30 @@ jobs:
   build-windows:
     needs: test
     runs-on: windows-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-      - name: Build for Windows AMD64
+      - name: Build for Windows ${{ matrix.goarch }}
         shell: pwsh
         run: |
           $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "${{ matrix.goarch }}"
           $version = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "dev" }
           $commit = $env:GITHUB_SHA.Substring(0, 8)
-          go build -ldflags="-s -w -X github.com/huangzheng2016/eTerm/internal/version.Version=$version -X github.com/huangzheng2016/eTerm/internal/version.Commit=$commit" -o eterm_windows_amd64.exe .
+          go build -ldflags="-s -w -X github.com/huangzheng2016/eTerm/internal/version.Version=$version -X github.com/huangzheng2016/eTerm/internal/version.Commit=$commit" -o eterm_windows_${{ matrix.goarch }}.exe .
       - name: Create archive
         shell: pwsh
-        run: Compress-Archive -Path "eterm_windows_amd64.exe" -DestinationPath "eterm_windows_amd64.zip"
+        run: Compress-Archive -Path "eterm_windows_${{ matrix.goarch }}.exe" -DestinationPath "eterm_windows_${{ matrix.goarch }}.zip"
       - uses: actions/upload-artifact@v7
         with:
-          name: windows-amd64
-          path: eterm_windows_amd64.zip
+          name: windows-${{ matrix.goarch }}
+          path: eterm_windows_${{ matrix.goarch }}.zip
 
   release:
     needs: [build-linux, build-darwin, build-windows]

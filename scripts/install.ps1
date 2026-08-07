@@ -12,7 +12,8 @@ if (-not $tag) {
     Write-Error "Could not read latest release tag."
     exit 1
 }
-$zip = "eterm_windows_amd64.zip"
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+$zip = "eterm_windows_${arch}.zip"
 $url = "https://github.com/$Owner/$Repo/releases/download/$tag/$zip"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("eterm-inst-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -20,7 +21,7 @@ try {
     $zipPath = Join-Path $tmp $zip
     Invoke-WebRequest -Uri $url -OutFile $zipPath
     Expand-Archive -Path $zipPath -DestinationPath $tmp -Force
-    $src = Join-Path $tmp "eterm_windows_amd64.exe"
+    $src = Join-Path $tmp "eterm_windows_${arch}.exe"
     $destDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:USERPROFILE "bin" }
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     $dest = Join-Path $destDir "eterm.exe"
