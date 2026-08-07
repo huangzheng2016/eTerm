@@ -23,6 +23,7 @@ esac
 
 case "$UNAME_M" in
   x86_64|amd64) GOARCH=amd64 ;;
+  i386|i686|x86) GOARCH=386 ;;
   arm64|aarch64) GOARCH=arm64 ;;
   *) echo "Unsupported CPU: $UNAME_M" >&2; exit 1 ;;
 esac
