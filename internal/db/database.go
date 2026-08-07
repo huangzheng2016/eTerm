@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/glebarez/sqlite" // modernc/sqlite — works with CGO_ENABLED=0 (releases, cross-builds)
 	"gorm.io/gorm"
@@ -15,7 +16,11 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	db, err := gorm.Open(sqlite.Open(dbPath+"?_journal_mode=WAL&_busy_timeout=5000"), &gorm.Config{
+	query := "?_journal_mode=WAL&_busy_timeout=5000"
+	if runtime.GOOS == "linux" && runtime.GOARCH == "386" {
+		query = "?_journal_mode=MEMORY&_busy_timeout=5000"
+	}
+	db, err := gorm.Open(sqlite.Open(dbPath+query), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -44,7 +49,7 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 func backfillSyncIDs(db *gorm.DB) {
 	uuidExpr := `lower(hex(randomblob(4))||'-'||hex(randomblob(2))||'-4'||substr(hex(randomblob(2)),2)||'-'||substr('89ab',abs(random())%4+1,1)||substr(hex(randomblob(2)),2)||'-'||hex(randomblob(6)))`
 	for _, t := range []string{"hosts", "ssh_keys", "snippets", "port_forwards"} {
-		db.Exec("UPDATE "+t+" SET sync_id = "+uuidExpr+" WHERE sync_id = '' OR sync_id IS NULL")
+		db.Exec("UPDATE " + t + " SET sync_id = " + uuidExpr + " WHERE sync_id = '' OR sync_id IS NULL")
 	}
 }
 
