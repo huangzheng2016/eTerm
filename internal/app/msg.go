@@ -33,6 +33,7 @@ type remoteTerminalOpenedMsg struct {
 	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
 	reconnect    *types.RemoteReconnect
 	background   bool
+	resume       bool // reattach to the existing tab model, keeping scrollback
 }
 
 type remoteTmuxRenameAppliedMsg struct {

@@ -39,7 +39,7 @@ func TestWebSocketRelayData(t *testing.T) {
 	client.SetReadLimit(relay.MaxWebSocketMessageBytes)
 	defer client.CloseNow()
 
-	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: 1})
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: relay.ProtocolVersion})
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestWebSocketRelayData(t *testing.T) {
 		t.Fatalf("got frame %#v, want OPEN_OK stream 99", f)
 	}
 
-	ansiPayload := []byte("\x1b[48;2;47;52;58m  \x1b[0m\x1b]10;?\x1b\\")
+	ansiPayload := relay.DataPayload(0, []byte("\x1b[48;2;47;52;58m  \x1b[0m\x1b]10;?\x1b\\"))
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: ansiPayload})); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestWebSocketRelayData(t *testing.T) {
 		t.Fatalf("got frame %#v, want DATA %q", f, ansiPayload)
 	}
 
-	largePayload := bytes.Repeat([]byte("x"), 40*1024)
+	largePayload := relay.DataPayload(100, bytes.Repeat([]byte("x"), 40*1024))
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: largePayload})); err != nil {
 		t.Fatal(err)
 	}
@@ -108,18 +108,126 @@ func TestWebSocketRelayData(t *testing.T) {
 	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, largePayload) {
 		t.Fatalf("got frame type=%#v len=%d, want DATA len=%d", f.Type, len(f.Payload), len(largePayload))
 	}
+
+	// Client -> daemon: ack and input frames pass through.
+	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(41 * 1024)})); err != nil {
+		t.Fatal(err)
+	}
+	_, data, err = daemon.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err = relay.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, err := relay.ParseAck(f.Payload)
+	if f.Type != relay.FrameAck || err != nil || ack != 41*1024 {
+		t.Fatalf("got frame %#v, want ACK %d", f, 41*1024)
+	}
+}
+
+func TestDaemonHelloVersionMismatchRejected(t *testing.T) {
+	engine := testEngine(t)
+	handler := NewHTTPHandler(engine, "")
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	daemon, _, err := websocket.Dial(ctx, base+"/api/v1/ws/daemon", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemon.SetReadLimit(relay.MaxWebSocketMessageBytes)
+	defer daemon.CloseNow()
+
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Version: 1})
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
+		t.Fatal(err)
+	}
+	_, data, err := daemon.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := relay.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Type != relay.FrameHelloErr || !strings.Contains(string(f.Payload), "protocol version") {
+		t.Fatalf("got frame %#v, want HELLO_ERR", f)
+	}
+}
+
+func TestLaneQueueSendBlocksUntilSpace(t *testing.T) {
+	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1)}
+	q.ctrl <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+
+	ctx := context.Background()
+	done := make(chan bool, 1)
+	go func() {
+		done <- q.send(ctx, relay.Frame{Type: relay.FrameData, StreamID: 2}, false)
+	}()
+
+	select {
+	case ok := <-done:
+		t.Fatalf("send returned %v before queue space was available", ok)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	<-q.ctrl
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("send returned false after queue space was available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("send did not unblock after queue space was available")
+	}
+
+	got := <-q.ctrl
+	if got.StreamID != 2 {
+		t.Fatalf("stream id = %d", got.StreamID)
+	}
+}
+
+func TestLaneQueueSendReturnsFalseOnContextCancel(t *testing.T) {
+	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1)}
+	q.bulk <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		done <- q.send(ctx, relay.Frame{Type: relay.FrameData, StreamID: 2}, true)
+	}()
+	select {
+	case ok := <-done:
+		t.Fatalf("send returned %v with full bulk queue", ok)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("send returned true after context cancel")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("send did not return after context cancel")
+	}
 }
 
 func TestCloseDaemonSessionsMarksCloseAsAbnormal(t *testing.T) {
 	h := NewRelayHub(nil)
-	client := make(chan relay.Frame, 1)
-	daemon := make(chan relay.Frame, 1)
+	client := newLaneQueue()
+	daemon := newLaneQueue()
 	h.sessions[7] = relaySession{client: client, daemon: daemon}
 
 	h.closeDaemonSessions(daemon)
 
 	select {
-	case f := <-client:
+	case f := <-client.ctrl:
 		if f.Type != relay.FrameClose || f.StreamID != 7 {
 			t.Fatalf("got frame %#v, want close stream 7", f)
 		}
@@ -131,66 +239,48 @@ func TestCloseDaemonSessionsMarksCloseAsAbnormal(t *testing.T) {
 	}
 }
 
-func TestCloseDaemonSessionsTimesOutWhenQueueIsFull(t *testing.T) {
-	oldTimeout := relaySendTimeoutNanos.Swap(int64(10 * time.Millisecond))
-	t.Cleanup(func() { relaySendTimeoutNanos.Store(oldTimeout) })
-
+func TestCloseClientSessionsKeepsDaemonSide(t *testing.T) {
 	h := NewRelayHub(nil)
-	client := make(chan relay.Frame, 1)
-	daemon := make(chan relay.Frame, 1)
-	client <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+	client := newLaneQueue()
+	daemon := newLaneQueue()
 	h.sessions[7] = relaySession{client: client, daemon: daemon}
 
-	done := make(chan struct{})
-	go func() {
-		h.closeDaemonSessions(daemon)
-		close(done)
-	}()
+	h.closeClientSessions(client)
 
+	if _, ok := h.session(7); ok {
+		t.Fatal("session mapping kept after client disconnect")
+	}
 	select {
-	case <-done:
+	case f := <-daemon.ctrl:
+		if f.Type != relay.FrameClose || f.StreamID != 7 || string(f.Payload) != relay.CloseClientDisconnected {
+			t.Fatalf("got frame %#v, want close/client-disconnected stream 7", f)
+		}
 	case <-time.After(time.Second):
-		t.Fatal("close did not time out")
+		t.Fatal("daemon not notified of client disconnect")
 	}
 }
 
-func TestDefaultRelaySendTimeoutIsFiveMinutes(t *testing.T) {
-	if got := time.Duration(relaySendTimeoutNanos.Load()); got != 5*time.Minute {
-		t.Fatalf("timeout = %s", got)
-	}
-}
-
-func TestTrySendWaitsForQueueSpace(t *testing.T) {
-	oldTimeout := relaySendTimeoutNanos.Swap(int64(time.Second))
-	t.Cleanup(func() { relaySendTimeoutNanos.Store(oldTimeout) })
-
-	ch := make(chan relay.Frame, 1)
-	ch <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+func TestLaneQueueSendUnblocksWhenOwnerCloses(t *testing.T) {
+	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
+	q.bulk <- relay.Frame{Type: relay.FrameData, StreamID: 1}
 
 	done := make(chan bool, 1)
 	go func() {
-		done <- trySend(ch, relay.Frame{Type: relay.FrameData, StreamID: 2})
+		done <- q.send(context.Background(), relay.Frame{Type: relay.FrameData, StreamID: 2}, true)
 	}()
-
 	select {
 	case ok := <-done:
-		t.Fatalf("trySend returned %v before queue space was available", ok)
+		t.Fatalf("send returned %v with full bulk queue", ok)
 	case <-time.After(20 * time.Millisecond):
 	}
-
-	<-ch
+	q.close()
 	select {
 	case ok := <-done:
-		if !ok {
-			t.Fatal("trySend returned false after queue space was available")
+		if ok {
+			t.Fatal("send returned true after owner closed")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("trySend did not send after queue space was available")
-	}
-
-	got := <-ch
-	if got.StreamID != 2 {
-		t.Fatalf("stream id = %d", got.StreamID)
+		t.Fatal("send did not return after owner closed")
 	}
 }
 

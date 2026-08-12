@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -50,9 +49,10 @@ const (
 	wsWriteTimeout      = 10 * time.Second
 	openRequestTimeout  = 30 * time.Second
 	sessionStartupGrace = 150 * time.Millisecond
-	outputFlushInterval = 8 * time.Millisecond
 	maxOutputFrameBytes = 16 * 1024
 )
+
+var errProtocolVersion = errors.New("relay protocol version mismatch")
 
 var (
 	tmuxListSessions  = tmux.ListSessions
@@ -153,10 +153,16 @@ func unlock(database *gorm.DB, password string) (*security.MasterKeyManager, err
 }
 
 func runLoop(ctx context.Context, rt *runtimeConfig) error {
+	mgr := newSessionManager()
+	defer mgr.closeAll()
+	go mgr.reapLoop(ctx)
 	delay := 2 * time.Second
 	for {
 		start := time.Now()
-		if err := runOnce(ctx, rt); err != nil {
+		if err := runOnce(ctx, rt, mgr); err != nil {
+			if errors.Is(err, errProtocolVersion) {
+				return err
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -180,7 +186,7 @@ func runLoop(ctx context.Context, rt *runtimeConfig) error {
 	}
 }
 
-func runOnce(ctx context.Context, rt *runtimeConfig) error {
+func runOnce(ctx context.Context, rt *runtimeConfig, mgr *sessionManager) error {
 	serverURL := rt.sync.ServerURL
 	insecureTLS := rt.sync.InsecureTLS
 	if rt.sync.Mode == "ssh" {
@@ -206,23 +212,18 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 	defer stopKeepalive()
 	wskeepalive.Start(keepaliveCtx, c, wsKeepaliveInterval, wsKeepaliveTimeout)
 
-	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: rt.name, Version: 1})
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: rt.name, Version: relay.ProtocolVersion})
 	if err := c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
 		return err
 	}
 	log.Printf("eterm daemon relay registered peer=%s tenant=%s", rt.peerID, shortID(rt.tenantID))
 
-	var writeMu sync.Mutex
-	var sessionsMu sync.Mutex
-	sessions := map[uint32]*internalssh.InteractiveSession{}
-	defer closeSessions(&sessionsMu, sessions)
-	writeFrame := func(f relay.Frame) error {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-		wctx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
-		defer cancel()
-		return c.Write(wctx, websocket.MessageBinary, relay.Encode(f))
-	}
+	connCtx, cancelConn := context.WithCancel(ctx)
+	defer cancelConn()
+	sender := newFrameSender()
+	mgr.setSender(sender)
+	defer mgr.clearSender(sender)
+	go sender.run(connCtx, c)
 
 	for {
 		typ, data, err := c.Read(ctx)
@@ -236,7 +237,10 @@ func runOnce(ctx context.Context, rt *runtimeConfig) error {
 		if err != nil {
 			continue
 		}
-		handleFrame(rt, f, &sessionsMu, sessions, writeFrame, ctx)
+		if f.Type == relay.FrameHelloErr {
+			return fmt.Errorf("%w: %s", errProtocolVersion, f.Payload)
+		}
+		handleFrame(rt, f, mgr, sender, ctx)
 	}
 }
 
@@ -247,80 +251,71 @@ func shortID(s string) string {
 	return s[:12]
 }
 
-func handleFrame(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, writeFrame func(relay.Frame) error, ctx context.Context) {
+func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *frameSender, ctx context.Context) {
 	switch f.Type {
 	case relay.FrameOpen:
-		if writeFrame == nil {
+		if sender == nil {
 			return
 		}
 		go func() {
 			reqCtx, cancel := context.WithTimeout(ctx, openRequestTimeout)
 			defer cancel()
-			handleOpen(rt, f, sessionsMu, sessions, writeFrame, reqCtx, ctx)
+			handleOpen(rt, f, mgr, sender, reqCtx, ctx)
 		}()
 	case relay.FrameData:
-		is := getSession(sessionsMu, sessions, f.StreamID)
-		if is != nil && is.Stdin != nil {
-			_, _ = is.Stdin.Write(f.Payload)
+		if sr := mgr.get(f.StreamID); sr != nil && sr.is.Stdin != nil {
+			_, _ = sr.is.Stdin.Write(f.Payload)
 		}
 	case relay.FrameResize:
 		rows, cols, err := relay.ParseResize(f.Payload)
 		if err == nil {
-			is := getSession(sessionsMu, sessions, f.StreamID)
-			if is != nil && is.Resize != nil {
-				_ = is.Resize(rows, cols)
+			if sr := mgr.get(f.StreamID); sr != nil && sr.is.Resize != nil {
+				_ = sr.is.Resize(rows, cols)
+			}
+		}
+	case relay.FrameAck:
+		ack, err := relay.ParseAck(f.Payload)
+		if err == nil {
+			if sr := mgr.get(f.StreamID); sr != nil {
+				sr.setAck(ack)
 			}
 		}
 	case relay.FrameClose:
-		if is := removeSession(sessionsMu, sessions, f.StreamID, nil); is != nil {
-			_ = is.Close()
+		if string(f.Payload) == relay.CloseClientDisconnected {
+			// The client connection dropped; keep the PTY for a later resume.
+			if sr := mgr.get(f.StreamID); sr != nil {
+				sr.markDetached()
+			}
+			return
+		}
+		if sr := mgr.remove(f.StreamID, nil); sr != nil {
+			sr.shutdown()
+			_ = sr.is.Close()
 		}
 	}
 }
 
-func closeSessions(mu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession) {
-	mu.Lock()
-	open := make([]*internalssh.InteractiveSession, 0, len(sessions))
-	for streamID, is := range sessions {
-		open = append(open, is)
-		delete(sessions, streamID)
-	}
-	mu.Unlock()
-	for _, is := range open {
-		_ = is.Close()
-	}
-}
+const resumeUnavailableErr = "resume unavailable"
 
-func getSession(mu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, streamID uint32) *internalssh.InteractiveSession {
-	mu.Lock()
-	defer mu.Unlock()
-	return sessions[streamID]
-}
-
-func setSession(mu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, streamID uint32, is *internalssh.InteractiveSession) {
-	mu.Lock()
-	sessions[streamID] = is
-	mu.Unlock()
-}
-
-func removeSession(mu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, streamID uint32, expected *internalssh.InteractiveSession) *internalssh.InteractiveSession {
-	mu.Lock()
-	defer mu.Unlock()
-	is := sessions[streamID]
-	if is == nil {
-		return nil
-	}
-	if expected != nil && is != expected {
-		return nil
-	}
-	delete(sessions, streamID)
-	return is
-}
-
-func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessions map[uint32]*internalssh.InteractiveSession, writeFrame func(relay.Frame) error, ctx context.Context, streamCtx context.Context) {
+func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *frameSender, ctx context.Context, streamCtx context.Context) {
 	var req relay.OpenRequest
 	if err := json.Unmarshal(f.Payload, &req); err != nil {
-		_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+		return
+	}
+	if sr := mgr.get(f.StreamID); sr != nil {
+		// Reconnect on an existing stream: replay retained output from the
+		// client's last consumed offset. OpenOK must reach the client before
+		// any replayed data, so attachForOpen holds the stream lock while
+		// queueing it.
+		openOK := relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}
+		if err := sr.attachForOpen(req.ResumeFromSeq, sender, openOK); err != nil {
+			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(resumeUnavailableErr)})
+		}
+		return
+	}
+	if req.ResumeFromSeq > 0 {
+		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(resumeUnavailableErr)})
 		return
 	}
 	rows, cols := req.Rows, req.Cols
@@ -329,106 +324,95 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, sessionsMu *sync.Mutex, sessio
 	if req.Target == relay.TargetTmuxList || req.Target == relay.TargetTmuxNew || req.Target == relay.TargetTmuxAttach || req.Target == relay.TargetTmuxKill || req.Target == relay.TargetTmuxRename {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
 		}
 		configFile, err = tmux.ResolveConfig(rt.db, config.ConfigDir(), home)
 		if err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 			return
 		}
+	}
+	openErr := func(err error) {
+		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+	}
+	// startStream registers the session, replies OpenOK, then starts the pump.
+	startStream := func(is *internalssh.InteractiveSession, okPayload []byte) {
+		sr := newStreamRelay(is)
+		mgr.add(f.StreamID, sr)
+		if err := sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: okPayload}); err != nil {
+			if mgr.remove(f.StreamID, sr) != nil {
+				sr.shutdown()
+				_ = is.Close()
+			}
+			return
+		}
+		go sr.pump(streamCtx, f.StreamID, mgr)
 	}
 	switch req.Target {
 	case relay.TargetTmuxList:
 		list, err := tmuxListSessions(ctx, configFile)
 		if err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
 		payload, _ := json.Marshal(list)
-		if writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: payload}) == nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
+		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: payload}) == nil {
+			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetTmuxNew:
 		is, name, err := tmuxNewSession(ctx, configFile, rows, cols)
 		if err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
 		if err := waitSessionStarted(is); err != nil {
 			_ = is.Close()
 			_ = tmuxKillSession(ctx, configFile, name)
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
-		setSession(sessionsMu, sessions, f.StreamID, is)
-		if err := writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: []byte(name)}); err != nil {
-			if removeSession(sessionsMu, sessions, f.StreamID, is) != nil {
-				_ = is.Close()
-			}
-			return
-		}
-		go pumpSession(streamCtx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
-			return removeSession(sessionsMu, sessions, streamID, is) != nil
-		})
+		startStream(is, []byte(name))
 	case relay.TargetTmuxAttach:
 		is, err := tmuxAttachSession(ctx, configFile, req.SessionID, rows, cols)
 		if err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
 		if err := waitSessionStarted(is); err != nil {
 			_ = is.Close()
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
-		setSession(sessionsMu, sessions, f.StreamID, is)
-		if err := writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}); err != nil {
-			if removeSession(sessionsMu, sessions, f.StreamID, is) != nil {
-				_ = is.Close()
-			}
-			return
-		}
-		go pumpSession(streamCtx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
-			return removeSession(sessionsMu, sessions, streamID, is) != nil
-		})
+		startStream(is, nil)
 	case relay.TargetTmuxKill:
 		if err := tmuxKillSession(ctx, configFile, req.SessionID); err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
-		if writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
+		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
+			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetTmuxRename:
 		if err := tmuxRenameSession(ctx, configFile, req.SessionID, req.Name); err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
-		if writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
+		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
+			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	default:
 		is, err := openTarget(rt, req, rows, cols)
 		if err != nil {
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
 		if err := waitSessionStarted(is); err != nil {
 			_ = is.Close()
-			_ = writeFrame(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
+			openErr(err)
 			return
 		}
-		setSession(sessionsMu, sessions, f.StreamID, is)
-		if err := writeFrame(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}); err != nil {
-			if removeSession(sessionsMu, sessions, f.StreamID, is) != nil {
-				_ = is.Close()
-			}
-			return
-		}
-		go pumpSession(streamCtx, f.StreamID, is, writeFrame, func(streamID uint32, is *internalssh.InteractiveSession) bool {
-			return removeSession(sessionsMu, sessions, streamID, is) != nil
-		})
+		startStream(is, nil)
 	}
 }
 
@@ -497,103 +481,6 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 	}
 	is.SetClosers(res.Closers)
 	return is, nil
-}
-
-func pumpSession(ctx context.Context, streamID uint32, is *internalssh.InteractiveSession, writeFrame func(relay.Frame) error, cleanup func(uint32, *internalssh.InteractiveSession) bool) {
-	stopRead := make(chan struct{})
-	chunks, readDone := readSessionOutput(is.Stdout, stopRead)
-	var closeErr error
-	var pending []byte
-	var flushC <-chan time.Time
-	var flushTimer *time.Timer
-	stopFlushTimer := func() {
-		if flushTimer == nil {
-			return
-		}
-		if !flushTimer.Stop() {
-			select {
-			case <-flushTimer.C:
-			default:
-			}
-		}
-		flushTimer = nil
-		flushC = nil
-	}
-	flush := func() bool {
-		if len(pending) == 0 {
-			return true
-		}
-		payload := pending
-		pending = nil
-		stopFlushTimer()
-		if err := writeFrame(relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: payload}); err != nil {
-			closeErr = err
-			return false
-		}
-		return true
-	}
-	startFlushTimer := func() {
-		if flushTimer != nil || len(pending) == 0 {
-			return
-		}
-		flushTimer = time.NewTimer(outputFlushInterval)
-		flushC = flushTimer.C
-	}
-	for closeErr == nil {
-		select {
-		case <-ctx.Done():
-			closeErr = ctx.Err()
-		case closeErr = <-is.Done:
-		case chunk, ok := <-chunks:
-			if !ok {
-				_ = flush()
-				closeErr = sessionDoneErr(<-readDone, is.Done)
-				break
-			}
-			pending = append(pending, chunk...)
-			if len(pending) >= maxOutputFrameBytes {
-				_ = flush()
-				break
-			}
-			startFlushTimer()
-		case <-flushC:
-			_ = flush()
-		}
-	}
-	_ = flush()
-	stopFlushTimer()
-	close(stopRead)
-	if cleanup == nil || cleanup(streamID, is) {
-		_ = is.Close()
-		_ = writeFrame(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: closePayload(closeErr)})
-	}
-}
-
-func readSessionOutput(stdout io.Reader, stop <-chan struct{}) (<-chan []byte, <-chan error) {
-	chunks := make(chan []byte, 128)
-	done := make(chan error, 1)
-	go func() {
-		defer close(chunks)
-		buf := make([]byte, 8192)
-		for {
-			n, err := stdout.Read(buf)
-			if n > 0 {
-				payload := make([]byte, n)
-				copy(payload, buf[:n])
-				select {
-				case chunks <- payload:
-				case <-stop:
-					done <- nil
-					return
-				}
-			}
-			if err != nil {
-				done <- err
-				return
-			}
-		}
-	}()
-	return chunks, done
 }
 
 func sessionDoneErr(readErr error, sessionDone <-chan error) error {

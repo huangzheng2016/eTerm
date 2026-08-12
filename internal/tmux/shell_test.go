@@ -80,7 +80,7 @@ func TestNewSessionCleansUpWhenAttachFails(t *testing.T) {
 	created := ""
 	killed := ""
 	runTmuxCmd = func(ctx context.Context, op string, args []string) error {
-		if op == "new-session" && len(args) == 6 {
+		if op == "new-session" && len(args) >= 6 {
 			created = args[5]
 		}
 		return nil

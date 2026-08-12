@@ -17,6 +17,8 @@ import (
 var (
 	remoteOpenWithProgress            = remote.OpenWithProgress
 	remoteOpenTmuxSessionWithProgress = remote.OpenTmuxSessionWithProgress
+	remoteResumeOpenWithProgress      = remote.ResumeOpenWithProgress
+	remoteResumeInfo                  = remote.ResumeInfo
 	remoteListTmuxSessions            = remote.ListTmuxSessions
 	remoteKillTmuxSession             = remote.KillTmuxSession
 	remoteRenameTmuxSession           = remote.RenameTmuxSession
@@ -138,6 +140,12 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 			sm.SetReconnecting(msg.Attempt, msg.MaxAttempts)
 		}
 	}
+	var relayStreamID uint32
+	var resumeSeq uint64
+	canResume := false
+	if sm, ok := a.tabs[idx].Model.(*sshview.Model); ok {
+		relayStreamID, resumeSeq, canResume = remoteResumeInfo(sm.Session())
+	}
 	title := a.tabs[idx].Title
 	cols, rows := ptyFromAppSizeForTab(a, SSHTab)
 	spec := msg.Spec
@@ -153,15 +161,29 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		defer close(progressCh)
 		baseURL, tunnel, err := a.syncHTTPBase(cfg)
 		var is *internalssh.InteractiveSession
+		resumed := false
 		if err == nil {
-			if spec.Tmux {
-				is, _, err = remoteOpenTmuxSessionWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.SessionID, rows, cols, func(stage remote.OpenStage) {
+			if canResume {
+				// Try to resume the relay stream first: the daemon replays
+				// retained output from resumeSeq and the tab keeps scrollback.
+				op := relay.OpenRequest{PeerID: spec.Peer.ID, Target: spec.Target, HostSyncID: spec.HostSyncID, SessionID: spec.SessionID, Rows: rows, Cols: cols}
+				ris, rerr := remoteResumeOpenWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, op, relayStreamID, resumeSeq, func(stage remote.OpenStage) {
 					progress(connectStageText(prefix, string(stage)))
 				})
-			} else {
-				is, err = remoteOpenWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
-					progress(connectStageText(prefix, string(stage)))
-				})
+				if rerr == nil {
+					is, resumed = ris, true
+				}
+			}
+			if !resumed {
+				if spec.Tmux {
+					is, _, err = remoteOpenTmuxSessionWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.SessionID, rows, cols, func(stage remote.OpenStage) {
+						progress(connectStageText(prefix, string(stage)))
+					})
+				} else {
+					is, err = remoteOpenWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, spec.Peer.ID, spec.Target, spec.HostSyncID, rows, cols, func(stage remote.OpenStage) {
+						progress(connectStageText(prefix, string(stage)))
+					})
+				}
 			}
 		}
 		if err != nil {
@@ -181,7 +203,7 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		if spec.Target == relay.TargetLocal {
 			tabType = LocalTab
 		}
-		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy, background: msg.Auto}
+		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy, background: msg.Auto, resume: resumed}
 	})
 }
 
@@ -268,6 +290,17 @@ func remoteTmuxTabTitle(peerName, sessionID string) string {
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
+	if msg.resume && msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
+		if old, ok := a.tabs[msg.replaceTabAt].Model.(*sshview.Model); ok {
+			cmd := old.ResumeSession(msg.is)
+			if !msg.background {
+				a.activeTab = msg.replaceTabAt
+			}
+			a.syncTabBar()
+			a.persistTmuxRestoreSnapshot()
+			return a, tea.Batch(cmd, reflowWindow(a))
+		}
+	}
 	sv := sshview.New(msg.is, msg.title, 0, BuildSSHKeys(a.kbConfig))
 	source := "remote"
 	if msg.reconnect != nil && msg.reconnect.Tmux {

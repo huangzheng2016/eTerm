@@ -57,3 +57,33 @@ func TestOpenOKCarriesPayload(t *testing.T) {
 		t.Fatalf("round-trip mismatch: %+v", out)
 	}
 }
+
+func TestDataPayloadRoundTrip(t *testing.T) {
+	payload := DataPayload(1<<40+3, []byte("hello"))
+	seq, data, err := ParseData(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 1<<40+3 || string(data) != "hello" {
+		t.Fatalf("got seq=%d data=%q", seq, data)
+	}
+}
+
+func TestParseDataRejectsShortPayload(t *testing.T) {
+	if _, _, err := ParseData([]byte("abc")); err == nil {
+		t.Fatal("expected short data payload error")
+	}
+}
+
+func TestAckPayloadRoundTrip(t *testing.T) {
+	ack, err := ParseAck(AckPayload(262144))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack != 262144 {
+		t.Fatalf("got ack=%d", ack)
+	}
+	if _, err := ParseAck([]byte("abc")); err == nil {
+		t.Fatal("expected short ack payload error")
+	}
+}

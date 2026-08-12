@@ -6,9 +6,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -33,11 +35,14 @@ type wsStdin struct {
 	conn     *websocket.Conn
 	streamID uint32
 	mu       sync.Mutex
+	nextSeq  atomic.Uint64 // next daemon output offset expected (consumed so far)
+	lastAck  atomic.Uint64 // last offset acked to the daemon
 }
 
 const (
 	wsKeepaliveInterval = 25 * time.Second
 	wsKeepaliveTimeout  = 5 * time.Second
+	ackThresholdBytes   = 128 * 1024
 )
 
 func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
@@ -45,11 +50,37 @@ func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS boo
 }
 
 func OpenWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, error) {
-	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols}, progress)
+	conn, streamID, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, HostSyncID: hostSyncID, Rows: rows, Cols: cols}, randomStreamID(), progress)
 	if err != nil {
 		return nil, err
 	}
-	return sessionFromConn(ctx, conn, streamID, rows, cols), nil
+	return sessionFromConn(ctx, conn, streamID, rows, cols, 0), nil
+}
+
+// ResumeOpenWithProgress reopens streamID asking the daemon to replay output
+// from resumeFromSeq (the client's next expected offset). It fails with the
+// daemon's OpenErr when the stream or the retained offset is gone; callers
+// should fall back to a fresh open.
+func ResumeOpenWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, streamID uint32, resumeFromSeq uint64, progress ProgressFunc) (*internalssh.InteractiveSession, error) {
+	op.ResumeFromSeq = resumeFromSeq
+	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, op, streamID, progress)
+	if err != nil {
+		return nil, err
+	}
+	return sessionFromConn(ctx, conn, streamID, op.Rows, op.Cols, resumeFromSeq), nil
+}
+
+// ResumeInfo reports the relay stream and the next expected output offset for
+// a relay-backed session, for use with ResumeOpenWithProgress.
+func ResumeInfo(is *internalssh.InteractiveSession) (streamID uint32, nextSeq uint64, ok bool) {
+	if is == nil {
+		return 0, 0, false
+	}
+	w, isWS := is.Stdin.(*wsStdin)
+	if !isWS {
+		return 0, 0, false
+	}
+	return w.streamID, w.nextSeq.Load(), true
 }
 
 func OpenTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
@@ -57,11 +88,11 @@ func OpenTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, inse
 }
 
 func OpenTmuxSessionWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, string, error) {
-	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, SessionID: sessionID, Rows: rows, Cols: cols}, progress)
+	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, SessionID: sessionID, Rows: rows, Cols: cols}, randomStreamID(), progress)
 	if err != nil {
 		return nil, "", err
 	}
-	return sessionFromConn(ctx, conn, streamID, rows, cols), string(okPayload), nil
+	return sessionFromConn(ctx, conn, streamID, rows, cols, 0), string(okPayload), nil
 }
 
 func ListTmuxSessions(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.TmuxSessionInfo, error) {
@@ -83,7 +114,7 @@ func RenameTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, in
 }
 
 func openControl(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest) ([]byte, error) {
-	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, op, nil)
+	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, op, randomStreamID(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +133,12 @@ func ParseTmuxSessionList(payload []byte) ([]relay.TmuxSessionInfo, error) {
 	return out, nil
 }
 
-func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
+func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, streamID uint32, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
 	ctx, cancel := openTimeoutContext(ctx)
 	defer cancel()
 
 	for {
-		conn, streamID, payload, err := openStreamOnce(ctx, serverURL, apiKey, tenant, insecureTLS, op, progress)
+		conn, payload, err := openStreamOnce(ctx, serverURL, apiKey, tenant, insecureTLS, op, streamID, progress)
 		if !isPeerOffline(err) {
 			return conn, streamID, payload, err
 		}
@@ -119,7 +150,7 @@ func openStream(ctx context.Context, serverURL, apiKey, tenant string, insecureT
 	}
 }
 
-func openStreamOnce(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, progress ProgressFunc) (*websocket.Conn, uint32, []byte, error) {
+func openStreamOnce(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, streamID uint32, progress ProgressFunc) (*websocket.Conn, []byte, error) {
 	header := http.Header{}
 	if apiKey != "" {
 		header.Set("Authorization", "Bearer "+apiKey)
@@ -130,35 +161,46 @@ func openStreamOnce(ctx context.Context, serverURL, apiKey, tenant string, insec
 	reportOpenProgress(progress, OpenStageConnect)
 	conn, err := esync.DialWebSocket(ctx, esync.WSURLCandidates(serverURL, "/api/v1/ws/client"), header, insecureTLS)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, nil, err
 	}
-	streamID := randomStreamID()
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "client", Version: relay.ProtocolVersion})
+	if err := writeFrame(ctx, conn, relay.Frame{Type: relay.FrameHello, Payload: hello}); err != nil {
+		conn.CloseNow()
+		return nil, nil, err
+	}
 	payload, _ := json.Marshal(op)
 	reportOpenProgress(progress, OpenStageRequest)
 	if err := writeFrame(ctx, conn, relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload}); err != nil {
 		conn.CloseNow()
-		return nil, 0, nil, err
+		return nil, nil, err
 	}
 	reportOpenProgress(progress, OpenStageReply)
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
 			conn.CloseNow()
-			return nil, 0, nil, err
+			return nil, nil, err
 		}
 		if typ != websocket.MessageBinary {
 			continue
 		}
 		f, err := relay.Decode(data)
-		if err != nil || f.StreamID != streamID {
+		if err != nil {
+			continue
+		}
+		if f.Type == relay.FrameHelloErr {
+			conn.CloseNow()
+			return nil, nil, fmt.Errorf("relay protocol rejected: %s", string(f.Payload))
+		}
+		if f.StreamID != streamID {
 			continue
 		}
 		if f.Type == relay.FrameOpenErr {
 			conn.CloseNow()
-			return nil, 0, nil, errors.New(string(f.Payload))
+			return nil, nil, errors.New(string(f.Payload))
 		}
 		if f.Type == relay.FrameOpenOK {
-			return conn, streamID, f.Payload, nil
+			return conn, f.Payload, nil
 		}
 	}
 }
@@ -191,13 +233,15 @@ func writeTimeoutContext(ctx context.Context) (context.Context, context.CancelFu
 	return context.WithTimeout(ctx, defaultWriteTimeout)
 }
 
-func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int) *internalssh.InteractiveSession {
+func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32, rows, cols int, resumeFromSeq uint64) *internalssh.InteractiveSession {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
 	done := make(chan error, 1)
 	keepaliveCtx, stopKeepalive := context.WithCancel(sessionCtx)
 	wskeepalive.Start(keepaliveCtx, conn, wsKeepaliveInterval, wsKeepaliveTimeout)
 	stdin := &wsStdin{ctx: sessionCtx, conn: conn, streamID: streamID}
+	stdin.nextSeq.Store(resumeFromSeq)
+	stdin.lastAck.Store(resumeFromSeq)
 	is := &internalssh.InteractiveSession{
 		Stdin:  stdin,
 		Stdout: pr,
@@ -228,12 +272,36 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 			}
 			switch f.Type {
 			case relay.FrameData:
-				if len(f.Payload) > 0 {
+				seq, payload, err := relay.ParseData(f.Payload)
+				if err != nil {
+					continue
+				}
+				next := stdin.nextSeq.Load()
+				if seq < next {
+					// Stale or duplicated segment (e.g. mixed with a replay);
+					// the daemon resends anything still needed.
+					continue
+				}
+				if seq > next {
+					// Output gap: the byte stream is unrecoverable locally.
+					// Fail the session so the caller reconnects and resumes.
+					done <- fmt.Errorf("relay output gap: got seq %d, want %d", seq, next)
+					return
+				}
+				if len(payload) > 0 {
 					sawData = true
 				}
-				if _, err := pw.Write(f.Payload); err != nil {
+				if _, err := pw.Write(payload); err != nil {
 					done <- err
 					return
+				}
+				next = seq + uint64(len(payload))
+				stdin.nextSeq.Store(next)
+				if next-stdin.lastAck.Load() >= ackThresholdBytes {
+					stdin.lastAck.Store(next)
+					stdin.mu.Lock()
+					_ = writeFrame(sessionCtx, conn, relay.Frame{Type: relay.FrameAck, StreamID: streamID, Payload: relay.AckPayload(next)})
+					stdin.mu.Unlock()
 				}
 			case relay.FrameClose:
 				if len(f.Payload) > 0 {

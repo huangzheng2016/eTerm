@@ -4,8 +4,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
 type PeerInfo struct {
@@ -16,7 +14,7 @@ type PeerInfo struct {
 
 type PeerConn struct {
 	PeerInfo
-	Send chan relay.Frame
+	Send *laneQueue
 }
 
 type PeerRegistry struct {
@@ -28,7 +26,7 @@ func NewPeerRegistry() *PeerRegistry {
 	return &PeerRegistry{tenants: make(map[string]map[string]*PeerConn)}
 }
 
-func (r *PeerRegistry) Register(tenant string, p PeerInfo, send chan relay.Frame) string {
+func (r *PeerRegistry) Register(tenant string, p PeerInfo, send *laneQueue) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.tenants[tenant] == nil {
@@ -53,7 +51,7 @@ func (r *PeerRegistry) Unregister(tenant, id string) {
 	}
 }
 
-func (r *PeerRegistry) UnregisterConn(tenant, id string, send chan relay.Frame) {
+func (r *PeerRegistry) UnregisterConn(tenant, id string, send *laneQueue) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.tenants[tenant] == nil {

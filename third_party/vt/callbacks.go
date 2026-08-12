@@ -53,6 +53,15 @@ type Callbacks struct {
 	// current working directory changes.
 	WorkingDirectory func(string)
 
+	// CommandStart callback. When set, this function is called when the shell
+	// reports the start of command execution (OSC 133;C).
+	CommandStart func()
+
+	// CommandEnd callback. When set, this function is called when the shell
+	// reports the end of a command (OSC 133;D). exitCode is -1 when the shell
+	// did not report one.
+	CommandEnd func(exitCode int)
+
 	// EnableMode callback. When set, this function is called when a mode is
 	// enabled.
 	EnableMode func(mode ansi.Mode)

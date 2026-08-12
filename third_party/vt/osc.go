@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"image/color"
 	"io"
+	"strconv"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -121,6 +122,39 @@ func (e *Emulator) handleWorkingDirectory(cmd int, data []byte) {
 
 	if e.cb.WorkingDirectory != nil {
 		e.cb.WorkingDirectory(path)
+	}
+}
+
+// handleCommandSequence handles OSC 133 shell command lifecycle markers.
+// A = prompt start, B = input start, C = command execution start,
+// D;<exitcode> = command finished.
+func (e *Emulator) handleCommandSequence(cmd int, data []byte) {
+	if cmd != 133 {
+		// Invalid, ignore
+		return
+	}
+
+	parts := bytes.Split(data, []byte{';'})
+	if len(parts) < 2 || len(parts[1]) == 0 {
+		// Invalid, ignore
+		return
+	}
+
+	switch parts[1][0] {
+	case 'C': // Command execution starts
+		if e.cb.CommandStart != nil {
+			e.cb.CommandStart()
+		}
+	case 'D': // Command finished
+		exitCode := -1
+		if len(parts) >= 3 {
+			if n, err := strconv.Atoi(string(parts[2])); err == nil {
+				exitCode = n
+			}
+		}
+		if e.cb.CommandEnd != nil {
+			e.cb.CommandEnd(exitCode)
+		}
 	}
 }
 

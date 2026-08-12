@@ -3,15 +3,13 @@ package syncd
 import (
 	"testing"
 	"time"
-
-	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
 func TestPeerRegistryListSortedByTenant(t *testing.T) {
 	r := NewPeerRegistry()
-	r.Register("tenant-a", PeerInfo{ID: "2", Name: "beta", LastSeen: time.Unix(2, 0)}, make(chan relay.Frame, 1))
-	r.Register("tenant-a", PeerInfo{ID: "1", Name: "alpha", LastSeen: time.Unix(1, 0)}, make(chan relay.Frame, 1))
-	r.Register("tenant-b", PeerInfo{ID: "3", Name: "aardvark", LastSeen: time.Unix(3, 0)}, make(chan relay.Frame, 1))
+	r.Register("tenant-a", PeerInfo{ID: "2", Name: "beta", LastSeen: time.Unix(2, 0)}, newLaneQueue())
+	r.Register("tenant-a", PeerInfo{ID: "1", Name: "alpha", LastSeen: time.Unix(1, 0)}, newLaneQueue())
+	r.Register("tenant-b", PeerInfo{ID: "3", Name: "aardvark", LastSeen: time.Unix(3, 0)}, newLaneQueue())
 
 	got := r.List("tenant-a")
 	if len(got) != 2 {
@@ -24,7 +22,7 @@ func TestPeerRegistryListSortedByTenant(t *testing.T) {
 
 func TestPeerRegistryUnregister(t *testing.T) {
 	r := NewPeerRegistry()
-	id := r.Register("tenant-a", PeerInfo{ID: "1", Name: "alpha"}, make(chan relay.Frame, 1))
+	id := r.Register("tenant-a", PeerInfo{ID: "1", Name: "alpha"}, newLaneQueue())
 	r.Unregister("tenant-a", "1")
 
 	if len(r.List("tenant-a")) != 0 {
@@ -40,8 +38,8 @@ func TestPeerRegistryUnregister(t *testing.T) {
 
 func TestPeerRegistryReplacesDuplicatePeerID(t *testing.T) {
 	r := NewPeerRegistry()
-	firstSend := make(chan relay.Frame, 1)
-	secondSend := make(chan relay.Frame, 1)
+	firstSend := newLaneQueue()
+	secondSend := newLaneQueue()
 	first := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, firstSend)
 	second := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, secondSend)
 

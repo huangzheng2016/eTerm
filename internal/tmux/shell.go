@@ -11,6 +11,7 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/google/uuid"
+	"github.com/huangzheng2016/eTerm/internal/shellintegr"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
@@ -37,7 +38,11 @@ func ListSessions(ctx context.Context, configFile string) ([]types.TmuxSession, 
 
 func NewSession(ctx context.Context, configFile string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
 	name := defaultSessionName()
-	if err := runTmuxCmd(ctx, "new-session", newSessionDetachedArgs(configFile, name)); err != nil {
+	newArgs := newSessionDetachedArgs(configFile, name)
+	if cmdStr, ok := shellintegr.TmuxCommand(); ok {
+		newArgs = append(newArgs, cmdStr)
+	}
+	if err := runTmuxCmd(ctx, "new-session", newArgs); err != nil {
 		return nil, "", err
 	}
 	is, err := attachTmuxSession(ctx, configFile, name, rows, cols)

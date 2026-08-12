@@ -143,6 +143,12 @@ type Model struct {
 
 	osc52Clipboard []string
 	recorder       *Recorder
+
+	// Command lifecycle from OSC 133 (set from emulator callbacks during Write).
+	cmdRunning   bool
+	cmdCount     int
+	lastExitCode int
+	hasExitCode  bool
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -233,6 +239,15 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		CursorVisibility: func(visible bool) {
 			m.cursorHidden = !visible
 		},
+		CommandStart: func() {
+			m.cmdRunning = true
+		},
+		CommandEnd: func(code int) {
+			m.cmdRunning = false
+			m.cmdCount++
+			m.lastExitCode = code
+			m.hasExitCode = true
+		},
 	})
 	// Drain the emulator's input pipe so internal writes (e.g. in-band resize
 	// responses) never block emu.Write(). Without this, vi/less freeze the app.
@@ -243,8 +258,10 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 			if err != nil {
 				return
 			}
-			if n > 0 && m.sess != nil && m.sess.Stdin != nil {
-				m.queueInput(buf[:n])
+			if n > 0 {
+				if sess := m.currentSession(); sess != nil && sess.Stdin != nil {
+					m.queueInput(buf[:n])
+				}
 			}
 		}
 	}()
@@ -253,10 +270,9 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 
 func (m *Model) startInputWriter() {
 	ch := m.inputCh
-	sess := m.sess
 	go func() {
 		for b := range ch {
-			if sess != nil && sess.Stdin != nil {
+			if sess := m.currentSession(); sess != nil && sess.Stdin != nil {
 				_, _ = sess.Stdin.Write(b)
 			}
 		}
@@ -265,14 +281,19 @@ func (m *Model) startInputWriter() {
 
 func (m *Model) startResizeWriter() {
 	ch := m.resizeCh
-	sess := m.sess
 	go func() {
 		for req := range ch {
-			if sess != nil && sess.Resize != nil {
+			if sess := m.currentSession(); sess != nil && sess.Resize != nil {
 				_ = sess.Resize(req.rows, req.cols)
 			}
 		}
 	}()
+}
+
+func (m *Model) currentSession() *internalssh.InteractiveSession {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sess
 }
 
 func (m *Model) queueInput(p []byte) bool {
@@ -386,6 +407,20 @@ func (m *Model) ReplayRecordingEnabled() bool {
 	return m != nil && m.recorder != nil
 }
 
+// LastCommandExitCode returns the exit code of the last command reported via
+// OSC 133;D (-1 when the shell omitted it). ok is false before the first
+// command finishes.
+func (m *Model) LastCommandExitCode() (code int, ok bool) {
+	return m.lastExitCode, m.hasExitCode
+}
+
+// CommandCount returns how many commands have finished (OSC 133;D count).
+func (m *Model) CommandCount() int { return m.cmdCount }
+
+// CommandRunning reports whether a command is currently executing (between
+// OSC 133;C and OSC 133;D).
+func (m *Model) CommandRunning() bool { return m.cmdRunning }
+
 // PasteCommand writes a command string to the SSH session stdin.
 func (m *Model) PasteCommand(cmd string) {
 	if m.disconnected || m.sess == nil || m.sess.Stdin == nil {
@@ -396,6 +431,52 @@ func (m *Model) PasteCommand(cmd string) {
 
 func (m *Model) PasteText(text string) {
 	m.PasteCommand(text)
+}
+
+// Session returns the current session so the app layer can extract relay
+// resume state (stream id and consumed offset) after a disconnect.
+func (m *Model) Session() *internalssh.InteractiveSession { return m.currentSession() }
+
+// ResumeSession swaps in a resumed relay session, keeping the emulator and
+// its scrollback, and restarts the read plumbing. The replayed output is
+// re-fed to the emulator, restoring the visible state.
+func (m *Model) ResumeSession(is *internalssh.InteractiveSession) tea.Cmd {
+	m.mu.Lock()
+	oldCh := m.ch
+	m.sess = is
+	m.endErr = nil
+	m.waitComplete = false
+	m.closed = false
+	m.ch = make(chan []byte, 128)
+	m.doneClosed = make(chan struct{})
+	m.mu.Unlock()
+	// Render output that was acked but still queued in the old channel, so
+	// resuming from nextSeq loses nothing.
+drain:
+	for {
+		select {
+		case b, ok := <-oldCh:
+			if !ok {
+				break drain
+			}
+			if m.recorder != nil {
+				m.recorder.Output(b)
+			}
+			m.writeEmulator(b)
+		default:
+			break drain
+		}
+	}
+	m.disconnected = false
+	m.reconnecting = false
+	m.reconnectTry = 0
+	m.reconnectMax = 0
+	if m.width > 0 {
+		m.SetSize(m.width, m.height)
+	}
+	go m.readLoop()
+	go m.watchDone()
+	return waitChunk(m)
 }
 
 // Disconnected is true after a network-style drop; press "r" to send [types.SSHReconnectMsg].
@@ -484,44 +565,69 @@ func (m *Model) setWaitErr(err error) {
 
 func (m *Model) Init() tea.Cmd {
 	go m.readLoop()
-	go func() {
-		if m.sess == nil {
-			return
-		}
-		err := <-m.sess.Done
-		m.setWaitErr(err)
-		if m.doneClosed != nil {
-			close(m.doneClosed)
-		}
-	}()
+	go m.watchDone()
 	return waitChunk(m)
 }
 
+// watchDone waits for the current session to end. Init and ResumeSession each
+// start one; it captures the session and done channel at start and only
+// records the error if that session is still current.
+func (m *Model) watchDone() {
+	m.mu.Lock()
+	sess := m.sess
+	doneClosed := m.doneClosed
+	m.mu.Unlock()
+	if sess == nil {
+		return
+	}
+	err := <-sess.Done
+	m.mu.Lock()
+	current := m.sess == sess
+	m.mu.Unlock()
+	if current {
+		m.setWaitErr(err)
+	}
+	if doneClosed != nil {
+		close(doneClosed)
+	}
+}
+
 func (m *Model) readLoop() {
+	m.mu.Lock()
+	sess := m.sess
+	ch := m.ch
+	m.mu.Unlock()
+	if sess == nil || sess.Stdout == nil {
+		m.closeChFor(ch)
+		return
+	}
 	buf := make([]byte, 8192)
 	for {
-		if m.sess == nil || m.sess.Stdout == nil {
-			m.closeCh()
-			return
-		}
-		n, err := m.sess.Stdout.Read(buf)
+		n, err := sess.Stdout.Read(buf)
 		if n > 0 {
 			b := make([]byte, n)
 			copy(b, buf[:n])
-			m.ch <- b
+			ch <- b
 		}
 		if err != nil {
-			m.setReadErr(err)
-			m.closeCh()
+			m.mu.Lock()
+			current := m.sess == sess
+			m.mu.Unlock()
+			if current {
+				m.setReadErr(err)
+			}
+			m.closeChFor(ch)
 			return
 		}
 	}
 }
 
-func (m *Model) closeCh() {
+// closeChFor closes ch only if it is still the live chunk channel; a stale
+// readLoop from before a ResumeSession must not close the new channel.
+func (m *Model) closeChFor(ch chan []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed {
+	if m.closed || m.ch != ch {
 		return
 	}
 	m.closed = true
@@ -529,12 +635,25 @@ func (m *Model) closeCh() {
 }
 
 func waitChunk(m *Model) tea.Cmd {
+	// Capture the generation's channels under lock: ResumeSession replaces
+	// them, and an in-flight wait on a superseded channel must not leak or
+	// report a stale StreamDoneMsg.
+	m.mu.Lock()
+	ch := m.ch
+	doneClosed := m.doneClosed
+	m.mu.Unlock()
 	return func() tea.Msg {
-		b, ok := <-m.ch
+		b, ok := <-ch
 		if !ok {
-			if m.doneClosed != nil {
+			m.mu.Lock()
+			if m.ch != ch {
+				m.mu.Unlock()
+				return nil
+			}
+			m.mu.Unlock()
+			if doneClosed != nil {
 				select {
-				case <-m.doneClosed:
+				case <-doneClosed:
 				case <-time.After(250 * time.Millisecond):
 				}
 			}
@@ -543,7 +662,7 @@ func waitChunk(m *Model) tea.Cmd {
 			m.mu.Unlock()
 			return StreamDoneMsg{StreamID: m.streamID, Err: err}
 		}
-		data := coalesceQueuedChunks(m.ch, b)
+		data := coalesceQueuedChunks(ch, b)
 		if m.recorder != nil {
 			m.recorder.Output(data)
 		}
@@ -670,8 +789,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if shouldOfferReconnect(err) {
 			m.disconnected = true
 			if m.sess != nil {
+				// Keep the dead session around: the app layer reads relay
+				// resume state from it before opening the replacement.
 				_ = m.sess.Close()
-				m.sess = nil
 			}
 			if m.remote != nil && m.remote.Tmux {
 				m.SetReconnecting(1, remoteTmuxReconnectAttempts)

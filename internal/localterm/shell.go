@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/creack/pty"
+	"github.com/huangzheng2016/eTerm/internal/shellintegr"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 )
 
@@ -37,8 +38,9 @@ func DefaultShell(configured string) string {
 
 func NewSession(shell string, rows, cols int) (*internalssh.InteractiveSession, error) {
 	rows, cols = internalssh.NormalizePTYSize(rows, cols)
-	cmd := exec.Command(shell)
-	cmd.Env = internalssh.TerminalEnv(os.Environ())
+	args, env, _ := shellintegr.Wrap(shell)
+	cmd := exec.Command(shell, args...)
+	cmd.Env = append(internalssh.TerminalEnv(os.Environ()), env...)
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	if err != nil {
 		return nil, err

@@ -327,6 +327,12 @@ func (e *Emulator) registerDefaultOscHandlers() {
 		return true
 	})
 
+	e.RegisterOscHandler(133, func(data []byte) bool {
+		// Shell command lifecycle markers
+		e.handleCommandSequence(133, data)
+		return true
+	})
+
 	for _, cmd := range []int{
 		10,  // Set/Query foreground color
 		11,  // Set/Query background color
