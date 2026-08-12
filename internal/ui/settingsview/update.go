@@ -1,6 +1,7 @@
 package settingsview
 
 import (
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -16,9 +17,10 @@ const (
 	cursorGridStatus     = 1
 	cursorLocalShell     = 2
 	cursorTmuxConfigFile = 3
-	cursorReplaySessions = 4
-	cursorPassword       = 5
-	bindingCursorBase    = 6
+	cursorShareMaxHours  = 4
+	cursorReplaySessions = 5
+	cursorPassword       = 6
+	bindingCursorBase    = 7
 )
 
 func (m *Model) Init() tea.Cmd {
@@ -113,6 +115,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if li == cursorTmuxConfigFile {
 			return m.startTmuxConfigEdit()
 		}
+		if li == cursorShareMaxHours {
+			return m.startShareHoursEdit()
+		}
 		return m, nil
 
 	case tea.PasteMsg:
@@ -135,6 +140,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateTmuxConfig {
 			return m.handleTmuxConfigEdit(msg)
+		}
+		if m.state == stateShareHours {
+			return m.handleShareHoursEdit(msg)
 		}
 		if m.state == stateCapture || m.state == stateAppend {
 			if m.cursor < bindingCursorBase {
@@ -197,6 +205,9 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.cursor == cursorTmuxConfigFile {
 			return m.startTmuxConfigEdit()
 		}
+		if m.cursor == cursorShareMaxHours {
+			return m.startShareHoursEdit()
+		}
 		if m.cursor == cursorPassword {
 			return m.openPasswordOverlay()
 		}
@@ -223,6 +234,7 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.gridStatusWords = false
 		m.localTerminalShell = ""
 		m.tmuxConfigFile = ""
+		m.shareMaxHours = "4"
 		m.modified = true
 	case "esc":
 		return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
@@ -313,6 +325,40 @@ func (m *Model) handleTmuxConfigEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) startShareHoursEdit() (tea.Model, tea.Cmd) {
+	m.shareHoursInput.SetValue(m.shareMaxHours)
+	m.shareHoursInput.SetWidth(max(20, m.width-30))
+	m.shareHoursErr = ""
+	m.state = stateShareHours
+	return m, m.shareHoursInput.Focus()
+}
+
+func (m *Model) handleShareHoursEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "escape":
+		m.state = stateNormal
+		m.shareHoursErr = ""
+		m.shareHoursInput.Blur()
+		return m, nil
+	case "enter":
+		n, err := strconv.Atoi(strings.TrimSpace(m.shareHoursInput.Value()))
+		if err != nil || n < 1 || n > 168 {
+			m.shareHoursErr = "must be a number between 1 and 168"
+			return m, nil
+		}
+		m.shareMaxHours = strconv.Itoa(n)
+		m.shareHoursErr = ""
+		m.modified = true
+		m.state = stateNormal
+		m.shareHoursInput.Blur()
+		return m, nil
+	}
+	m.shareHoursErr = ""
+	var cmd tea.Cmd
+	m.shareHoursInput, cmd = m.shareHoursInput.Update(msg)
+	return m, cmd
+}
+
 func (m *Model) save() tea.Cmd {
 	database := m.db
 	configData := m.ConfigJSON()
@@ -330,6 +376,7 @@ func (m *Model) save() tea.Cmd {
 		captureMode = "replay"
 	}
 	tmuxConfigFile := strings.TrimSpace(m.tmuxConfigFile)
+	shareMaxHours := strings.TrimSpace(m.shareMaxHours)
 	return func() tea.Msg {
 		if err := db.SetSetting(database, "keybindings", string(configData)); err != nil {
 			return types.SettingsSavedMsg{Err: err}
@@ -347,6 +394,9 @@ func (m *Model) save() tea.Cmd {
 			return types.SettingsSavedMsg{Err: err}
 		}
 		if err := db.SetSetting(database, "tmux_config_file", tmuxConfigFile); err != nil {
+			return types.SettingsSavedMsg{Err: err}
+		}
+		if err := db.SetSetting(database, "share_max_hours", shareMaxHours); err != nil {
 			return types.SettingsSavedMsg{Err: err}
 		}
 		return types.SettingsSavedMsg{}

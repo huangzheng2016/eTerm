@@ -3,13 +3,17 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	"github.com/huangzheng2016/eTerm/internal/remote"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/syncshare"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
@@ -22,6 +26,7 @@ var (
 	remoteListTmuxSessions            = remote.ListTmuxSessions
 	remoteKillTmuxSession             = remote.KillTmuxSession
 	remoteRenameTmuxSession           = remote.RenameTmuxSession
+	syncshareCreate                   = syncshare.CreateShare
 )
 
 // syncHTTPBase returns the base URL for sync HTTP APIs. In SSH mode it opens
@@ -205,6 +210,49 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		}
 		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy, background: msg.Auto, resume: resumed}
 	})
+}
+
+type remoteShareLinkMsg struct {
+	url       string
+	expiresAt time.Time
+	label     string
+	err       error
+}
+
+func (a App) shareDefaultMaxHours() int {
+	if v, err := db.GetSetting(a.db, "share_max_hours"); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 1 && n <= 168 {
+			return n
+		}
+	}
+	return 4
+}
+
+func (a App) shareRemoteShell(msg types.RemoteShareSubmitMsg) (App, tea.Cmd) {
+	cfg := esync.LoadConfig(a.db, a.masterKey)
+	label := msg.Label
+	if label == "" {
+		label = msg.Peer.Name
+	}
+	if cfg.ServerURL == "" || cfg.APIKey == "" {
+		return a, func() tea.Msg {
+			return remoteShareLinkMsg{label: label, err: fmt.Errorf("sync server not configured")}
+		}
+	}
+	maxHours := msg.MaxHours
+	if maxHours < 1 || maxHours > 168 {
+		maxHours = 4
+	}
+	name := msg.Name
+	if name == "" {
+		name = msg.Peer.Name
+	}
+	peer := msg.Peer
+	target, sessionID := msg.Target, msg.SessionID
+	return a, func() tea.Msg {
+		url, expiresAt, err := syncshareCreate(context.Background(), cfg, peer.ID, name, maxHours, target, sessionID)
+		return remoteShareLinkMsg{url: url, expiresAt: expiresAt, label: label, err: err}
+	}
 }
 
 func (a App) loadRemoteTmuxSessions(peer types.RemotePeer) tea.Cmd {

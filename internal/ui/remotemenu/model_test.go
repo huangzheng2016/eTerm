@@ -244,6 +244,48 @@ func TestTmuxKillRequestsConfirmationAndKeepsMenu(t *testing.T) {
 	}
 }
 
+func TestShareKeyOnTmuxSessionEmitsAttachShare(t *testing.T) {
+	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})
+	m.cursor = 1
+	done, cmd := m.Update(keyText("s"))
+	if !done || cmd == nil {
+		t.Fatal("s on session should close menu and emit cmd")
+	}
+	msg := cmd().(types.RemoteShareMsg)
+	if msg.Peer.ID != "p1" || msg.Target != relay.TargetTmuxAttach || msg.SessionID != "work" || msg.Label != "work" {
+		t.Fatalf("bad share msg %+v", msg)
+	}
+}
+
+func TestShareKeyOnNewSessionEmitsLocalShare(t *testing.T) {
+	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})
+	m.cursor = 0
+	done, cmd := m.Update(keyText("s"))
+	if !done || cmd == nil {
+		t.Fatal("s on + New session should close menu and emit cmd")
+	}
+	msg := cmd().(types.RemoteShareMsg)
+	if msg.Target != "" || msg.SessionID != "" || msg.Label != "peer" {
+		t.Fatalf("bad share msg %+v", msg)
+	}
+}
+
+func TestShareKeyOnRelayTabEmitsLocalShare(t *testing.T) {
+	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, []types.RemoteHost{{Alias: "prod"}})
+	m.Update(keyMsg("tab"))
+	m.Update(keyMsg("down"))
+	done, cmd := m.Update(keyText("s"))
+	if !done || cmd == nil {
+		t.Fatal("s on relay tab should close menu and emit cmd")
+	}
+	msg := cmd().(types.RemoteShareMsg)
+	if msg.Target != "" || msg.SessionID != "" || msg.Label != "peer" {
+		t.Fatalf("bad share msg %+v", msg)
+	}
+}
+
 func keyMsg(s string) tea.KeyPressMsg {
 	switch s {
 	case "pgdown":

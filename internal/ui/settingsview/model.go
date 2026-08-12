@@ -2,6 +2,7 @@ package settingsview
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -20,6 +21,7 @@ const (
 	stateAppend               // waiting for user to press a key (appends)
 	stateShell                // editing local terminal shell
 	stateTmuxConfig           // editing tmux config file
+	stateShareHours           // editing share link max hours
 )
 
 // bindingEntry represents one configurable keybinding row.
@@ -48,6 +50,9 @@ type Model struct {
 	shellInput            textinput.Model
 	tmuxConfigFile        string
 	tmuxConfigInput       textinput.Model
+	shareMaxHours         string
+	shareHoursInput       textinput.Model
+	shareHoursErr         string
 	noPasswordMode        bool
 	pwd                   *passwordOverlay
 }
@@ -64,6 +69,7 @@ func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMo
 	m.gridStatusWords = loadGridStatusWords(database)
 	m.localTerminalShell = loadLocalTerminalShell(database)
 	m.tmuxConfigFile = loadTmuxConfigFile(database)
+	m.shareMaxHours = loadShareMaxHours(database)
 	ti := textinput.New()
 	ti.Placeholder = localterm.DefaultShell("")
 	ti.CharLimit = 512
@@ -71,6 +77,10 @@ func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMo
 	ti = textinput.New()
 	ti.CharLimit = 512
 	m.tmuxConfigInput = ti
+	ti = textinput.New()
+	ti.Placeholder = "4"
+	ti.CharLimit = 3
+	m.shareHoursInput = ti
 	return m
 }
 
@@ -113,6 +123,18 @@ func loadTmuxConfigFile(gdb *gorm.DB) string {
 		return ""
 	}
 	return s
+}
+
+func loadShareMaxHours(gdb *gorm.DB) string {
+	s, err := db.GetSetting(gdb, "share_max_hours")
+	if err != nil {
+		return "4"
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 1 || n > 168 {
+		return "4"
+	}
+	return strconv.Itoa(n)
 }
 
 func (m *Model) SetSize(w, h int) {

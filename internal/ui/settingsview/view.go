@@ -100,6 +100,22 @@ func tmuxConfigInputLine(value string, editing bool, input string, selected bool
 	return fmt.Sprintf("%s%s  %s", cursor, labelStyle.Render(label), keyStyle.Render(val))
 }
 
+func shareHoursInputLine(value string, editing bool, input string, selected bool) string {
+	cursor := "  "
+	if selected {
+		cursor = "> "
+	}
+	label := "Share link max hours"
+	val := value
+	if editing {
+		val = input
+	}
+	if selected {
+		return fmt.Sprintf("%s%s  %s", cursor, selectedStyle.Render(labelStyle.Render(label)), selectedStyle.Render(val))
+	}
+	return fmt.Sprintf("%s%s  %s", cursor, labelStyle.Render(label), keyStyle.Render(val))
+}
+
 func (m *Model) buildScrollLines() []scrollLine {
 	var out []scrollLine
 	out = append(out, scrollLine{catStyle.Render("  General"), -1})
@@ -118,6 +134,10 @@ func (m *Model) buildScrollLines() []scrollLine {
 	out = append(out, scrollLine{
 		tmuxConfigInputLine(m.tmuxConfigFile, m.state == stateTmuxConfig, m.tmuxConfigInput.View(), m.cursor == cursorTmuxConfigFile),
 		cursorTmuxConfigFile,
+	})
+	out = append(out, scrollLine{
+		shareHoursInputLine(m.shareMaxHours, m.state == stateShareHours, m.shareHoursInput.View(), m.cursor == cursorShareMaxHours),
+		cursorShareMaxHours,
 	})
 	out = append(out, scrollLine{
 		prefToggleLine("Record session replay", m.replaySessions, m.cursor == cursorReplaySessions),
@@ -187,6 +207,12 @@ func (m *Model) View() tea.View {
 		b.WriteString(captureStyle.Render("  Enter shell path...  (enter to accept, esc to cancel)") + "\n")
 	} else if m.state == stateTmuxConfig {
 		b.WriteString(captureStyle.Render("  Enter tmux config file...  (enter to accept, esc to cancel)") + "\n")
+	} else if m.state == stateShareHours {
+		hint := "  Enter share link max hours (1-168)...  (enter to accept, esc to cancel)"
+		if m.shareHoursErr != "" {
+			hint = "  " + m.shareHoursErr + "  (enter to accept, esc to cancel)"
+		}
+		b.WriteString(captureStyle.Render(hint) + "\n")
 	} else {
 		b.WriteString("\n")
 	}

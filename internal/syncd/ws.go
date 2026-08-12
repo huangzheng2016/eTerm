@@ -73,15 +73,19 @@ type relaySession struct {
 }
 
 type RelayHub struct {
-	peers    *PeerRegistry
-	mu       sync.Mutex
-	sessions map[uint32]relaySession
+	peers       *PeerRegistry
+	mu          sync.Mutex
+	sessions    map[uint32]relaySession
+	shareConns  map[string]chan struct{}
+	shareStates map[string]*shareStreamState
 }
 
 func NewRelayHub(peers *PeerRegistry) *RelayHub {
 	return &RelayHub{
-		peers:    peers,
-		sessions: make(map[uint32]relaySession),
+		peers:       peers,
+		sessions:    make(map[uint32]relaySession),
+		shareConns:  make(map[string]chan struct{}),
+		shareStates: make(map[string]*shareStreamState),
 	}
 }
 

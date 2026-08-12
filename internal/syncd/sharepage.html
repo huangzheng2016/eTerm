@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Name}} - eTerm share</title>
+<link rel="stylesheet" href="static/xterm.css">
+<style>
+html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13px/1.4 system-ui, sans-serif; }
+#bar { display: flex; gap: 16px; align-items: center; padding: 6px 10px; background: #111; }
+#bar .name { font-weight: 600; }
+#bar .meta { color: #888; }
+#term { height: calc(100% - 32px); padding: 4px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <span class="name">{{.Name}}</span>
+  <span class="meta" id="status">connecting</span>
+  <span class="meta" id="expires"></span>
+</div>
+<div id="term"></div>
+<script src="static/xterm.js"></script>
+<script src="static/xterm-addon-fit.js"></script>
+<script>
+(function () {
+  var token = "{{.Token}}";
+  var expiresAt = new Date("{{.ExpiresAt}}");
+  var statusEl = document.getElementById("status");
+  var expiresEl = document.getElementById("expires");
+
+  function pad(n) {
+    return String(n).padStart(2, "0");
+  }
+  function renderExpires() {
+    expiresEl.textContent = "expires " + expiresAt.getFullYear() + "-" + pad(expiresAt.getMonth() + 1) + "-" + pad(expiresAt.getDate()) +
+      " " + pad(expiresAt.getHours()) + ":" + pad(expiresAt.getMinutes()) + ":" + pad(expiresAt.getSeconds());
+  }
+  renderExpires();
+
+  var term = new Terminal({ cursorBlink: true });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("term"));
+  fit.fit();
+
+  var alive = true;
+  var retries = 0;
+  var ws;
+
+  function send(o) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(o));
+  }
+  function b64encode(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64decode(b64) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  function exited(reason) {
+    alive = false;
+    statusEl.textContent = "exited: " + reason;
+  }
+
+  function connect() {
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/x/" + token + "/ws");
+    ws.onopen = function () {
+      retries = 0;
+      statusEl.textContent = "connected";
+      send({ t: "resize", rows: term.rows, cols: term.cols });
+    };
+    ws.onmessage = function (ev) {
+      var m = JSON.parse(ev.data);
+      if (m.t === "out") {
+        term.write(b64decode(m.d));
+      } else if (m.t === "exit") {
+        exited(m.reason || "session closed");
+      }
+    };
+    ws.onclose = function () {
+      if (!alive) return;
+      if (Date.now() >= expiresAt.getTime()) {
+        alive = false;
+        statusEl.textContent = "disconnected";
+        return;
+      }
+      var delay = Math.min(10000, 1000 * Math.pow(2, retries));
+      retries++;
+      statusEl.textContent = "reconnecting...";
+      setTimeout(connect, delay);
+    };
+  }
+  connect();
+
+  term.onData(function (d) {
+    if (alive) send({ t: "in", d: b64encode(d) });
+  });
+
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      fit.fit();
+      if (alive) send({ t: "resize", rows: term.rows, cols: term.cols });
+    }, 150);
+  });
+})();
+</script>
+</body>
+</html>

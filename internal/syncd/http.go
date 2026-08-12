@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
 type syncRecordWire struct {
@@ -185,6 +187,97 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
+
+	mux.HandleFunc("POST /api/v1/shares", auth(func(w http.ResponseWriter, r *http.Request) {
+		tenant := r.Header.Get("X-ETerm-Tenant")
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		var body struct {
+			PeerID    string `json:"peer_id"`
+			Name      string `json:"name"`
+			MaxHours  int    `json:"max_hours"`
+			Target    string `json:"target"`
+			SessionID string `json:"session_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if name := []rune(body.Name); len(name) > 128 {
+			body.Name = string(name[:128])
+		}
+		if body.Target == "" {
+			body.Target = relay.TargetLocal
+		}
+		if body.Target != relay.TargetLocal && body.Target != relay.TargetTmuxAttach {
+			http.Error(w, "unsupported target", 400)
+			return
+		}
+		if body.Target == relay.TargetTmuxAttach && body.SessionID == "" {
+			http.Error(w, "session_id required for tmux-attach", 400)
+			return
+		}
+		if body.PeerID == "" {
+			http.Error(w, "peer_id required", 400)
+			return
+		}
+		if _, ok := peers.Get(tenant, body.PeerID); !ok {
+			http.Error(w, "peer offline", 400)
+			return
+		}
+		share, err := engine.CreateShare(tenant, body.PeerID, body.Name, body.Target, body.SessionID, body.MaxHours)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"url":        "/x/" + share.Token,
+			"expires_at": share.ExpiresAt,
+		})
+	}))
+
+	mux.HandleFunc("POST /api/v1/shares/{token}/renew", auth(func(w http.ResponseWriter, r *http.Request) {
+		share, err := engine.RenewShare(r.Header.Get("X-ETerm-Tenant"), r.PathValue("token"))
+		if err == ErrShareNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"expires_at": share.ExpiresAt,
+		})
+	}))
+
+	mux.HandleFunc("DELETE /api/v1/shares/{token}", auth(func(w http.ResponseWriter, r *http.Request) {
+		if err := engine.DeleteShare(r.Header.Get("X-ETerm-Tenant"), r.PathValue("token")); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	mux.HandleFunc("GET /x/{token}", func(w http.ResponseWriter, r *http.Request) {
+		share, err := engine.GetShareByToken(r.PathValue("token"))
+		if err == ErrShareNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeSharePage(w, share)
+	})
+
+	mux.HandleFunc("GET /x/static/xterm.js", writeShareStatic)
+	mux.HandleFunc("GET /x/static/xterm.css", writeShareStatic)
+	mux.HandleFunc("GET /x/static/xterm-addon-fit.js", writeShareStatic)
+
+	mux.HandleFunc("GET /x/{token}/ws", func(w http.ResponseWriter, r *http.Request) {
+		relayHub.shareWS(engine, w, r)
+	})
 
 	return mux
 }

@@ -92,6 +92,19 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, nil
 	}
 
+	if msg.Text == "s" {
+		share := types.RemoteShareMsg{Peer: m.Peer, Label: m.Peer.Name}
+		if m.tab == tabTmux && m.cursor > 0 && m.cursor <= len(m.sessions) {
+			session := m.sessions[m.cursor-1]
+			share.Target = relay.TargetTmuxAttach
+			share.SessionID = session.Name
+			share.Label = session.Name
+		}
+		return true, func() tea.Msg {
+			return share
+		}
+	}
+
 	if m.tab == tabTmux {
 		return m.updateTmux(msg)
 	}
@@ -228,7 +241,7 @@ func (m *Model) View() string {
 				rows = append(rows, "", ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, (len(m.sessions)+pageSize-1)/pageSize)))
 			}
 		}
-		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · enter open · r rename · d kill · R refresh · esc close"))
+		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · enter open · r rename · d kill · R refresh · s share session/link · esc close"))
 	} else {
 		if m.searching || m.query != "" {
 			prompt := "/" + m.query
@@ -251,7 +264,7 @@ func (m *Model) View() string {
 		if len(hosts) > pageSize {
 			rows = append(rows, "", ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, (len(hosts)+pageSize-1)/pageSize)))
 		}
-		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · / search · pgup/pgdown page · enter open · esc close"))
+		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · / search · pgup/pgdown page · enter open · s share link · esc close"))
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

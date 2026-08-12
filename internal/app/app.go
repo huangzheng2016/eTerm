@@ -8,6 +8,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
+	"github.com/huangzheng2016/eTerm/internal/ui/shareview"
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 
 	bubbleshelp "charm.land/bubbles/v2/help"
@@ -124,6 +125,7 @@ type App struct {
 	tmuxMenu   *tmuxmenu.Model
 
 	renamePrompt *sessionRenameModel
+	sharePrompt  *shareview.Model
 
 	connectProgressSeq uint64
 	tmuxRestoreSeq     uint64

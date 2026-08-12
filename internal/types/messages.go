@@ -109,6 +109,27 @@ type RemotePeerMenuMsg struct {
 	Hosts []RemoteHost
 }
 
+// RemoteShareMsg requests a temporary shell share link for the peer.
+// Target is empty (local new shell) or relay.TargetTmuxAttach with SessionID set;
+// Label describes what is shared, for the toast.
+type RemoteShareMsg struct {
+	Peer      RemotePeer
+	Target    string
+	SessionID string
+	Label     string
+}
+
+// RemoteShareSubmitMsg carries confirmed share parameters from the share prompt.
+// Name is the optional user note; empty falls back to the peer name.
+type RemoteShareSubmitMsg struct {
+	Peer      RemotePeer
+	Target    string
+	SessionID string
+	Label     string
+	Name      string
+	MaxHours  int
+}
+
 type RemoteShellOpenMsg struct {
 	Peer       RemotePeer
 	Target     string

@@ -106,6 +106,9 @@ func (a App) View() tea.View {
 		} else if a.renamePrompt != nil {
 			overlay := a.renamePrompt.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.sharePrompt != nil {
+			overlay := a.sharePrompt.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.remoteMenu != nil {
 			overlay := a.remoteMenu.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)

@@ -18,6 +18,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
 	"github.com/huangzheng2016/eTerm/internal/ui/settingsview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sftpview"
+	"github.com/huangzheng2016/eTerm/internal/ui/shareview"
 	"github.com/huangzheng2016/eTerm/internal/ui/snippetview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
@@ -49,6 +50,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.renamePrompt != nil {
 			a.renamePrompt.syncWidth(a.width)
+		}
+		if a.sharePrompt != nil {
+			a.sharePrompt.SetWidth(a.width)
 		}
 		if a.importHostList != nil {
 			a.importHostList.setPageSize(a.height)
@@ -190,6 +194,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			closed, cmd := a.renamePrompt.Update(msg)
 			if closed {
 				a.renamePrompt = nil
+			}
+			return a, cmd
+		}
+
+		if a.sharePrompt != nil {
+			closed, cmd := a.sharePrompt.Update(msg)
+			if closed {
+				a.sharePrompt = nil
 			}
 			return a, cmd
 		}
@@ -445,6 +457,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.renamePrompt.paste(msg)
 			return a, nil
 		}
+		if a.sharePrompt != nil {
+			a.sharePrompt.Paste(msg)
+			return a, nil
+		}
 		if a.batchTag != nil {
 			a.batchTag.paste(msg)
 			return a, nil
@@ -689,6 +705,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.RemoteShellOpenMsg:
 		return a.openRemoteShell(msg)
+
+	case types.RemoteShareMsg:
+		a.sharePrompt = shareview.New(msg.Peer, msg.Target, msg.SessionID, msg.Label, a.shareDefaultMaxHours())
+		a.sharePrompt.SetWidth(a.width)
+		return a, textinput.Blink
+
+	case types.RemoteShareSubmitMsg:
+		return a.shareRemoteShell(msg)
+
+	case remoteShareLinkMsg:
+		var tc tea.Cmd
+		if msg.err != nil {
+			a.toast, tc = a.toast.Show(fmt.Sprintf("Share failed: %v", msg.err), components.ToastError, 5*time.Second)
+			return a, tc
+		}
+		a.toast, tc = a.toast.Show(fmt.Sprintf("Link copied (%s), expires %s", msg.label, msg.expiresAt.Local().Format("2006-01-02 15:04")), components.ToastSuccess, 8*time.Second)
+		return a, tea.Batch(tc, tea.SetClipboard(msg.url))
 
 	case remoteTerminalOpenedMsg:
 		return a.applyRemoteTerminalOpened(msg)
