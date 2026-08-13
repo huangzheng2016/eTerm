@@ -7,10 +7,20 @@
 <link rel="stylesheet" href="static/xterm.css">
 <style>
 html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13px/1.4 system-ui, sans-serif; }
-#bar { display: flex; gap: 16px; align-items: center; padding: 6px 10px; background: #111; }
+#bar { display: flex; gap: 12px; align-items: center; padding: 6px 10px; background: #111; }
 #bar .name { font-weight: 600; }
 #bar .meta { color: #888; }
+#bar .spacer { flex: 1; }
+.btn { background: #222; color: #ccc; border: 1px solid #333; border-radius: 3px; padding: 4px 10px; font: inherit; cursor: pointer; }
+.btn.on { background: #3a4a5a; color: #fff; }
 #term { height: calc(100% - 32px); padding: 4px; box-sizing: border-box; }
+#keys { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 6px; padding: 6px; background: #111; border-top: 1px solid #333; overflow-x: auto; z-index: 20; }
+#keys .btn { min-width: 40px; padding: 8px 10px; flex: none; }
+#lockoverlay { position: fixed; left: 0; right: 0; bottom: 0; display: none; z-index: 25; background: transparent; touch-action: none; }
+#pastebg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); z-index: 30; }
+#pastebox { width: min(90%, 560px); background: #161616; border: 1px solid #333; border-radius: 4px; padding: 10px; }
+#pastetext { width: 100%; height: 40vh; box-sizing: border-box; background: #0d0d0d; color: #ccc; border: 1px solid #333; font: 13px/1.4 monospace; }
+#pastebox .row { margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -18,8 +28,23 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   <span class="name">{{.Name}}</span>
   <span class="meta" id="status">connecting</span>
   <span class="meta" id="expires"></span>
+  <span class="spacer"></span>
+  <button class="btn" id="btn-paste">Paste</button>
+  <button class="btn" id="btn-keys">Keys</button>
+  <button class="btn" id="btn-lock">Lock</button>
 </div>
 <div id="term"></div>
+<div id="keys"></div>
+<div id="lockoverlay"></div>
+<div id="pastebg">
+  <div id="pastebox">
+    <textarea id="pastetext" placeholder="paste text here"></textarea>
+    <div class="row">
+      <button class="btn" id="paste-cancel">Cancel</button>
+      <button class="btn" id="paste-send">Send</button>
+    </div>
+  </div>
+</div>
 <script src="static/xterm.js"></script>
 <script src="static/xterm-addon-fit.js"></script>
 <script>
@@ -47,9 +72,13 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   var alive = true;
   var retries = 0;
   var ws;
+  var bracketed = false;
 
   function send(o) {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(o));
+  }
+  function sendRaw(str) {
+    if (alive) send({ t: "in", d: b64encode(str) });
   }
   function b64encode(str) {
     var bytes = new TextEncoder().encode(str);
@@ -78,7 +107,14 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
     ws.onmessage = function (ev) {
       var m = JSON.parse(ev.data);
       if (m.t === "out") {
-        term.write(b64decode(m.d));
+        var bytes = b64decode(m.d);
+        var s = "";
+        for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        var h = s.lastIndexOf("\x1b[?2004h");
+        var l = s.lastIndexOf("\x1b[?2004l");
+        if (h > l) bracketed = true;
+        else if (l > h) bracketed = false;
+        term.write(bytes);
       } else if (m.t === "exit") {
         exited(m.reason || "session closed");
       }
@@ -98,17 +134,189 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   }
   connect();
 
+  // Ctrl/Alt latch: the next typed character is transformed once, then the
+  // latch releases. Tapping the key again cancels.
+  var ctrlLatch = false;
+  var altLatch = false;
+  var keyButtons = {};
+
+  function updateKeyButtons() {
+    keyButtons.Ctrl.classList.toggle("on", ctrlLatch);
+    keyButtons.Alt.classList.toggle("on", altLatch);
+  }
+
+  function sendInput(str) {
+    if (ctrlLatch || altLatch) {
+      var out = "";
+      for (var i = 0; i < str.length; i++) {
+        var ch = str.charAt(i);
+        if (ctrlLatch) {
+          out += String.fromCharCode(ch.charCodeAt(0) & 0x1f);
+        } else {
+          out += "\x1b" + ch;
+        }
+      }
+      ctrlLatch = false;
+      altLatch = false;
+      updateKeyButtons();
+      str = out;
+    }
+    sendRaw(str);
+  }
+
   term.onData(function (d) {
-    if (alive) send({ t: "in", d: b64encode(d) });
+    sendInput(d);
   });
 
+  // Extra keys bar.
+  var keysEl = document.getElementById("keys");
+  var keyDefs = [
+    { label: "Esc", data: "\x1b" },
+    { label: "Tab", data: "\t" },
+    { label: "Ctrl" },
+    { label: "Alt" },
+    { label: "←", data: "\x1b[D" },
+    { label: "↑", data: "\x1b[A" },
+    { label: "↓", data: "\x1b[B" },
+    { label: "→", data: "\x1b[C" },
+    { label: "Enter", data: "\r" }
+  ];
+  keyDefs.forEach(function (def) {
+    var b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = def.label;
+    // pointerdown + preventDefault keeps focus on xterm's hidden textarea,
+    // so the soft keyboard stays open.
+    b.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      if (def.label === "Ctrl") {
+        ctrlLatch = !ctrlLatch;
+        if (ctrlLatch) altLatch = false;
+        updateKeyButtons();
+      } else if (def.label === "Alt") {
+        altLatch = !altLatch;
+        if (altLatch) ctrlLatch = false;
+        updateKeyButtons();
+      } else {
+        sendRaw(def.data);
+      }
+    });
+    keyButtons[def.label] = b;
+    keysEl.appendChild(b);
+  });
+
+  var keysPref = localStorage.getItem("eterm-share-keys");
+  var coarse = matchMedia("(pointer: coarse)").matches;
+  if (keysPref === null) keysPref = coarse ? "1" : "0";
+  function setKeys(v) {
+    keysEl.style.display = v ? "flex" : "none";
+    localStorage.setItem("eterm-share-keys", v ? "1" : "0");
+    document.getElementById("btn-keys").classList.toggle("on", v);
+  }
+  setKeys(keysPref === "1");
+  document.getElementById("btn-keys").addEventListener("click", function () {
+    setKeys(keysEl.style.display !== "flex");
+  });
+
+  // Keep the keys bar on top of the soft keyboard.
+  function placeKeys() {
+    var vv = window.visualViewport;
+    if (!vv) return;
+    var bottom = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    keysEl.style.bottom = bottom + "px";
+  }
+
+  // Soft keyboard must not resize the terminal: only a width change
+  // (rotation, window management) triggers fit + resize.
+  var lastWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
   var resizeTimer;
-  window.addEventListener("resize", function () {
+  function scheduleFit() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
       fit.fit();
       if (alive) send({ t: "resize", rows: term.rows, cols: term.cols });
     }, 150);
+  }
+  function viewportChanged() {
+    placeKeys();
+    var vv = window.visualViewport;
+    var w = vv ? vv.width : window.innerWidth;
+    if (coarse && Math.abs(w - lastWidth) < 1) return;
+    lastWidth = w;
+    scheduleFit();
+  }
+  window.addEventListener("resize", viewportChanged);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", viewportChanged);
+    window.visualViewport.addEventListener("scroll", placeKeys);
+  }
+
+  // Input lock: a transparent overlay swallows all pointer events so the
+  // hidden textarea never gains focus and the soft keyboard never opens.
+  var barEl = document.getElementById("bar");
+  var lockEl = document.getElementById("lockoverlay");
+  var btnLock = document.getElementById("btn-lock");
+  var locked = localStorage.getItem("eterm-share-lock") === "1";
+  function setLock(v) {
+    locked = v;
+    localStorage.setItem("eterm-share-lock", v ? "1" : "0");
+    lockEl.style.top = barEl.offsetHeight + "px";
+    lockEl.style.display = v ? "block" : "none";
+    btnLock.textContent = v ? "Locked" : "Lock";
+    btnLock.classList.toggle("on", v);
+    if (v && document.activeElement) document.activeElement.blur();
+  }
+  setLock(locked);
+  btnLock.addEventListener("click", function () {
+    setLock(!locked);
+  });
+  lockEl.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+  });
+  var touchY = null;
+  lockEl.addEventListener("touchstart", function (e) {
+    touchY = e.touches[0].clientY;
+    e.preventDefault();
+  }, { passive: false });
+  lockEl.addEventListener("touchmove", function (e) {
+    var y = e.touches[0].clientY;
+    term.scrollLines(Math.round((touchY - y) / 20));
+    touchY = y;
+    e.preventDefault();
+  }, { passive: false });
+  lockEl.addEventListener("wheel", function (e) {
+    term.scrollLines(e.deltaY > 0 ? 3 : -3);
+    e.preventDefault();
+  }, { passive: false });
+
+  // Paste: batch input, wrapped in bracketed-paste markers when the remote
+  // side enabled them.
+  var pastebg = document.getElementById("pastebg");
+  var pastetext = document.getElementById("pastetext");
+  function openPaste() {
+    pastebg.style.display = "flex";
+    pastetext.focus();
+  }
+  function closePaste() {
+    pastebg.style.display = "none";
+    pastetext.value = "";
+    if (!locked) term.focus();
+  }
+  document.getElementById("btn-paste").addEventListener("click", openPaste);
+  document.getElementById("paste-cancel").addEventListener("click", closePaste);
+  pastebg.addEventListener("click", function (e) {
+    if (e.target === pastebg) closePaste();
+  });
+  pastetext.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closePaste();
+  });
+  document.getElementById("paste-send").addEventListener("click", function () {
+    var text = pastetext.value;
+    if (text) {
+      if (bracketed) text = "\x1b[200~" + text + "\x1b[201~";
+      sendRaw(text);
+    }
+    closePaste();
   });
 })();
 </script>
