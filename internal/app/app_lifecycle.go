@@ -389,6 +389,12 @@ func (a *App) processConfirmResult() tea.Cmd {
 
 func (a *App) finalizeTerminalSessions() {
 	for i := range a.tabs {
+		if a.tabs[i].Type == SFTPTab {
+			if closer, ok := a.tabs[i].Model.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+			continue
+		}
 		if !isTerminalTab(a.tabs[i].Type) {
 			continue
 		}

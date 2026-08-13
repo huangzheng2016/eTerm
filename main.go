@@ -17,6 +17,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/config"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/debugpprof"
+	"github.com/huangzheng2016/eTerm/internal/rlimit"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/login"
@@ -24,6 +25,7 @@ import (
 )
 
 func main() {
+	rlimit.Raise()
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println("eTerm " + version.Version + " (" + version.Commit + ")")
 		return

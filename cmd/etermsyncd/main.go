@@ -10,12 +10,14 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/debugpprof"
+	"github.com/huangzheng2016/eTerm/internal/rlimit"
 	"github.com/huangzheng2016/eTerm/internal/syncd"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 func main() {
+	rlimit.Raise()
 	listen := flag.String("listen", ":8443", "HTTP listen address")
 	dbPath := flag.String("db", "sync.db", "SQLite database path")
 	apiKey := flag.String("api-key", "", "Bearer token for auth (env: ETERMSYNCD_API_KEY)")

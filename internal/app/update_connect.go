@@ -365,6 +365,7 @@ func (a App) applySFTPOpen(msg types.SFTPOpenMsg) (App, tea.Cmd) {
 		}
 
 		appDebugf("SFTP ready, opening tab for %q", hostDisplayName(host))
+		sftpClient.AddClosers(client.Closers...)
 		return sftpOpenedMsg{client: sftpClient, hostAlias: hostDisplayName(host)}
 	}
 	return a, tea.Batch(progressCmd, sftpAsync)

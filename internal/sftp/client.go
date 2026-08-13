@@ -1,6 +1,7 @@
 package sftp
 
 import (
+	"io"
 	"os"
 	"time"
 
@@ -19,6 +20,7 @@ type FileInfo struct {
 type Client struct {
 	sftpClient *sftp.Client
 	sshClient  *ssh.Client
+	closers    []io.Closer
 }
 
 func NewClient(sshClient *ssh.Client) (*Client, error) {
@@ -32,8 +34,23 @@ func NewClient(sshClient *ssh.Client) (*Client, error) {
 	}, nil
 }
 
+// AddClosers attaches resources (jump host chain, agent socket) to be
+// released with the client.
+func (c *Client) AddClosers(cl ...io.Closer) {
+	c.closers = append(c.closers, cl...)
+}
+
 func (c *Client) Close() error {
-	return c.sftpClient.Close()
+	err := c.sftpClient.Close()
+	if c.sshClient != nil {
+		_ = c.sshClient.Close()
+	}
+	for _, cl := range c.closers {
+		if cl != nil {
+			_ = cl.Close()
+		}
+	}
+	return err
 }
 
 func (c *Client) List(path string) ([]FileInfo, error) {

@@ -708,6 +708,11 @@ func (m *Model) Close() error {
 	}
 	m.closeInputQueue()
 	m.closeResizeQueue()
+	if m.recorder != nil {
+		// finalizeSSHSession already harvested the data when a history row
+		// exists; this only cleans up otherwise (temp file fd included).
+		m.recorder.Discard()
+	}
 	if m.sess != nil {
 		return m.sess.Close()
 	}

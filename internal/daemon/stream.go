@@ -380,7 +380,18 @@ func (m *sessionManager) sender() *frameSender { return m.senderV.Load() }
 
 func (m *sessionManager) setSender(s *frameSender) { m.senderV.Store(s) }
 
-func (m *sessionManager) clearSender(s *frameSender) { m.senderV.CompareAndSwap(s, nil) }
+func (m *sessionManager) clearSender(s *frameSender) {
+	if !m.senderV.CompareAndSwap(s, nil) {
+		return
+	}
+	// Connection dropped: stamp every stream so the reaper can expire it even
+	// if the daemon reconnects before the next reap tick and no client resumes.
+	m.mu.Lock()
+	for _, sr := range m.streams {
+		sr.markDetached()
+	}
+	m.mu.Unlock()
+}
 
 func (m *sessionManager) get(streamID uint32) *streamRelay {
 	m.mu.Lock()

@@ -125,6 +125,22 @@ func (r *Recorder) Close() ([]byte, time.Duration, bool) {
 	return r.buf.Bytes(), r.last, r.stopped
 }
 
+// Discard releases the recorder without harvesting data; used when the
+// recording will not be persisted (e.g. missing history row).
+func (r *Recorder) Discard() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	_ = r.zip.Close()
+	if r.file != nil {
+		_ = r.file.Close()
+		_ = os.Remove(r.path)
+	}
+	r.closed = true
+}
+
 func decodeReplayBinary(data []byte) ([]ReplayEvent, error) {
 	if len(data) < 4 || string(data[:4]) != "ETR2" {
 		return nil, fmt.Errorf("invalid replay format")

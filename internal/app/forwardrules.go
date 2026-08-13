@@ -153,6 +153,16 @@ func (a App) attachForward(msg forwardRuleAttachMsg) (App, tea.Cmd) {
 	}
 	st := a.forwardByHost[msg.hostID]
 	if msg.res != nil {
+		if old := a.forwardByHost[msg.hostID]; old != nil && old.res != nil {
+			// A concurrent dial already attached this host; the displaced
+			// session and its listeners must not leak.
+			for _, pfc := range old.rules {
+				if pfc != nil {
+					_ = pfc.Close()
+				}
+			}
+			old.res.Close()
+		}
 		st = &hostForwardState{res: msg.res, rules: make(map[uint]*internalssh.PortForwardCloser)}
 		a.forwardByHost[msg.hostID] = st
 	}

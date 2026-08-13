@@ -65,6 +65,14 @@ type Model struct {
 
 func (m *Model) SetViewKeys(vk viewkeys.SFTPKeys) { m.vk = vk }
 
+// Close releases the SFTP session and the underlying SSH connection.
+func (m Model) Close() error {
+	if m.sftpClient == nil {
+		return nil
+	}
+	return m.sftpClient.Close()
+}
+
 func New(client *sftp.Client, hostAlias string, vk viewkeys.SFTPKeys) Model {
 	localDelegate := newFileDelegate()
 	localList := list.New([]list.Item{}, localDelegate, 0, 0)
