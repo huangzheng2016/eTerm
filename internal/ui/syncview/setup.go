@@ -86,8 +86,10 @@ func (m *Model) loadFromDB() {
 
 	m.inputs[inRemotePort].SetValue(get("sync_remote_port", ""))
 	m.inputs[inServerURL].SetValue(get("sync_server_url", ""))
-	m.inputs[inAPIKey].SetValue(decrypt("sync_api_key"))
-	m.inputs[inPassphrase].SetValue(decrypt("sync_passphrase"))
+	m.loadedAPIKey = decrypt("sync_api_key")
+	m.loadedPass = decrypt("sync_passphrase")
+	m.inputs[inAPIKey].SetValue(m.loadedAPIKey)
+	m.inputs[inPassphrase].SetValue(m.loadedPass)
 	m.inputs[inInterval].SetValue(get("sync_interval", ""))
 
 	// Load hosts for selector

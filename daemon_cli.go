@@ -25,9 +25,11 @@ type daemonOptions struct {
 }
 
 type daemonController struct {
-	pidPath string
-	logPath string
-	isAlive func(int) bool
+	pidPath   string
+	logPath   string
+	isAlive   func(int) bool
+	terminate func(int) error
+	kill      func(int) error
 }
 
 func runDaemon(args []string) {
@@ -103,9 +105,11 @@ func newDaemonController() (daemonController, error) {
 	}
 	dir := config.ConfigDir()
 	return daemonController{
-		pidPath: filepath.Join(dir, "daemon.pid"),
-		logPath: filepath.Join(dir, "daemon.log"),
-		isAlive: isProcessAlive,
+		pidPath:   filepath.Join(dir, "daemon.pid"),
+		logPath:   filepath.Join(dir, "daemon.log"),
+		isAlive:   isProcessAlive,
+		terminate: terminateProcess,
+		kill:      killProcess,
 	}, nil
 }
 
@@ -168,20 +172,39 @@ func (c daemonController) stop(out io.Writer) int {
 		fmt.Fprintln(out, "stopped")
 		return 0
 	}
-	if err := terminateProcess(pid); err != nil {
+	if err := c.terminate(pid); err != nil {
 		fmt.Fprintf(out, "stop failed: %v\n", err)
 		return 1
 	}
-	for i := 0; i < 20; i++ {
-		if !c.isAlive(pid) {
-			_ = os.Remove(c.pidPath)
-			fmt.Fprintln(out, "stopped")
-			return 0
-		}
-		time.Sleep(100 * time.Millisecond)
+	if c.waitGone(pid, 2*time.Second) {
+		_ = os.Remove(c.pidPath)
+		fmt.Fprintln(out, "stopped")
+		return 0
+	}
+	if err := c.kill(pid); err != nil {
+		fmt.Fprintf(out, "stop failed: %v\n", err)
+		return 1
+	}
+	if c.waitGone(pid, time.Second) {
+		_ = os.Remove(c.pidPath)
+		fmt.Fprintln(out, "stopped")
+		return 0
 	}
 	fmt.Fprintf(out, "stop failed: pid %d still running\n", pid)
 	return 1
+}
+
+func (c daemonController) waitGone(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !c.isAlive(pid) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (c daemonController) status(out io.Writer) int {

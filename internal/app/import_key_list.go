@@ -196,14 +196,14 @@ func (m *importKeyListModel) View() string {
 
 	switch m.state {
 	case keyListStateList:
-		action := "导入"
-		enterHint := " · enter 改名"
+		action := "Import"
+		enterHint := " · enter rename"
 		if m.exportMode {
-			action = "导出"
+			action = "Export"
 			enterHint = ""
 		}
-		title := ui.TitleStyle.Render(action + "密钥 (步骤 2/2)")
-		hint := ui.DimStyle.Render("space 选择" + enterHint + " · y 确认 · ←→ 翻页 · esc 返回")
+		title := ui.TitleStyle.Render(action + " Keys (step 2/2)")
+		hint := ui.DimStyle.Render("space select" + enterHint + " · y confirm · ←→ page · esc back")
 		totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
 		if totalPages < 1 {
 			totalPages = 1
@@ -245,20 +245,20 @@ func (m *importKeyListModel) View() string {
 
 			suffix := ""
 			if item.locked {
-				suffix = "   " + ui.WarningStyle.Render("[必须]")
+				suffix = "   " + ui.WarningStyle.Render("[required]")
 			} else if item.blocked {
-				suffix = "   " + ui.DimStyle.Render("[已存在]")
+				suffix = "   " + ui.DimStyle.Render("[exists]")
 			}
 
 			row := fmt.Sprintf("%s %-20s %-12s%s", checkbox, rowStyle.Render(name), ui.DimStyle.Render(aliasStr), suffix)
 			rows += row + "\n"
 		}
-		pager := ui.DimStyle.Render(fmt.Sprintf("第 %d/%d 页", m.page+1, totalPages))
+		pager := ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, totalPages))
 		content = lipgloss.JoinVertical(lipgloss.Left, title, "", rows, pager, hint)
 
 	case keyListStateAlias:
 		item := m.items[m.cursor]
-		title := ui.TitleStyle.Render("选择别名: " + item.chosenAlias)
+		title := ui.TitleStyle.Render("Select alias: " + item.chosenAlias)
 		rows := ""
 		for i, alias := range item.rec.Aliases {
 			cursor := "  "
@@ -276,7 +276,7 @@ func (m *importKeyListModel) View() string {
 			cursor = "▸ "
 			newNameStyle = ui.SelectedStyle
 		}
-		rows += fmt.Sprintf("%s%s\n", cursor, newNameStyle.Render("[ 输入新名... ]"))
+		rows += fmt.Sprintf("%s%s\n", cursor, newNameStyle.Render("[ enter new name... ]"))
 		hint := ui.DimStyle.Render("↑↓ navigate · enter select · esc back")
 		content = lipgloss.JoinVertical(lipgloss.Left, title, "", rows, hint)
 
@@ -284,9 +284,9 @@ func (m *importKeyListModel) View() string {
 		item := m.items[m.cursor]
 		var label string
 		if item.nameConflict && !m.renameFromAlias {
-			label = ui.WarningStyle.Render("名称冲突，请重命名:")
+			label = ui.WarningStyle.Render("Name conflict, enter a new name:")
 		} else {
-			label = ui.TitleStyle.Render("输入新名:")
+			label = ui.TitleStyle.Render("Enter new name:")
 		}
 		content = lipgloss.JoinVertical(lipgloss.Left, label, "", m.renameInput.View())
 
@@ -310,14 +310,14 @@ func (m *importKeyListModel) View() string {
 				keyCount++
 			}
 		}
-		action := "导入"
+		action := "Import"
 		if m.exportMode {
-			action = "导出"
+			action = "Export"
 		}
-		title := ui.TitleStyle.Render(action + "确认")
-		hostLine := fmt.Sprintf("  主机: %d 个", hostCount)
-		keyLine := fmt.Sprintf("  密钥: %d 个（含 %d 个必须）", keyCount, lockedCount)
-		hint := ui.DimStyle.Render("  y 确认  n/esc 取消")
+		title := ui.TitleStyle.Render("Confirm " + action)
+		hostLine := fmt.Sprintf("  Hosts: %d", hostCount)
+		keyLine := fmt.Sprintf("  Keys: %d (%d required)", keyCount, lockedCount)
+		hint := ui.DimStyle.Render("  y confirm  n/esc cancel")
 		content = lipgloss.JoinVertical(lipgloss.Left, title, "", hostLine, keyLine, "", hint)
 	}
 

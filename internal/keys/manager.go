@@ -67,6 +67,9 @@ func CreateKey(database *gorm.DB, masterKey *security.MasterKeyManager, name, ke
 		}
 		sshKey.PrivateKeyData = encrypted
 	case "file":
+		if filepath.Base(name) != name {
+			return nil, fmt.Errorf("invalid key name %q: must not contain path separators", name)
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get home dir: %w", err)
@@ -156,6 +159,9 @@ func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyMana
 		if sourcePathWhenFile != "" {
 			sshKey.PrivatePath = sourcePathWhenFile
 			break
+		}
+		if filepath.Base(name) != name {
+			return nil, fmt.Errorf("invalid key name %q: must not contain path separators", name)
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {

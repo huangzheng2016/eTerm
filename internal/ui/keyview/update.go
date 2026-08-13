@@ -239,15 +239,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case modeDetail:
-			switch msg.String() {
-			case "esc":
+			if msg.String() == "esc" {
 				m.resetMode()
 				return m, nil
-			case "c":
+			}
+			switch {
+			case viewkeys.MatchKey(msg, m.vk.Copy):
 				if k := m.keyByID(m.activeKeyID); k != nil {
 					return m, copyPublicKey(k.PublicKeyData)
 				}
-			case "e":
+			case viewkeys.MatchKey(msg, m.vk.Edit):
 				return m.startEdit()
 			}
 

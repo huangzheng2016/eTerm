@@ -111,7 +111,7 @@ func (m Model) renderDetailOverlay() string {
 		"Public key:",
 		ui.DimStyle.Render(pubkey),
 		"",
-		ui.SelectedStyle.Render("[c Copy public key]")+"  "+ui.SelectedStyle.Render("[e Edit]"),
+		ui.SelectedStyle.Render("["+viewkeys.HelpLabel(m.vk.Copy)+" Copy public key]")+"  "+ui.SelectedStyle.Render("["+viewkeys.HelpLabel(m.vk.Edit)+" Edit]"),
 		overlayHintStyle.Render("Esc: close"),
 	)
 	return overlayBoxStyle.Width(m.overlayWidth()).Render(content)
@@ -134,13 +134,13 @@ func (m Model) renderEditOverlay() string {
 // PLACEHOLDER_OVERLAYS
 
 func (m Model) renderDeleteOverlay() string {
-	title := overlayTitleStyle.Render("删除密钥")
+	title := overlayTitleStyle.Render("Delete SSH Key")
 	name := lipgloss.NewStyle().Bold(true).Render(m.pendingDeleteName)
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		title,
-		"确认删除密钥 "+name+" ?",
+		"Delete key "+name+"?",
 		"",
-		overlayHintStyle.Render("y 确认  n/esc 取消"),
+		overlayHintStyle.Render("y: confirm  n/esc: cancel"),
 	)
 	return overlayBoxStyle.Width(m.overlayWidth()).Render(content)
 }

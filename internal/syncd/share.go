@@ -93,21 +93,6 @@ func (e *Engine) validShare(entry *ShareEntry) (*ShareEntry, error) {
 	return entry, nil
 }
 
-func (e *Engine) RenewShare(tenant, token string) (*ShareEntry, error) {
-	var entry ShareEntry
-	if err := e.DB.Where("tenant = ? AND token = ?", tenant, token).First(&entry).Error; err != nil {
-		return nil, ErrShareNotFound
-	}
-	if _, err := e.validShare(&entry); err != nil {
-		return nil, err
-	}
-	entry.ExpiresAt = time.Now().UTC().Add(time.Duration(entry.MaxHours) * time.Hour)
-	if err := e.DB.Save(&entry).Error; err != nil {
-		return nil, err
-	}
-	return &entry, nil
-}
-
 func (e *Engine) DeleteShare(tenant, token string) error {
 	return e.DB.Where("tenant = ? AND token = ?", tenant, token).Delete(&ShareEntry{}).Error
 }

@@ -17,6 +17,7 @@ const (
 	outputRingBytes    = 2 * 1024 * 1024
 	sendCtrlQueueSize  = 64
 	sendDataQueueSize  = 64
+	inputQueueSize     = 64
 	sendRetryDelay     = 50 * time.Millisecond
 	outputReadBufBytes = 8192
 )
@@ -159,21 +160,54 @@ type streamRelay struct {
 	ring *outputRing
 	sent uint64
 	ack  uint64
-	// gen bumps on every attach; pump compares its snapshot so a rewound
-	// stream never advances sent for a frame queued before the rewind.
-	gen           uint64
 	detachedSince time.Time
+	input         chan []byte
 	wake          chan struct{}
 	stop          chan struct{}
 	stopOnce      sync.Once
 }
 
 func newStreamRelay(is *internalssh.InteractiveSession) *streamRelay {
-	return &streamRelay{
-		is:   is,
-		ring: newOutputRing(),
-		wake: make(chan struct{}, 1),
-		stop: make(chan struct{}),
+	s := &streamRelay{
+		is:    is,
+		ring:  newOutputRing(),
+		input: make(chan []byte, inputQueueSize),
+		wake:  make(chan struct{}, 1),
+		stop:  make(chan struct{}),
+	}
+	go s.inputPump()
+	return s
+}
+
+// queueInput enqueues client input without blocking the relay read loop; a
+// stalled peer (XOFF, no reader) must not freeze every stream. When the queue
+// is full the oldest frame is dropped.
+func (s *streamRelay) queueInput(p []byte) {
+	select {
+	case s.input <- p:
+	default:
+		select {
+		case <-s.input:
+		case <-s.stop:
+			return
+		}
+		select {
+		case s.input <- p:
+		case <-s.stop:
+		}
+	}
+}
+
+func (s *streamRelay) inputPump() {
+	for {
+		select {
+		case p := <-s.input:
+			if _, err := s.is.Stdin.Write(p); err != nil {
+				return
+			}
+		case <-s.stop:
+			return
+		}
 	}
 }
 
@@ -193,12 +227,6 @@ func (s *streamRelay) appendOutput(p []byte) {
 	s.ring.Write(p)
 	s.mu.Unlock()
 	s.notify()
-}
-
-func (s *streamRelay) readChunk(from uint64, max int) []byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ring.ReadFrom(from, max)
 }
 
 func (s *streamRelay) setAck(ack uint64) {
@@ -232,7 +260,6 @@ func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK 
 	}
 	s.sent = fromSeq
 	s.ack = fromSeq
-	s.gen++
 	s.detachedSince = time.Time{}
 	sender.drainData()
 	err := sender.send(openOK)
@@ -284,12 +311,19 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 	for {
 		sender := mgr.sender()
 		s.mu.Lock()
-		sent, end, inflight, gen := s.sent, s.ring.End(), s.sent-s.ack, s.gen
-		s.mu.Unlock()
+		sent, end, inflight := s.sent, s.ring.End(), s.sent-s.ack
 		if sender != nil && sent < end && inflight < outputWindowBytes {
-			chunk := s.readChunk(sent, maxOutputFrameBytes)
+			chunk := s.ring.ReadFrom(sent, maxOutputFrameBytes)
 			frame := relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: relay.DataPayload(sent, chunk)}
-			if err := sender.send(frame); err != nil {
+			// Send while holding mu: attachForOpen rewinds and drains under
+			// the same lock, so a pre-rewind frame can never slip past the
+			// drain and reach the client ahead of the replay.
+			err := sender.send(frame)
+			if err == nil {
+				s.sent += uint64(len(chunk))
+			}
+			s.mu.Unlock()
+			if err != nil {
 				select {
 				case <-time.After(sendRetryDelay):
 				case <-s.stop:
@@ -297,15 +331,10 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 				case <-ctx.Done():
 					return
 				}
-				continue
 			}
-			s.mu.Lock()
-			if s.gen == gen && s.sent == sent {
-				s.sent += uint64(len(chunk))
-			}
-			s.mu.Unlock()
 			continue
 		}
+		s.mu.Unlock()
 		if ended && sender != nil && sent >= end {
 			if mgr.remove(streamID, s) != nil {
 				s.shutdown()

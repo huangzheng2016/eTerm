@@ -204,6 +204,10 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if s, ok := h.session(f.StreamID); ok {
+			if s.daemon != send {
+				// Frame from a connection that does not own this stream.
+				continue
+			}
 			// Daemon -> client: FrameData is bulk output, everything else is control.
 			if !s.client.send(ctx, f, f.Type == relay.FrameData) {
 				if ctx.Err() != nil {
@@ -256,7 +260,7 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if f.Type == relay.FrameHello {
 			var hello relay.HelloPayload
-			if json.Unmarshal(f.Payload, &hello) == nil && hello.Version != 0 && hello.Version != relay.ProtocolVersion {
+			if json.Unmarshal(f.Payload, &hello) == nil && hello.Version != relay.ProtocolVersion {
 				send.sendCtl(relay.Frame{Type: relay.FrameHelloErr, Payload: []byte(fmt.Sprintf("unsupported protocol version %d, want %d", hello.Version, relay.ProtocolVersion))})
 				return
 			}
@@ -289,6 +293,10 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if s, ok := h.session(f.StreamID); ok {
+			if s.client != send {
+				// Frame from a connection that does not own this stream.
+				continue
+			}
 			// Client -> daemon: input and control frames are all interactive priority.
 			if !s.daemon.send(ctx, f, false) {
 				if ctx.Err() != nil {

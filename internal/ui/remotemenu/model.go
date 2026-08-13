@@ -264,7 +264,7 @@ func (m *Model) View() string {
 		if len(hosts) > pageSize {
 			rows = append(rows, "", ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, (len(hosts)+pageSize-1)/pageSize)))
 		}
-		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · / search · pgup/pgdown page · enter open · s share link · esc close"))
+		rows = append(rows, "", ui.DimStyle.Render("tab switch · up/down navigate · / search · pgup/pgdown page · enter open · s share peer shell · esc close"))
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

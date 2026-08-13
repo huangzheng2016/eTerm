@@ -55,6 +55,7 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			_ = engine.CleanupExpiredBlobs()
+			_ = engine.CleanupExpiredShares()
 		}
 	}()
 

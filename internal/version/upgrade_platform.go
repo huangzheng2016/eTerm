@@ -14,7 +14,7 @@ func ReleaseArchiveNames() (archive string, inner string, ok bool) {
 	switch goos {
 	case "linux":
 		switch goarch {
-		case "amd64", "arm64", "386":
+		case "amd64", "arm64":
 			return fmt.Sprintf("eterm_linux_%s.tar.gz", goarch), fmt.Sprintf("eterm_linux_%s", goarch), true
 		default:
 			return "", "", false

@@ -167,6 +167,8 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 	// Remove conflicting bindings: d/f are used by our own handlers
 	l.KeyMap.NextPage = key.NewBinding(key.WithKeys("pgdown"))
 	l.KeyMap.PrevPage = key.NewBinding(key.WithKeys("pgup"))
+	// Bind the configurable search key to the list filter trigger
+	l.KeyMap.Filter = hkc.Keys.Search
 	return Model{
 		list:               l,
 		keys:               hkc.Keys,
@@ -190,6 +192,7 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 // WithUpdatedKeys returns a copy of the model with updated keybinding configuration.
 func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
 	m.keys = hkc.Keys
+	m.list.KeyMap.Filter = hkc.Keys.Search
 	m.kmCfg = hkc.KmCfg
 	m.helpKeys = hkc.Help
 	m.quickConnectKeys = hkc.QuickConnect

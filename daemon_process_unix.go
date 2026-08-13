@@ -38,3 +38,11 @@ func terminateProcess(pid int) error {
 	}
 	return p.Signal(syscall.SIGTERM)
 }
+
+func killProcess(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Signal(syscall.SIGKILL)
+}

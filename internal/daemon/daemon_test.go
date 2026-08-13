@@ -28,3 +28,16 @@ func TestLoadRuntimeRejectsSSHSyncModeWithoutHost(t *testing.T) {
 		t.Fatalf("got %v, want no SSH host error", err)
 	}
 }
+
+func TestQueueInputDropsOldestWhenFull(t *testing.T) {
+	sr := &streamRelay{input: make(chan []byte, 2), stop: make(chan struct{})}
+	sr.queueInput([]byte("a"))
+	sr.queueInput([]byte("b"))
+	sr.queueInput([]byte("c"))
+	if got := <-sr.input; string(got) != "b" {
+		t.Fatalf("first queued = %q, want b (oldest dropped)", got)
+	}
+	if got := <-sr.input; string(got) != "c" {
+		t.Fatalf("second queued = %q, want c", got)
+	}
+}

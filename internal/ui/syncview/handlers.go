@@ -182,7 +182,7 @@ func (m *Model) save() tea.Cmd {
 			}
 		}
 
-		if apiKeyPlain != "" || passPlain != "" {
+		if apiKeyPlain != m.loadedAPIKey || passPlain != m.loadedPass {
 			k := mk.GetKey()
 			if k == nil {
 				return types.ErrorMsg{Err: fmt.Errorf("master key required to save secrets")}
@@ -193,6 +193,9 @@ func (m *Model) save() tea.Cmd {
 				{"sync_passphrase", passPlain},
 			} {
 				if kv[1] == "" {
+					if err := set(kv[0], ""); err != nil {
+						return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv[0], err)}
+					}
 					continue
 				}
 				enc, err := security.Encrypt([]byte(kv[1]), k.Bytes())
@@ -201,17 +204,6 @@ func (m *Model) save() tea.Cmd {
 				}
 				if err := set(kv[0], enc); err != nil {
 					return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv[0], err)}
-				}
-			}
-		} else {
-			k := mk.GetKey()
-			if k != nil {
-				defer k.Clear()
-				if err := set("sync_api_key", ""); err != nil {
-					return types.ErrorMsg{Err: fmt.Errorf("save sync_api_key: %w", err)}
-				}
-				if err := set("sync_passphrase", ""); err != nil {
-					return types.ErrorMsg{Err: fmt.Errorf("save sync_passphrase: %w", err)}
 				}
 			}
 		}

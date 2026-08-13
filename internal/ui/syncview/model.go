@@ -50,4 +50,8 @@ type Model struct {
 	height      int
 	err         string
 	testing     bool
+	// secret field values as loaded from DB; save only overwrites stored
+	// secrets when the user actually modified these fields
+	loadedAPIKey string
+	loadedPass   string
 }

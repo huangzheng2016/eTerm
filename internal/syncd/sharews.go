@@ -17,7 +17,7 @@ import (
 
 // shareStateIdleTTL exceeds the daemon's 10 minute detached-stream TTL, so a
 // pruned state would fail resume on the daemon anyway.
-const shareStateIdleTTL = 9 * time.Minute
+const shareStateIdleTTL = 11 * time.Minute
 
 // shareStreamState carries a guest stream across connections of the same
 // share token: the relay stream ID and the cumulative acked offset the guest
@@ -41,6 +41,7 @@ func (h *RelayHub) shareState(token string) (st *shareStreamState, created bool)
 		}
 	}
 	if st = h.shareStates[token]; st != nil {
+		st.idleSince = time.Time{}
 		return st, false
 	}
 	id, err := randomStreamID()
@@ -53,9 +54,13 @@ func (h *RelayHub) shareState(token string) (st *shareStreamState, created bool)
 	return st, true
 }
 
-func (h *RelayHub) dropShareState(token string) {
+// dropShareState removes the state only if st is still the current state for
+// token, so a stale owner cannot delete a newer guest's state.
+func (h *RelayHub) dropShareState(token string, st *shareStreamState) {
 	h.mu.Lock()
-	delete(h.shareStates, token)
+	if h.shareStates[token] == st {
+		delete(h.shareStates, token)
+	}
 	h.mu.Unlock()
 }
 
@@ -192,7 +197,7 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 			peer.Send.sendCtl(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: []byte(relay.CloseClientDisconnected)})
 		default:
 			peer.Send.sendCtl(relay.Frame{Type: relay.FrameClose, StreamID: streamID})
-			h.dropShareState(token)
+			h.dropShareState(token, st)
 		}
 		h.mu.Lock()
 		st.idleSince = time.Now()

@@ -306,3 +306,154 @@ func waitPeer(t *testing.T, baseURL string) {
 	}
 	t.Fatal("peer did not register")
 }
+
+func TestClientHelloVersionMismatchRejected(t *testing.T) {
+	engine := testEngine(t)
+	handler := NewHTTPHandler(engine, "")
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	for _, version := range []int{0, 1} {
+		client, _, err := websocket.Dial(ctx, base+"/api/v1/ws/client", &websocket.DialOptions{
+			HTTPHeader: http.Header{"X-ETerm-Tenant": []string{"tenant-a"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.SetReadLimit(relay.MaxWebSocketMessageBytes)
+
+		hello, _ := json.Marshal(relay.HelloPayload{Role: "client", Tenant: "tenant-a", Version: version})
+		if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
+			t.Fatal(err)
+		}
+		_, data, err := client.Read(ctx)
+		if err != nil {
+			t.Fatalf("version %d: %v", version, err)
+		}
+		f, err := relay.Decode(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Type != relay.FrameHelloErr || !strings.Contains(string(f.Payload), "protocol version") {
+			t.Fatalf("version %d: got frame %#v, want HELLO_ERR", version, f)
+		}
+		client.CloseNow()
+	}
+}
+
+func readFrame(t *testing.T, ctx context.Context, c *websocket.Conn) relay.Frame {
+	t.Helper()
+	_, data, err := c.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := relay.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func relayDial(t *testing.T, ctx context.Context, base, path string, header http.Header) *websocket.Conn {
+	t.Helper()
+	c, _, err := websocket.Dial(ctx, base+path, &websocket.DialOptions{HTTPHeader: header})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetReadLimit(relay.MaxWebSocketMessageBytes)
+	t.Cleanup(func() { c.CloseNow() })
+	return c
+}
+
+func daemonHello(t *testing.T, ctx context.Context, daemon *websocket.Conn, peerID string) {
+	t.Helper()
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: peerID, Name: "host", Version: relay.ProtocolVersion})
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientWSForeignStreamFrameDropped(t *testing.T) {
+	engine := testEngine(t)
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+
+	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon, "peer-a")
+	waitPeer(t, server.URL)
+
+	client1 := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+	client2 := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	if err := client1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 99, Payload: openPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 99 {
+		t.Fatalf("got frame %#v, want OPEN stream 99", f)
+	}
+
+	// A different client connection injects a frame on client1's stream.
+	if err := client2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(111)})); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	// The owner connection's frame still goes through.
+	if err := client1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(222)})); err != nil {
+		t.Fatal(err)
+	}
+	f := readFrame(t, ctx, daemon)
+	ack, err := relay.ParseAck(f.Payload)
+	if f.Type != relay.FrameAck || err != nil || ack != 222 {
+		t.Fatalf("got frame %#v, want owner ACK 222 (injected 111 must be dropped)", f)
+	}
+}
+
+func TestDaemonWSForeignStreamFrameDropped(t *testing.T) {
+	engine := testEngine(t)
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+
+	daemon1 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon1, "peer-a")
+	waitPeer(t, server.URL)
+	daemon2 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon2, "peer-b")
+
+	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 99, Payload: openPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon1); f.Type != relay.FrameOpen || f.StreamID != 99 {
+		t.Fatalf("got frame %#v, want OPEN stream 99", f)
+	}
+
+	// A different daemon connection injects output on peer-a's stream.
+	if err := daemon2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("injected"))})); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	// The owner daemon's frame still goes through.
+	if err := daemon1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("legit"))})); err != nil {
+		t.Fatal(err)
+	}
+	f := readFrame(t, ctx, client)
+	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, relay.DataPayload(0, []byte("legit"))) {
+		t.Fatalf("got frame %#v, want owner DATA legit (injected must be dropped)", f)
+	}
+}

@@ -11,7 +11,7 @@ import (
 )
 
 func TestEnterOpensKeyDetailAndCopyPublicKey(t *testing.T) {
-	m := New(nil, nil, viewkeys.KeyViewKeys{})
+	m := New(nil, nil, viewkeys.KeyViewKeys{Copy: []string{"c"}})
 	m.loaded = true
 	m.sshKeys = []db.SSHKey{{Model: gorm.Model{ID: 7}, Name: "deploy", PublicKeyData: "ssh-ed25519 AAAA"}}
 

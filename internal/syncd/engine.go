@@ -76,7 +76,9 @@ func (e *Engine) Push(tenant string, entries []SyncEntry) (int64, error) {
 	defer e.mu.Unlock()
 
 	var maxRev int64
-	e.DB.Model(&SyncEntry{}).Where("tenant = ?", tenant).Select("COALESCE(MAX(revision), 0)").Row().Scan(&maxRev)
+	if err := e.DB.Model(&SyncEntry{}).Where("tenant = ?", tenant).Select("COALESCE(MAX(revision), 0)").Row().Scan(&maxRev); err != nil {
+		return 0, err
+	}
 
 	for _, entry := range entries {
 		entry.Tenant = tenant

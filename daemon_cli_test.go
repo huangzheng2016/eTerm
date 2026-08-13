@@ -72,3 +72,59 @@ func TestDaemonStatusReportsRunningPid(t *testing.T) {
 		t.Fatalf("output = %q", out.String())
 	}
 }
+
+func TestDaemonStopEscalatesToKill(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "daemon.pid")
+	if err := os.WriteFile(pidPath, []byte("123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	killed := false
+	ctl := daemonController{
+		pidPath: pidPath,
+		isAlive: func(pid int) bool {
+			return !killed
+		},
+		terminate: func(pid int) error { return nil },
+		kill: func(pid int) error {
+			killed = true
+			return nil
+		},
+	}
+	var out strings.Builder
+	code := ctl.stop(&out)
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	if !killed {
+		t.Fatal("kill was not called after terminate did not stop the process")
+	}
+	if strings.TrimSpace(out.String()) != "stopped" {
+		t.Fatalf("output = %q", out.String())
+	}
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Fatal("pid file was not removed")
+	}
+}
+
+func TestDaemonStopFailsWhenKillDoesNotHelp(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "daemon.pid")
+	if err := os.WriteFile(pidPath, []byte("123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctl := daemonController{
+		pidPath:   pidPath,
+		isAlive:   func(pid int) bool { return true },
+		terminate: func(pid int) error { return nil },
+		kill:      func(pid int) error { return nil },
+	}
+	var out strings.Builder
+	code := ctl.stop(&out)
+	if code != 1 {
+		t.Fatalf("code = %d, want 1", code)
+	}
+	if !strings.Contains(out.String(), "still running") {
+		t.Fatalf("output = %q", out.String())
+	}
+}

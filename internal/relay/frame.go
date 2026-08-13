@@ -9,8 +9,6 @@ type FrameType byte
 
 const (
 	FrameHello    FrameType = 0x01
-	FramePeerList FrameType = 0x02
-	FrameHostList FrameType = 0x03
 	FrameHelloErr FrameType = 0x04
 	FrameOpen     FrameType = 0x10
 	FrameOpenOK   FrameType = 0x11
@@ -19,8 +17,6 @@ const (
 	FrameResize   FrameType = 0x21
 	FrameClose    FrameType = 0x22
 	FrameAck      FrameType = 0x23
-	FramePing     FrameType = 0x30
-	FramePong     FrameType = 0x31
 )
 
 // ProtocolVersion is the relay wire version. Peers without a version are v1.

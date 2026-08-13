@@ -134,7 +134,7 @@ func (m *importHostListModel) Update(msg tea.KeyPressMsg) (closed bool, proceed 
 
 	case hostListStateAlias:
 		item := &m.items[m.cursor]
-		maxIdx := len(item.rec.Aliases) // last = "输入新名..."
+		maxIdx := len(item.rec.Aliases) // last = "enter new name..."
 		switch msg.String() {
 		case "up", "k":
 			if m.aliasCursor > 0 {
@@ -196,14 +196,14 @@ func (m *importHostListModel) View() string {
 }
 
 func (m *importHostListModel) viewList() string {
-	action := "导入"
-	enterHint := " · enter 改名"
+	action := "Import"
+	enterHint := " · enter rename"
 	if m.exportMode {
-		action = "导出"
+		action = "Export"
 		enterHint = ""
 	}
-	title := ui.TitleStyle.Render(action + "主机 (步骤 1/2)")
-	hint := ui.DimStyle.Render("space 选择" + enterHint + " · y 下一步 · ←→ 翻页 · esc 返回")
+	title := ui.TitleStyle.Render(action + " Hosts (step 1/2)")
+	hint := ui.DimStyle.Render("space select" + enterHint + " · y next · ←→ page · esc back")
 
 	totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
 	if totalPages < 1 {
@@ -242,9 +242,9 @@ func (m *importHostListModel) viewList() string {
 			line += fmt.Sprintf("  [key: %s]", item.rec.KeyName)
 		}
 		if item.blocked {
-			line += "  [已存在]"
+			line += "  [exists]"
 		} else if item.existing {
-			line += "  [已导出]"
+			line += "  [exported]"
 		}
 
 		var rowStyle lipgloss.Style
@@ -262,7 +262,7 @@ func (m *importHostListModel) viewList() string {
 		rows = append(rows, cursor+rowStyle.Render(line))
 	}
 
-	pager := ui.DimStyle.Render(fmt.Sprintf("第 %d/%d 页", m.page+1, totalPages))
+	pager := ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, totalPages))
 	content := lipgloss.JoinVertical(lipgloss.Left, title, hint, "", strings.Join(rows, "\n"), pager)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -292,7 +292,7 @@ func truncateImportHostLine(s string, width int) string {
 
 func (m *importHostListModel) viewAlias() string {
 	item := m.items[m.cursor]
-	title := ui.TitleStyle.Render("选择别名: " + item.chosenAlias)
+	title := ui.TitleStyle.Render("Select alias: " + item.chosenAlias)
 
 	var rows string
 	for i, a := range item.rec.Aliases {
@@ -304,7 +304,7 @@ func (m *importHostListModel) viewAlias() string {
 		}
 		rows += cursor + style.Render(a) + "\n"
 	}
-	// "输入新名..." option
+	// "enter new name..." option
 	lastIdx := len(item.rec.Aliases)
 	cursor := "  "
 	style := ui.DimStyle
@@ -312,7 +312,7 @@ func (m *importHostListModel) viewAlias() string {
 		cursor = "▸ "
 		style = ui.SelectedStyle
 	}
-	rows += cursor + style.Render("[ 输入新名... ]") + "\n"
+	rows += cursor + style.Render("[ enter new name... ]") + "\n"
 
 	content := lipgloss.JoinVertical(lipgloss.Left, title, "", rows)
 	return lipgloss.NewStyle().
@@ -327,9 +327,9 @@ func (m *importHostListModel) viewRename() string {
 	item := m.items[m.cursor]
 	var label string
 	if item.nameConflict && !m.renameFromAlias {
-		label = ui.WarningStyle.Render("名称冲突，请重命名:")
+		label = ui.WarningStyle.Render("Name conflict, enter a new name:")
 	} else {
-		label = ui.DimStyle.Render("输入新名:")
+		label = ui.DimStyle.Render("Enter new name:")
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, label, m.renameInput.View())
 	return lipgloss.NewStyle().

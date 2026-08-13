@@ -3,7 +3,6 @@ package db
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/glebarez/sqlite" // modernc/sqlite — works with CGO_ENABLED=0 (releases, cross-builds)
 	"gorm.io/gorm"
@@ -17,9 +16,6 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 	}
 
 	query := "?_journal_mode=WAL&_busy_timeout=5000"
-	if runtime.GOOS == "linux" && runtime.GOARCH == "386" {
-		query = "?_journal_mode=MEMORY&_busy_timeout=5000"
-	}
 	db, err := gorm.Open(sqlite.Open(dbPath+query), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

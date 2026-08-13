@@ -234,7 +234,7 @@ func (a App) shareRemoteShell(msg types.RemoteShareSubmitMsg) (App, tea.Cmd) {
 	if label == "" {
 		label = msg.Peer.Name
 	}
-	if cfg.ServerURL == "" || cfg.APIKey == "" {
+	if cfg.APIKey == "" || (cfg.Mode != "ssh" && cfg.ServerURL == "") {
 		return a, func() tea.Msg {
 			return remoteShareLinkMsg{label: label, err: fmt.Errorf("sync server not configured")}
 		}
@@ -250,6 +250,15 @@ func (a App) shareRemoteShell(msg types.RemoteShareSubmitMsg) (App, tea.Cmd) {
 	peer := msg.Peer
 	target, sessionID := msg.Target, msg.SessionID
 	return a, func() tea.Msg {
+		base, tunnel, err := a.syncHTTPBase(cfg)
+		if err != nil {
+			return remoteShareLinkMsg{label: label, err: err}
+		}
+		if tunnel != nil {
+			defer tunnel.Close()
+			cfg.ServerURL = base
+			cfg.InsecureTLS = false
+		}
 		url, expiresAt, err := syncshareCreate(context.Background(), cfg, peer.ID, name, maxHours, target, sessionID)
 		return remoteShareLinkMsg{url: url, expiresAt: expiresAt, label: label, err: err}
 	}

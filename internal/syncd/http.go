@@ -235,21 +235,6 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 		})
 	}))
 
-	mux.HandleFunc("POST /api/v1/shares/{token}/renew", auth(func(w http.ResponseWriter, r *http.Request) {
-		share, err := engine.RenewShare(r.Header.Get("X-ETerm-Tenant"), r.PathValue("token"))
-		if err == ErrShareNotFound {
-			http.NotFound(w, r)
-			return
-		}
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"expires_at": share.ExpiresAt,
-		})
-	}))
-
 	mux.HandleFunc("DELETE /api/v1/shares/{token}", auth(func(w http.ResponseWriter, r *http.Request) {
 		if err := engine.DeleteShare(r.Header.Get("X-ETerm-Tenant"), r.PathValue("token")); err != nil {
 			http.Error(w, err.Error(), 500)
@@ -284,6 +269,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 
 func writeBlob(w http.ResponseWriter, blob *BlobEntry) {
 	w.Header().Set("Content-Type", blob.Mime)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", strconv.FormatInt(blob.Bytes, 10))
 	if blob.Filename != "" {
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": blob.Filename}))

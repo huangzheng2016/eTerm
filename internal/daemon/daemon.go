@@ -254,9 +254,6 @@ func shortID(s string) string {
 func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *frameSender, ctx context.Context) {
 	switch f.Type {
 	case relay.FrameOpen:
-		if sender == nil {
-			return
-		}
 		go func() {
 			reqCtx, cancel := context.WithTimeout(ctx, openRequestTimeout)
 			defer cancel()
@@ -264,7 +261,7 @@ func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *
 		}()
 	case relay.FrameData:
 		if sr := mgr.get(f.StreamID); sr != nil && sr.is.Stdin != nil {
-			_, _ = sr.is.Stdin.Write(f.Payload)
+			sr.queueInput(f.Payload)
 		}
 	case relay.FrameResize:
 		rows, cols, err := relay.ParseResize(f.Payload)
@@ -460,6 +457,9 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 			}
 		}
 	}
+	// The daemon cannot prompt, so an unknown host key is never trusted here;
+	// the user must confirm it once via a direct TUI connection.
+	unknownFingerprint := false
 	res, err := internalssh.Connect(internalssh.ConnectConfig{
 		Host:      &host,
 		Key:       hostKey,
@@ -468,10 +468,14 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 		MasterKey: rt.mk,
 		DB:        rt.db,
 		FingerprintCallback: func(string, int, string, string) bool {
-			return true
+			unknownFingerprint = true
+			return false
 		},
 	})
 	if err != nil {
+		if unknownFingerprint {
+			return nil, errors.New("host key not trusted; connect directly from the TUI once to confirm the fingerprint")
+		}
 		return nil, err
 	}
 	is, err := internalssh.NewInteractiveSession(res.Client, rows, cols, host.ForwardAgent)

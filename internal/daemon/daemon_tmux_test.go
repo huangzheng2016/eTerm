@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -106,13 +107,34 @@ func waitDataBytes(t *testing.T, s *daemonFrameSink, want int) (uint64, []byte) 
 }
 
 type daemonWriteCloser struct {
-	bytes.Buffer
+	mu     sync.Mutex
+	buf    bytes.Buffer
 	closed bool
 }
 
+func (w *daemonWriteCloser) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *daemonWriteCloser) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
 func (w *daemonWriteCloser) Close() error {
+	w.mu.Lock()
 	w.closed = true
+	w.mu.Unlock()
 	return nil
+}
+
+func (w *daemonWriteCloser) isClosed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.closed
 }
 
 type daemonOneByteReader struct {
@@ -239,7 +261,7 @@ func TestHandleOpenTmuxNewCleansUpWhenOpenOKWriteFails(t *testing.T) {
 	if mgr.get(12) != nil {
 		t.Fatal("session registered after OpenOK write failed")
 	}
-	if !fake.stdin.closed {
+	if !fake.stdin.isClosed() {
 		t.Fatal("session not closed after OpenOK write failed")
 	}
 }
@@ -269,7 +291,7 @@ func TestHandleOpenTmuxNewReturnsOpenErrWhenSessionExitsImmediately(t *testing.T
 	if mgr.get(15) != nil {
 		t.Fatal("session registered after immediate exit")
 	}
-	if !fake.stdin.closed {
+	if !fake.stdin.isClosed() {
 		t.Fatal("session not closed after immediate exit")
 	}
 	if killed != "tmux-abc123" {
@@ -521,13 +543,18 @@ func TestHandleFrameRoutesDataResizeAckAndCloseToSession(t *testing.T) {
 	sr.sent = 3
 	sr.mu.Unlock()
 	handleFrame(rt, relay.Frame{Type: relay.FrameData, StreamID: 31, Payload: []byte("input")}, mgr, nil, context.Background())
+	// Input is written by the stream's input pump; wait for it before the
+	// close below shuts the pump down.
+	deadline := time.Now().Add(2 * time.Second)
+	for fake.stdin.String() != "input" {
+		if time.Now().After(deadline) {
+			t.Fatalf("stdin = %q", fake.stdin.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
 	handleFrame(rt, relay.Frame{Type: relay.FrameResize, StreamID: 31, Payload: relay.ResizePayload(40, 100)}, mgr, nil, context.Background())
 	handleFrame(rt, relay.Frame{Type: relay.FrameAck, StreamID: 31, Payload: relay.AckPayload(3)}, mgr, nil, context.Background())
 	handleFrame(rt, relay.Frame{Type: relay.FrameClose, StreamID: 31}, mgr, nil, context.Background())
-
-	if fake.stdin.String() != "input" {
-		t.Fatalf("stdin = %q", fake.stdin.String())
-	}
 	if len(fake.resizes) != 1 || fake.resizes[0] != [2]int{40, 100} {
 		t.Fatalf("resizes = %+v", fake.resizes)
 	}
@@ -540,7 +567,7 @@ func TestHandleFrameRoutesDataResizeAckAndCloseToSession(t *testing.T) {
 	if mgr.get(31) != nil {
 		t.Fatal("session still registered")
 	}
-	if !fake.stdin.closed {
+	if !fake.stdin.isClosed() {
 		t.Fatal("session not closed")
 	}
 }
@@ -683,7 +710,7 @@ func TestPumpRemovesEndedStream(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !fake.stdin.closed {
+	if !fake.stdin.isClosed() {
 		t.Fatal("ended session not closed")
 	}
 }
@@ -818,10 +845,10 @@ func TestReapDetachedRemovesExpiredStreams(t *testing.T) {
 	if mgr.get(81) == nil {
 		t.Fatal("attached stream reaped")
 	}
-	if !expired.stdin.closed {
+	if !expired.stdin.isClosed() {
 		t.Fatal("reaped session not closed")
 	}
-	if fresh.stdin.closed {
+	if fresh.stdin.isClosed() {
 		t.Fatal("attached session closed")
 	}
 }
@@ -837,7 +864,7 @@ func TestHandleFrameClientDisconnectedKeepsSession(t *testing.T) {
 	if mgr.get(32) == nil {
 		t.Fatal("session removed on client disconnect")
 	}
-	if fake.stdin.closed {
+	if fake.stdin.isClosed() {
 		t.Fatal("session closed on client disconnect")
 	}
 	sr.mu.Lock()

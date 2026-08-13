@@ -76,6 +76,14 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 | `--version-json`    | 以 JSON 打印 version / commit 并退出 |
 | `--no-update-check` | 禁用解锁后的 GitHub 版本检查             |
 
+子命令：
+
+| 命令              | 说明                             |
+| ----------------- | ------------------------------ |
+| `eterm version`   | 打印版本并退出（同 `-v`）            |
+| `eterm upgrade`   | 启动 TUI 并强制检查更新，有新版本时提示升级   |
+| `eterm daemon ...` | 管理远程 Shell daemon，见「多设备同步」一节 |
+
 
 ## 快捷键
 
@@ -89,7 +97,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 | `s`             | SFTP               |
 | `c`             | 复制 SSH 命令          |
 | `C`             | 克隆主机               |
-| `h` / `H`       | 隐藏主机 / 切换隐藏可见      |
+| `h` / `H`       | 切换隐藏可见 / 隐藏主机      |
 | `/`             | 搜索                 |
 | `Esc`           | 打开菜单（退出 / 设置 / 同步） |
 | `C-S-i`         | 上传剪贴板文件/图片并粘贴链接   |
@@ -151,10 +159,15 @@ sudo systemctl enable --now etermsyncd
 需要远程 Shell 时，在可访问的 eTerm 主机上启动 daemon：
 
 ```bash
-eterm daemon start
+eterm daemon start    # 后台启动
 eterm daemon status
 eterm daemon stop
+eterm daemon run      # 前台运行（start 实际以 daemon run 拉起子进程）
 ```
+
+daemon 子命令的可选参数：`-c path`（数据库路径）、`-password <主密码>`（也可用环境变量 `ETERM_MASTER_PASSWORD`）、`-name <显示名>`（默认主机名）、`-pprof <地址>`。
+
+daemon 与 syncd 的 relay 协议版本不匹配时，daemon 会报错并以退出码 1 退出，不再自动重连。升级 syncd 或 eterm 后，需要用与 syncd 匹配的新版 eterm 重新 `eterm daemon start`。
 
 也可以选 SSH 模式：在某台可通过 SSH 登录的主机上常驻 etermsyncd（同上，监听 `127.0.0.1:18443`），同步设置里选 SSH 并填该主机和 Remote Port（默认 18443），API Key 与远端一致。客户端会用 SSH 本地端口映射访问远端的 HTTP API，records 同步、远程 Shell 和剪贴板托管与 HTTP 模式完全一致。注意 SSH 主机需要先交互连接一次以信任指纹。
 
@@ -171,6 +184,16 @@ eterm daemon stop
 短链格式为 `https://sync.example.com/b/<token>`（SSH 模式下为 `http://127.0.0.1:<remote port>/b/<token>`，在远端主机上访问），有效期 30 分钟。文件/图片最大 10 MiB。
 
 普通文本粘贴不受影响。纯图片剪贴板通常不会触发终端文本粘贴事件，请使用 `C-S-i` 或命令面板入口上传。
+
+## 临时 Shell 分享
+
+在主机列表选中在线的远程设备按 Enter 打开远程菜单，选中设备或 tmux 会话后按 `s`，在弹窗中输入有效期（小时）和名称，即可生成一条 `https://<sync server>/x/<token>` 分享链接。访客用浏览器打开链接，通过 xterm.js 直接进入该 Shell，可读写。
+
+- 单连接顶替：新访客打开链接会把当前已连接的访客踢下线
+- 有效期在创建时固定，不随访问续期，到期后连接自动断开
+- 设置项 `share_max_hours`（1-168，默认 4）仅作为弹窗中有效期的默认值，可按需修改
+
+安全提示：链接中的 token 即访问凭证，任何拿到链接的人都能读写该 Shell，请像对待密码一样分发和保管。
 
 ## 推荐 tmux 配置
 

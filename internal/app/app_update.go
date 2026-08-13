@@ -720,7 +720,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.toast, tc = a.toast.Show(fmt.Sprintf("Share failed: %v", msg.err), components.ToastError, 5*time.Second)
 			return a, tc
 		}
-		a.toast, tc = a.toast.Show(fmt.Sprintf("Link copied (%s), expires %s", msg.label, msg.expiresAt.Local().Format("2006-01-02 15:04")), components.ToastSuccess, 8*time.Second)
+		a.toast, tc = a.toast.Show(fmt.Sprintf("Link copied (%s): %s (expires %s)", msg.label, msg.url, msg.expiresAt.Local().Format("2006-01-02 15:04")), components.ToastSuccess, 8*time.Second)
 		return a, tea.Batch(tc, tea.SetClipboard(msg.url))
 
 	case remoteTerminalOpenedMsg:
@@ -1038,7 +1038,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			a.toast, tc = a.toast.Show(fmt.Sprintf("Import error: %v", msg.err), components.ToastError, 5*time.Second)
 		} else {
-			a.toast, tc = a.toast.Show(fmt.Sprintf("导入完成: %d 成功, %d 跳过", msg.imported, msg.skipped), components.ToastSuccess, 3*time.Second)
+			a.toast, tc = a.toast.Show(fmt.Sprintf("Import complete: %d imported, %d skipped", msg.imported, msg.skipped), components.ToastSuccess, 3*time.Second)
 		}
 		return a, tea.Batch(tc, func() tea.Msg { return types.RefreshListMsg{} })
 

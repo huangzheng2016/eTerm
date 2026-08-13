@@ -2,6 +2,7 @@ package home
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -39,13 +40,13 @@ func (m Model) loadRemoteSummary() ([]types.RemotePeer, []types.RemoteHost, erro
 	var peersResp struct {
 		Peers []types.RemotePeer `json:"peers"`
 	}
-	if err := getJSON(client, cfg.ServerURL, "/api/v1/peers", cfg.APIKey, tenant, &peersResp); err != nil {
+	if err := getJSON(client, serverURL, "/api/v1/peers", cfg.APIKey, tenant, &peersResp); err != nil {
 		return nil, nil, err
 	}
 	var hostsResp struct {
 		Hosts []types.RemoteHost `json:"hosts"`
 	}
-	if err := getJSON(client, cfg.ServerURL, "/api/v1/hosts", cfg.APIKey, tenant, &hostsResp); err != nil {
+	if err := getJSON(client, serverURL, "/api/v1/hosts", cfg.APIKey, tenant, &hostsResp); err != nil {
 		return nil, nil, err
 	}
 	sort.Slice(peersResp.Peers, func(i, j int) bool { return peersResp.Peers[i].Name < peersResp.Peers[j].Name })
@@ -61,8 +62,12 @@ func (m Model) loadRemoteSummary() ([]types.RemotePeer, []types.RemoteHost, erro
 }
 
 func getJSON(client *http.Client, serverURL, path, apiKey, tenant string, out interface{}) error {
+	candidates := esync.HTTPBaseURLCandidates(serverURL)
+	if len(candidates) == 0 {
+		return fmt.Errorf("no server URL candidates for %q", serverURL)
+	}
 	var lastErr error
-	for _, baseURL := range esync.HTTPBaseURLCandidates(serverURL) {
+	for _, baseURL := range candidates {
 		req, err := http.NewRequest("GET", baseURL+path, nil)
 		if err != nil {
 			return err
@@ -81,7 +86,7 @@ func getJSON(client *http.Client, serverURL, path, apiKey, tenant string, out in
 		defer resp.Body.Close()
 		if resp.StatusCode != 200 {
 			io.Copy(io.Discard, resp.Body)
-			return nil
+			return fmt.Errorf("GET %s: HTTP %d", baseURL+path, resp.StatusCode)
 		}
 		return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(out)
 	}

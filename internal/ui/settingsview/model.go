@@ -35,7 +35,7 @@ type bindingEntry struct {
 type Model struct {
 	db           *gorm.DB
 	entries      []bindingEntry
-	cursor       int // 0,1 = prefs; 2+ = entries[cursor-2]
+	cursor       int // 0-6 = prefs; 7+ = entries[cursor-bindingCursorBase]
 	state        editState
 	width        int
 	height       int
@@ -172,6 +172,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Command Palette", "command_palette"},
 		{"Global", "Local Terminal", "local_terminal"},
 		{"Global", "Rename Tab", "rename_tab"},
+		{"Global", "Paste Image URL", "paste_image_url"},
 		// Home
 		{"Home", "SSH Connect", "ssh_connect"},
 		{"Home", "SFTP Open", "sftp_open"},

@@ -78,6 +78,48 @@ func shareGuestDial(t *testing.T, ctx context.Context, server *httptest.Server, 
 	return guest
 }
 
+func TestShareStateReuseResetsIdle(t *testing.T) {
+	h := NewRelayHub(nil)
+	st, created := h.shareState("tok")
+	if !created {
+		t.Fatal("first shareState not created")
+	}
+	h.mu.Lock()
+	st.idleSince = time.Now().Add(-time.Minute)
+	h.mu.Unlock()
+
+	st2, created := h.shareState("tok")
+	if created || st2 != st {
+		t.Fatal("recent state not reused")
+	}
+	if !st2.idleSince.IsZero() {
+		t.Fatal("idleSince not reset on reuse; a later prune could drop an in-use state")
+	}
+}
+
+func TestDropShareStateIdentity(t *testing.T) {
+	h := NewRelayHub(nil)
+	old, _ := h.shareState("tok")
+	h.mu.Lock()
+	old.idleSince = time.Now().Add(-shareStateIdleTTL - time.Minute)
+	h.mu.Unlock()
+
+	fresh, created := h.shareState("tok")
+	if !created || fresh == old {
+		t.Fatal("idle state not pruned and recreated")
+	}
+
+	// A stale owner tearing down must not delete the new guest's state.
+	h.dropShareState("tok", old)
+	if got := h.shareStates["tok"]; got != fresh {
+		t.Fatal("stale dropShareState removed the current state")
+	}
+
+	h.dropShareState("tok", fresh)
+	if _, ok := h.shareStates["tok"]; ok {
+		t.Fatal("owner dropShareState did not remove the state")
+	}
+}
 
 func TestShareInvalidToken404(t *testing.T) {
 	engine := testEngine(t)

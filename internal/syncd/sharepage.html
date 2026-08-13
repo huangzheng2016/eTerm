@@ -7,13 +7,15 @@
 <link rel="stylesheet" href="static/xterm.css">
 <style>
 html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13px/1.4 system-ui, sans-serif; }
+body { display: flex; flex-direction: column; }
 #bar { display: flex; gap: 12px; align-items: center; padding: 6px 10px; background: #111; }
 #bar .name { font-weight: 600; }
 #bar .meta { color: #888; }
 #bar .spacer { flex: 1; }
 .btn { background: #222; color: #ccc; border: 1px solid #333; border-radius: 3px; padding: 4px 10px; font: inherit; cursor: pointer; }
 .btn.on { background: #3a4a5a; color: #fff; }
-#term { height: calc(100% - 32px); padding: 4px; box-sizing: border-box; }
+.btn:disabled { opacity: .5; cursor: default; }
+#term { flex: 1; min-height: 0; padding: 4px; box-sizing: border-box; }
 #keys { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 6px; padding: 6px; background: #111; border-top: 1px solid #333; overflow-x: auto; z-index: 20; }
 #keys .btn { min-width: 40px; padding: 8px 10px; flex: none; }
 #lockoverlay { position: fixed; left: 0; right: 0; bottom: 0; display: none; z-index: 25; background: transparent; touch-action: none; }
@@ -53,6 +55,14 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   var expiresAt = new Date("{{.ExpiresAt}}");
   var statusEl = document.getElementById("status");
   var expiresEl = document.getElementById("expires");
+  var termEl = document.getElementById("term");
+
+  function lsGet(k) {
+    try { return localStorage.getItem(k); } catch (e) { return null; }
+  }
+  function lsSet(k, v) {
+    try { localStorage.setItem(k, v); } catch (e) {}
+  }
 
   function pad(n) {
     return String(n).padStart(2, "0");
@@ -66,7 +76,7 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   var term = new Terminal({ cursorBlink: true });
   var fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
-  term.open(document.getElementById("term"));
+  term.open(termEl);
   fit.fit();
 
   var alive = true;
@@ -79,6 +89,20 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   }
   function sendRaw(str) {
     if (alive) send({ t: "in", d: b64encode(str) });
+  }
+  // Send large pastes in chunks so a single frame stays well under the
+  // server's 1MiB read limit: 64K chars is at most 256KB of UTF-8.
+  function sendRawChunked(str) {
+    var i = 0;
+    while (i < str.length) {
+      var end = Math.min(i + 65536, str.length);
+      if (end < str.length) {
+        var c = str.charCodeAt(end - 1);
+        if (c >= 0xd800 && c <= 0xdbff) end--;
+      }
+      sendRaw(str.substring(i, end));
+      i = end;
+    }
   }
   function b64encode(str) {
     var bytes = new TextEncoder().encode(str);
@@ -126,11 +150,32 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
         statusEl.textContent = "disconnected";
         return;
       }
-      var delay = Math.min(10000, 1000 * Math.pow(2, retries));
-      retries++;
-      statusEl.textContent = "reconnecting...";
-      setTimeout(connect, delay);
+      // A deleted share makes the handshake fail with 404; the WebSocket API
+      // hides the status, so probe the page URL before retrying.
+      fetch(location.pathname, { method: "HEAD", cache: "no-store" }).then(function (r) {
+        if (r.status === 404) {
+          alive = false;
+          statusEl.textContent = "disconnected: share deleted";
+        } else {
+          scheduleReconnect();
+        }
+      }).catch(function () {
+        scheduleReconnect();
+      });
     };
+  }
+  var maxRetries = 12;
+  function scheduleReconnect() {
+    if (!alive) return;
+    if (retries >= maxRetries) {
+      alive = false;
+      statusEl.textContent = "disconnected: reconnect limit reached";
+      return;
+    }
+    var delay = Math.min(10000, 1000 * Math.pow(2, retries));
+    retries++;
+    statusEl.textContent = "reconnecting...";
+    setTimeout(connect, delay);
   }
   connect();
 
@@ -146,20 +191,17 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   }
 
   function sendInput(str) {
-    if (ctrlLatch || altLatch) {
-      var out = "";
-      for (var i = 0; i < str.length; i++) {
-        var ch = str.charAt(i);
-        if (ctrlLatch) {
-          out += String.fromCharCode(ch.charCodeAt(0) & 0x1f);
-        } else {
-          out += "\x1b" + ch;
-        }
+    // Only transform single typed characters: a multi-character string is a
+    // native paste arriving via onData and must pass through untouched.
+    if ((ctrlLatch || altLatch) && str.length === 1) {
+      if (ctrlLatch) {
+        str = String.fromCharCode(str.charCodeAt(0) & 0x1f);
+      } else {
+        str = "\x1b" + str;
       }
       ctrlLatch = false;
       altLatch = false;
       updateKeyButtons();
-      str = out;
     }
     sendRaw(str);
   }
@@ -205,13 +247,18 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
     keysEl.appendChild(b);
   });
 
-  var keysPref = localStorage.getItem("eterm-share-keys");
+  var keysPref = lsGet("eterm-share-keys");
   var coarse = matchMedia("(pointer: coarse)").matches;
   if (keysPref === null) keysPref = coarse ? "1" : "0";
   function setKeys(v) {
     keysEl.style.display = v ? "flex" : "none";
-    localStorage.setItem("eterm-share-keys", v ? "1" : "0");
+    lsSet("eterm-share-keys", v ? "1" : "0");
     document.getElementById("btn-keys").classList.toggle("on", v);
+    // The keys bar is fixed at the bottom; shrink the terminal so the bar
+    // never covers its last rows, then refit.
+    termEl.style.marginBottom = v ? keysEl.offsetHeight + "px" : "0";
+    fit.fit();
+    if (alive) send({ t: "resize", rows: term.rows, cols: term.cols });
   }
   setKeys(keysPref === "1");
   document.getElementById("btn-keys").addEventListener("click", function () {
@@ -239,6 +286,7 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   }
   function viewportChanged() {
     placeKeys();
+    placeLock();
     var vv = window.visualViewport;
     var w = vv ? vv.width : window.innerWidth;
     if (coarse && Math.abs(w - lastWidth) < 1) return;
@@ -256,14 +304,21 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   var barEl = document.getElementById("bar");
   var lockEl = document.getElementById("lockoverlay");
   var btnLock = document.getElementById("btn-lock");
-  var locked = localStorage.getItem("eterm-share-lock") === "1";
+  var btnPaste = document.getElementById("btn-paste");
+  var locked = lsGet("eterm-share-lock") === "1";
+  // The overlay top tracks the bar height; it must be recomputed when the
+  // bar wraps or fonts finish loading, not only when the lock toggles.
+  function placeLock() {
+    lockEl.style.top = barEl.offsetHeight + "px";
+  }
   function setLock(v) {
     locked = v;
-    localStorage.setItem("eterm-share-lock", v ? "1" : "0");
-    lockEl.style.top = barEl.offsetHeight + "px";
+    lsSet("eterm-share-lock", v ? "1" : "0");
+    placeLock();
     lockEl.style.display = v ? "block" : "none";
     btnLock.textContent = v ? "Locked" : "Lock";
     btnLock.classList.toggle("on", v);
+    btnPaste.disabled = v;
     if (v && document.activeElement) document.activeElement.blur();
   }
   setLock(locked);
@@ -294,6 +349,7 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
   var pastebg = document.getElementById("pastebg");
   var pastetext = document.getElementById("pastetext");
   function openPaste() {
+    if (locked) return;
     pastebg.style.display = "flex";
     pastetext.focus();
   }
@@ -302,7 +358,7 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
     pastetext.value = "";
     if (!locked) term.focus();
   }
-  document.getElementById("btn-paste").addEventListener("click", openPaste);
+  btnPaste.addEventListener("click", openPaste);
   document.getElementById("paste-cancel").addEventListener("click", closePaste);
   pastebg.addEventListener("click", function (e) {
     if (e.target === pastebg) closePaste();
@@ -314,7 +370,7 @@ html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13
     var text = pastetext.value;
     if (text) {
       if (bracketed) text = "\x1b[200~" + text + "\x1b[201~";
-      sendRaw(text);
+      sendRawChunked(text);
     }
     closePaste();
   });

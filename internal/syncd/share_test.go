@@ -66,37 +66,6 @@ func TestShareExpiredGetDeletes(t *testing.T) {
 	}
 }
 
-func TestShareRenew(t *testing.T) {
-	engine := testEngine(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine.DB.Model(&ShareEntry{}).Where("id = ?", share.ID).Update("expires_at", time.Now().UTC().Add(30*time.Minute))
-	renewed, err := engine.RenewShare("tenant-a", share.Token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d := time.Until(renewed.ExpiresAt); d < time.Hour || d > 2*time.Hour {
-		t.Fatalf("renewed expires in %v", d)
-	}
-	if _, err := engine.RenewShare("tenant-b", share.Token); err != ErrShareNotFound {
-		t.Fatalf("cross-tenant renew err = %v", err)
-	}
-}
-
-func TestShareRenewExpired(t *testing.T) {
-	engine := testEngine(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine.DB.Model(&ShareEntry{}).Where("id = ?", share.ID).Update("expires_at", time.Now().UTC().Add(-time.Hour))
-	if _, err := engine.RenewShare("tenant-a", share.Token); err != ErrShareNotFound {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestShareDelete(t *testing.T) {
 	engine := testEngine(t)
 	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
