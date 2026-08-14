@@ -52,7 +52,12 @@ func TmuxCommand() (string, bool) {
 	}
 	var b strings.Builder
 	for _, kv := range env {
-		b.WriteString(shQuote(kv))
+		// Quote only the value: a fully quoted 'KEY=value' word is not an
+		// assignment to the shell and would be executed as a command.
+		k, v, _ := strings.Cut(kv, "=")
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(shQuote(v))
 		b.WriteByte(' ')
 	}
 	if shellName(shell) == "bash" {

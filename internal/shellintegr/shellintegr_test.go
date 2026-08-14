@@ -74,6 +74,36 @@ func TestTmuxCommand(t *testing.T) {
 	}
 }
 
+// TestTmuxCommandEnvAssignments runs the generated command through a real
+// shell with a fake "zsh" binary: the env prefixes must parse as assignments,
+// not as command words (fully quoted 'KEY=value' used to break this).
+func TestTmuxCommandEnvAssignments(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	fakeZsh := filepath.Join(bin, "zsh")
+	if err := os.WriteFile(fakeZsh, []byte("#!/bin/sh\nprintf 'GOT_ZDOTDIR=%s\\n' \"$ZDOTDIR\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", fakeZsh)
+	t.Setenv("ZDOTDIR", "")
+
+	cmdStr, ok := TmuxCommand()
+	if !ok {
+		t.Fatal("expected tmux command")
+	}
+	out, err := exec.Command("/bin/sh", "-c", cmdStr).CombinedOutput()
+	if err != nil {
+		t.Fatalf("command failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "GOT_ZDOTDIR=") {
+		t.Fatalf("fake shell did not see ZDOTDIR: %q", out)
+	}
+}
+
 // TestZshWrapperStartsClean runs a real zsh through the wrapper files: the
 // user's .zshrc must be sourced exactly once and no recursion error may occur.
 func TestZshWrapperStartsClean(t *testing.T) {

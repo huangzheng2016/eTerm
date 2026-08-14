@@ -49,8 +49,10 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 		if msg.New {
 			is, name, err := tmux.NewSession(context.Background(), configFile, rows, cols)
 			if err != nil {
+				appDebugf("tmux NewSession failed: %v", err)
 				return types.ErrorMsg{Err: fmt.Errorf("tmux new-session: %w", err)}
 			}
+			appDebugf("tmux NewSession ok: %s", name)
 			return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(name), session: name}
 		}
 		is, err := appAttachTmuxSession(context.Background(), configFile, msg.Name, rows, cols)
@@ -62,6 +64,7 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 }
 
 func (a App) applyTmuxTerminalOpened(msg tmuxTerminalOpenedMsg) (App, tea.Cmd) {
+	appDebugf("applyTmuxTerminalOpened: %s", msg.session)
 	sv := sshview.New(msg.is, msg.title, 0, BuildSSHKeys(a.kbConfig))
 	sv.SetHistoryID(createLocalSessionHistory(a.db, msg.title, "tmux"))
 	configureSessionCapture(a.db, sv)
