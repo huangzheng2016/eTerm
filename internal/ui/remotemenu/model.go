@@ -301,6 +301,12 @@ func tmuxDesc(session relay.TmuxSessionInfo) string {
 		}
 		d += "attached"
 	}
+	if session.Daemon {
+		if d != "" {
+			d += " "
+		}
+		d += "daemon session"
+	}
 	return d
 }
 

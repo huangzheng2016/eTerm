@@ -38,10 +38,15 @@ const CloseDaemonDisconnected = "daemon disconnected"
 // when a client connection drops; the daemon keeps the PTY alive for resume.
 const CloseClientDisconnected = "client disconnected"
 
+// CloseSessionTakenOver is the FrameClose payload the daemon sends on a named
+// session's old stream id when a new attach takes the session over.
+const CloseSessionTakenOver = "session taken over"
+
 type TmuxSessionInfo struct {
 	Name        string `json:"name"`
 	CreatedUnix int64  `json:"created_unix"`
 	Attached    bool   `json:"attached"`
+	Daemon      bool   `json:"daemon,omitempty"`
 }
 
 type HelloPayload struct {

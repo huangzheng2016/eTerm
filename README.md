@@ -222,6 +222,12 @@ set -g extended-keys-format csi-u
 tmux source-file ~/.tmux.conf
 ```
 
+## Windows 与无 tmux 设备
+
+本地 Shell 在 Windows 上通过 ConPTY 启动（默认 `powershell.exe`，依次探测 `pwsh.exe` / `powershell.exe` / `cmd.exe`，可在设置项 `local terminal shell` 中指定）。
+
+远程设备的 tmux 菜单在检测不到 tmux 的设备上（如 Windows）自动改用 daemon 托管会话：新建、附加、重命名、杀死的操作与 tmux 一致，关闭标签页只是 detach，会话在 daemon 上继续运行。区别是会话随 daemon 进程存活，daemon 退出后会话结束，不像 tmux server 那样独立常驻。
+
 ## 数据
 
 默认路径：`~/.config/eterm/eterm.db`（SQLite），可用 `-c path` 指定。

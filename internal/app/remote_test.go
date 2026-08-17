@@ -707,3 +707,43 @@ func renameShortcutTestApp(tabs []Tab) App {
 func ctrlShiftR() tea.KeyPressMsg {
 	return tea.KeyPressMsg(tea.Key{Code: 'r', Text: "R", Mod: tea.ModCtrl | tea.ModShift})
 }
+
+func TestRemoteTmuxAutoReconnectExhaustedSurfacesOpenError(t *testing.T) {
+	oldOpen := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		return nil, "", errors.New("no such session")
+	}
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a := remoteHTTPTestApp(t)
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
+
+	_, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     3,
+		MaxAttempts: 3,
+	})
+	msg := lastBatchMessage(t, cmd)
+
+	connErr, ok := msg.(types.ConnErrorMsg)
+	if !ok {
+		t.Fatalf("got %T want ConnErrorMsg", msg)
+	}
+	if connErr.Err == nil || !strings.Contains(connErr.Err.Error(), "no such session") {
+		t.Fatalf("err = %v", connErr.Err)
+	}
+	retry, ok := connErr.Retry.(types.RemoteShellReconnectMsg)
+	if !ok || retry.Auto {
+		t.Fatalf("retry = %+v, want manual RemoteShellReconnectMsg", connErr.Retry)
+	}
+}

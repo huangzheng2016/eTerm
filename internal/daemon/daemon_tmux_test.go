@@ -33,7 +33,7 @@ func testTmuxRuntime(t *testing.T) *runtimeConfig {
 	if err := db.SetSetting(database, tmux.SettingConfigFile, filepath.Join(t.TempDir(), "tmux.conf")); err != nil {
 		t.Fatal(err)
 	}
-	return &runtimeConfig{db: database}
+	return &runtimeConfig{db: database, hasTmux: true}
 }
 
 func newDaemonSink() *daemonFrameSink {

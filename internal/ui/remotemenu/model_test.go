@@ -217,6 +217,31 @@ func TestTmuxDescHidesMissingCreatedTime(t *testing.T) {
 	}
 }
 
+func TestTmuxDescMarksDaemonSession(t *testing.T) {
+	got := tmuxDesc(relay.TmuxSessionInfo{Name: "work", Daemon: true, Attached: true})
+	if !strings.Contains(got, "daemon session") || !strings.Contains(got, "attached") {
+		t.Fatalf("desc = %q", got)
+	}
+	if strings.Contains(tmuxDesc(relay.TmuxSessionInfo{Name: "work"}), "daemon session") {
+		t.Fatal("real tmux session should not be marked daemon")
+	}
+}
+
+func TestTmuxTabShowsDaemonSessionEntries(t *testing.T) {
+	m := New(types.RemotePeer{Name: "peer"}, nil)
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{
+		{Name: "work"},
+		{Name: "win", Daemon: true},
+	})
+	view := m.View()
+	if !strings.Contains(view, "daemon session") {
+		t.Fatalf("view missing daemon marker:\n%s", view)
+	}
+	if strings.Contains(view, "work daemon session") {
+		t.Fatalf("real tmux entry marked as daemon:\n%s", view)
+	}
+}
+
 func TestTmuxRenameRequestsPrompt(t *testing.T) {
 	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
 	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})

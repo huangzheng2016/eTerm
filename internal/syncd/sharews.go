@@ -135,7 +135,9 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	c, err := websocket.Accept(w, r, nil)
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		CompressionMode: websocket.CompressionContextTakeover,
+	})
 	if err != nil {
 		return
 	}

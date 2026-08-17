@@ -155,12 +155,13 @@ func (s *frameSender) run(ctx context.Context, c *websocket.Conn) {
 // streamRelay owns one PTY session's output pipeline. It outlives individual
 // relay connections so a client can resume after a disconnect.
 type streamRelay struct {
-	is   *internalssh.InteractiveSession
-	mu   sync.Mutex
-	ring *outputRing
-	sent uint64
-	ack  uint64
+	is            *internalssh.InteractiveSession
+	mu            sync.Mutex
+	ring          *outputRing
+	sent          uint64
+	ack           uint64
 	detachedSince time.Time
+	sidV          atomic.Uint32 // current relay stream id; re-keyed when a named session is attached
 	input         chan []byte
 	wake          chan struct{}
 	stop          chan struct{}
@@ -270,6 +271,32 @@ func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK 
 	return err
 }
 
+// attachClamped rewinds like attachForOpen but clamps a stale offset up to
+// the retained window instead of failing, and re-keys the stream onto a new
+// relay stream id; used when a client attaches to a daemon-hosted session
+// without knowing its resume offset.
+func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *frameSender, openOK relay.Frame) error {
+	s.mu.Lock()
+	s.sidV.Store(streamID)
+	if fromSeq < s.ring.base {
+		fromSeq = s.ring.base
+	}
+	if fromSeq > s.ring.End() {
+		s.mu.Unlock()
+		return errors.New("resume offset outside retained buffer")
+	}
+	s.sent = fromSeq
+	s.ack = fromSeq
+	s.detachedSince = time.Time{}
+	sender.drainData()
+	err := sender.send(openOK)
+	s.mu.Unlock()
+	if err == nil {
+		s.notify()
+	}
+	return err
+}
+
 func (s *streamRelay) waitCredit() bool {
 	for {
 		s.mu.Lock()
@@ -304,6 +331,7 @@ func (s *streamRelay) readPump(readDone chan<- error) {
 }
 
 func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionManager) {
+	s.sidV.Store(streamID)
 	readDone := make(chan error, 1)
 	go s.readPump(readDone)
 	var endErr error
@@ -311,10 +339,11 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 	for {
 		sender := mgr.sender()
 		s.mu.Lock()
+		sid := s.sidV.Load()
 		sent, end, inflight := s.sent, s.ring.End(), s.sent-s.ack
 		if sender != nil && sent < end && inflight < outputWindowBytes {
 			chunk := s.ring.ReadFrom(sent, maxOutputFrameBytes)
-			frame := relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: relay.DataPayload(sent, chunk)}
+			frame := relay.Frame{Type: relay.FrameData, StreamID: sid, Payload: relay.DataPayload(sent, chunk)}
 			// Send while holding mu: attachForOpen rewinds and drains under
 			// the same lock, so a pre-rewind frame can never slip past the
 			// drain and reach the client ahead of the replay.
@@ -336,10 +365,13 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 		}
 		s.mu.Unlock()
 		if ended && sender != nil && sent >= end {
-			if mgr.remove(streamID, s) != nil {
+			// Remove by identity: an attach may have re-keyed the stream onto
+			// another id, and a named session entry bound to it must go too,
+			// otherwise list/attach keep showing a dead session.
+			if closeID, ok := mgr.removeStream(s); ok {
 				s.shutdown()
 				_ = s.is.Close()
-				_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: closePayload(endErr)})
+				_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: closeID, Payload: closePayload(endErr)})
 			}
 			return
 		}
@@ -362,9 +394,11 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 }
 
 type sessionManager struct {
-	mu      sync.Mutex
-	streams map[uint32]*streamRelay
-	senderV atomic.Pointer[frameSender]
+	mu       sync.Mutex
+	streams  map[uint32]*streamRelay
+	named    map[string]*namedSession
+	attachMu sync.Mutex // serializes named-session attach against itself and kill
+	senderV  atomic.Pointer[frameSender]
 }
 
 const (
@@ -373,7 +407,7 @@ const (
 )
 
 func newSessionManager() *sessionManager {
-	return &sessionManager{streams: make(map[uint32]*streamRelay)}
+	return &sessionManager{streams: make(map[uint32]*streamRelay), named: make(map[string]*namedSession)}
 }
 
 func (m *sessionManager) sender() *frameSender { return m.senderV.Load() }
@@ -416,6 +450,26 @@ func (m *sessionManager) remove(streamID uint32, expected *streamRelay) *streamR
 	return s
 }
 
+// removeStream deletes whichever stream id currently maps to s (an attach may
+// have re-keyed it) along with any named session entry bound to that id.
+func (m *sessionManager) removeStream(s *streamRelay) (uint32, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, sr := range m.streams {
+		if sr != s {
+			continue
+		}
+		delete(m.streams, id)
+		for name, ns := range m.named {
+			if ns.streamID == id {
+				delete(m.named, name)
+			}
+		}
+		return id, true
+	}
+	return 0, false
+}
+
 // reapLoop destroys streams whose client never came back.
 func (m *sessionManager) reapLoop(ctx context.Context) {
 	t := time.NewTicker(reapCheckInterval)
@@ -433,9 +487,16 @@ func (m *sessionManager) reapLoop(ctx context.Context) {
 func (m *sessionManager) reapDetached(now time.Time) {
 	m.mu.Lock()
 	allDetached := m.sender() == nil
+	persistent := make(map[uint32]bool, len(m.named))
+	for _, ns := range m.named {
+		persistent[ns.streamID] = true
+	}
 	var expiredIDs []uint32
 	var expired []*streamRelay
 	for id, sr := range m.streams {
+		if persistent[id] {
+			continue
+		}
 		sr.mu.Lock()
 		if allDetached && sr.detachedSince.IsZero() {
 			sr.detachedSince = now

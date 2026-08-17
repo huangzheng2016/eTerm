@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
 	"time"
@@ -41,6 +42,7 @@ type runtimeConfig struct {
 	name     string
 	peerID   string
 	tenantID string
+	hasTmux  bool
 }
 
 const (
@@ -60,7 +62,13 @@ var (
 	tmuxAttachSession = tmux.AttachSession
 	tmuxKillSession   = tmux.KillSession
 	tmuxRenameSession = tmux.RenameSession
+	localNewSession   = localterm.NewSession
 )
+
+func hasTmuxBinary() bool {
+	_, err := exec.LookPath("tmux")
+	return err == nil
+}
 
 func Run(ctx context.Context, cfg Config) error {
 	dbPath := cfg.DBPath
@@ -117,6 +125,7 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 		name:     name,
 		peerID:   peerID,
 		tenantID: sc.TenantID(),
+		hasTmux:  hasTmuxBinary(),
 	}, nil
 }
 
@@ -285,6 +294,14 @@ func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *
 			}
 			return
 		}
+		if mgr.isPersistent(f.StreamID) {
+			// Daemon-hosted named session: closing the tab detaches, the
+			// shell keeps running until an explicit kill.
+			if sr := mgr.get(f.StreamID); sr != nil {
+				sr.markDetached()
+			}
+			return
+		}
 		if sr := mgr.remove(f.StreamID, nil); sr != nil {
 			sr.shutdown()
 			_ = sr.is.Close()
@@ -318,7 +335,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 	rows, cols := req.Rows, req.Cols
 	rows, cols = internalssh.NormalizePTYSize(rows, cols)
 	configFile := ""
-	if req.Target == relay.TargetTmuxList || req.Target == relay.TargetTmuxNew || req.Target == relay.TargetTmuxAttach || req.Target == relay.TargetTmuxKill || req.Target == relay.TargetTmuxRename {
+	if rt.hasTmux && (req.Target == relay.TargetTmuxList || req.Target == relay.TargetTmuxNew || req.Target == relay.TargetTmuxAttach || req.Target == relay.TargetTmuxKill || req.Target == relay.TargetTmuxRename) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
@@ -348,6 +365,10 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 	}
 	switch req.Target {
 	case relay.TargetTmuxList:
+		if !rt.hasTmux {
+			daemonSessionList(mgr, sender, f.StreamID)
+			return
+		}
 		list, err := tmuxListSessions(ctx, configFile)
 		if err != nil {
 			openErr(err)
@@ -358,6 +379,10 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetTmuxNew:
+		if !rt.hasTmux {
+			daemonSessionNew(rt, mgr, sender, f.StreamID, rows, cols, streamCtx)
+			return
+		}
 		is, name, err := tmuxNewSession(ctx, configFile, rows, cols)
 		if err != nil {
 			openErr(err)
@@ -371,6 +396,10 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		}
 		startStream(is, []byte(name))
 	case relay.TargetTmuxAttach:
+		if !rt.hasTmux {
+			daemonSessionAttach(mgr, sender, f.StreamID, req.SessionID, req.ResumeFromSeq)
+			return
+		}
 		is, err := tmuxAttachSession(ctx, configFile, req.SessionID, rows, cols)
 		if err != nil {
 			openErr(err)
@@ -383,6 +412,10 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		}
 		startStream(is, nil)
 	case relay.TargetTmuxKill:
+		if !rt.hasTmux {
+			daemonSessionKill(mgr, sender, f.StreamID, req.SessionID)
+			return
+		}
 		if err := tmuxKillSession(ctx, configFile, req.SessionID); err != nil {
 			openErr(err)
 			return
@@ -391,6 +424,10 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetTmuxRename:
+		if !rt.hasTmux {
+			daemonSessionRename(mgr, sender, f.StreamID, req.SessionID, req.Name)
+			return
+		}
 		if err := tmuxRenameSession(ctx, configFile, req.SessionID, req.Name); err != nil {
 			openErr(err)
 			return
@@ -429,7 +466,7 @@ func openTarget(rt *runtimeConfig, req relay.OpenRequest, rows, cols int) (*inte
 	switch req.Target {
 	case relay.TargetLocal:
 		configured, _ := db.GetSetting(rt.db, localterm.SettingShell)
-		return localterm.NewSession(localterm.DefaultShell(configured), rows, cols)
+		return localNewSession(localterm.DefaultShell(configured), rows, cols)
 	case relay.TargetHost:
 		return openHost(rt, req.HostSyncID, rows, cols)
 	default:

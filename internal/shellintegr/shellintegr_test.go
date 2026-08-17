@@ -113,6 +113,7 @@ func TestZshWrapperStartsClean(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", "") // isolate from a parent shell wrapped by eTerm
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("echo USER_ZSHRC_RAN\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,8 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +74,39 @@ func TestDataPayloadRoundTrip(t *testing.T) {
 func TestParseDataRejectsShortPayload(t *testing.T) {
 	if _, _, err := ParseData([]byte("abc")); err == nil {
 		t.Fatal("expected short data payload error")
+	}
+}
+
+func TestTmuxSessionInfoDaemonJSON(t *testing.T) {
+	payload, err := json.Marshal([]TmuxSessionInfo{{Name: "work", CreatedUnix: 5, Attached: true, Daemon: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"daemon":true`) {
+		t.Fatalf("daemon flag missing: %s", payload)
+	}
+	var out []TmuxSessionInfo
+	if err := json.Unmarshal(payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || !out[0].Daemon || out[0].Name != "work" {
+		t.Fatalf("got %+v", out)
+	}
+
+	// Real tmux entries carry no daemon flag; it must parse as false.
+	var plain []TmuxSessionInfo
+	if err := json.Unmarshal([]byte(`[{"name":"ops","created_unix":1,"attached":false}]`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if len(plain) != 1 || plain[0].Daemon {
+		t.Fatalf("got %+v", plain)
+	}
+	payload, err = json.Marshal(plain[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "daemon") {
+		t.Fatalf("zero daemon flag not omitted: %s", payload)
 	}
 }
 
