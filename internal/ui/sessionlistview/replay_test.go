@@ -189,8 +189,9 @@ func TestStaleReplayTickDoesNotAdvanceReplacement(t *testing.T) {
 	current.lastTick = time.Now().Add(-time.Second)
 	m := New(nil)
 	m.replay = current
+	base := current.pos
 	m.Update(replayTickMsg{replay: old, at: time.Now()})
-	if current.pos != 0 {
+	if current.pos != base {
 		t.Fatalf("replacement advanced to %v", current.pos)
 	}
 }
