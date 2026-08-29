@@ -100,7 +100,7 @@ func syncTickCmd(database *gorm.DB) tea.Cmd {
 	interval, _ := db.GetSetting(database, "sync_interval")
 	sec, _ := strconv.Atoi(interval)
 	if sec <= 0 {
-		return nil
+		sec = 300 // match LoadConfig default for empty/invalid sync_interval
 	}
 	enabled, _ := db.GetSetting(database, "sync_enabled")
 	if enabled != "true" {
