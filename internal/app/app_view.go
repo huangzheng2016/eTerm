@@ -33,10 +33,13 @@ func (a App) View() tea.View {
 		}
 
 		var contentView string
+		var tabCursor *tea.Cursor
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
 			tab := a.tabs[a.activeTab]
 			if tab.Model != nil {
-				contentView = tab.Model.View().Content
+				tv := tab.Model.View()
+				contentView = tv.Content
+				tabCursor = tv.Cursor
 				if isListView(tab.Type) {
 					contentView = renderListLayout(tab.Type, contentView, layoutW, a.mainContentHeightForType(tab.Type))
 				}
@@ -47,8 +50,9 @@ func (a App) View() tea.View {
 		// lands on the last terminal line. TrimRight trailing \n first, then
 		// pad or truncate to the exact allocated height.
 		allocH := 0
+		topH := 0
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
-			topH := lipgloss.Height(strings.TrimRight(tabChrome, "\n"))
+			topH = lipgloss.Height(strings.TrimRight(tabChrome, "\n"))
 			allocH = a.height - topH - 1
 			if allocH < 1 {
 				allocH = 1
@@ -89,6 +93,7 @@ func (a App) View() tea.View {
 		parts = append(parts, contentView) // already padded to exact allocH; do not trim
 		parts = append(parts, strings.TrimRight(statusView, "\n"))
 		main := strings.Join(parts, "\n")
+		mainNoOverlay := main
 
 		// Overlay: confirm dialog, quick connect, or snippet picker
 		if a.confirm.IsActive() {
@@ -164,6 +169,13 @@ func (a App) View() tea.View {
 		}
 
 		view = tea.NewView(main)
+		// Propagate the tab's cursor to the frame, offset by the tab chrome,
+		// so the outer terminal's hardware cursor (and the OS IME candidate
+		// window) anchors at the inner app's cursor cell. Overlays replace
+		// the frame, so the tab cursor no longer applies.
+		if tabCursor != nil && main == mainNoOverlay {
+			view.Cursor = tea.NewCursor(tabCursor.X, tabCursor.Y+topH)
+		}
 	default:
 		view = tea.NewView("")
 	}

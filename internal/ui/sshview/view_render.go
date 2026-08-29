@@ -14,8 +14,8 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
-// vt.Render() omits trailing blank cells. In alt-screen full-screen apps, render
-// the whole cell grid so cleared areas overwrite the previous frame.
+// In alt-screen full-screen apps, render the whole cell grid so cleared
+// areas overwrite the previous frame.
 var disconnectBannerStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#e0a000")).
 	Bold(true)
@@ -37,6 +37,7 @@ var scrollIndicatorStyle = lipgloss.NewStyle().
 	Bold(true)
 
 func (m *Model) View() tea.View {
+	cur, reportCur := m.reportCursor()
 	var screen string
 	switch {
 	case m.sel.active && !m.emu.IsAltScreen():
@@ -45,6 +46,11 @@ func (m *Model) View() tea.View {
 		screen = m.renderScrollback()
 	case m.bottomPad > 0 && !m.emu.IsAltScreen():
 		screen = m.renderBottomPad()
+	case reportCur:
+		// No software cursor: the outer terminal draws its hardware cursor at
+		// the reported position (block-inverting an already inverted cell
+		// would cancel out).
+		screen = m.renderScreen()
 	default:
 		screen = m.renderScreenWithCursor()
 	}
@@ -52,7 +58,9 @@ func (m *Model) View() tea.View {
 		if m.reconnecting {
 			banner := disconnectBannerStyle.Render("Reconnecting...")
 			screen = strings.TrimRight(screen, "\n") + "\n\n" + banner
-			return tea.NewView(screen)
+			v := tea.NewView(screen)
+			v.Cursor = cur
+			return v
 		}
 		screen = overlayFirstLineRight(screen, m.emu.Width(), disconnectedBadgeStyle.Render("DISCONNECTED"))
 		key := viewkeys.HelpLabel(m.vk.Reconnect)
@@ -67,7 +75,33 @@ func (m *Model) View() tea.View {
 		screen = strings.TrimRight(screen, "\n") + "\n\n" + banner
 	}
 	v := tea.NewView(screen)
+	v.Cursor = cur
 	return v
+}
+
+// reportCursor returns the inner terminal cursor position so the outer
+// terminal can place its hardware cursor (and the OS IME candidate window)
+// at the right cell. ok is false when the visible view does not map 1:1 to
+// the live screen (selection, scrollback, bottom pad) or the cursor is
+// hidden or out of bounds.
+func (m *Model) reportCursor() (*tea.Cursor, bool) {
+	if m.cursorHidden || m.sel.active || m.scrollOffset > 0 || m.bottomPad > 0 {
+		return nil, false
+	}
+	w, h := m.emu.Width(), m.emu.Height()
+	pos := m.emu.CursorPosition()
+	if w <= 0 || h <= 0 || pos.X < 0 || pos.Y < 0 || pos.X >= w || pos.Y >= h {
+		return nil, false
+	}
+	return tea.NewCursor(pos.X, pos.Y), true
+}
+
+// renderScreen renders the visible grid without a software cursor.
+func (m *Model) renderScreen() string {
+	if m.emu.IsAltScreen() {
+		return m.renderFullScreen()
+	}
+	return m.emu.Render()
 }
 
 func overlayFirstLineRight(screen string, width int, overlay string) string {
