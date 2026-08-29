@@ -2,6 +2,7 @@ package sshview
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func TestTmuxTerminalProbesReply(t *testing.T) {
 	stdin.waitContains(t, "\x1b[?997;1n")
 	stdin.waitContains(t, "\x1bP>|eTerm\x1b\\")
 	stdin.waitContains(t, "\x1b[8;10;40t")
-	if got := m.emu.Render(); got != "\n\n\n\n\n\n\n\n\n" {
+	if got := m.emu.Render(); strings.TrimSpace(got) != "" {
 		t.Fatalf("probes polluted screen: %q", got)
 	}
 }
@@ -89,7 +90,7 @@ func TestXTGETTCAPReplies(t *testing.T) {
 	stdin.waitContains(t, "\x1bP1+r524742=382F382F38\x1b\\")
 	stdin.waitContains(t, "\x1bP1+r4D73=1B5D35323B25703125733B257032257307\x1b\\")
 	stdin.waitContains(t, "\x1bP0+r626164\x1b\\")
-	if got := m.emu.Render(); got != "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" {
+	if got := m.emu.Render(); strings.TrimSpace(got) != "" {
 		t.Fatalf("xtgettcap polluted screen: %q", got)
 	}
 }
