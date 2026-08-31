@@ -57,6 +57,14 @@ type Callbacks struct {
 	// terminal receives an OSC 9 desktop notification.
 	Notification func(string)
 
+	// PromptStart callback. When set, this function is called when the shell
+	// reports the start of a prompt (OSC 133;A).
+	PromptStart func()
+
+	// InputStart callback. When set, this function is called when the shell
+	// reports the start of user input (OSC 133;B).
+	InputStart func()
+
 	// CommandStart callback. When set, this function is called when the shell
 	// reports the start of command execution (OSC 133;C).
 	CommandStart func()

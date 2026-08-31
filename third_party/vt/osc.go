@@ -143,6 +143,38 @@ func (e *Emulator) handleNotification(cmd int, data []byte) {
 	}
 }
 
+// handleUrxvtNotify handles OSC 777 urxvt notifications. The payload
+// "777;notify;title;body" is folded into the OSC 9 notification flow with
+// the title and body joined.
+func (e *Emulator) handleUrxvtNotify(cmd int, data []byte) {
+	if cmd != 777 {
+		// Invalid, ignore
+		return
+	}
+
+	parts := bytes.SplitN(data, []byte{';'}, 4)
+	if len(parts) != 4 || string(parts[1]) != "notify" {
+		// Invalid, ignore
+		return
+	}
+
+	text := string(parts[2])
+	if body := string(parts[3]); body != "" {
+		if text != "" {
+			text += ": "
+		}
+		text += body
+	}
+	if text == "" {
+		// Invalid, ignore
+		return
+	}
+
+	if e.cb.Notification != nil {
+		e.cb.Notification(text)
+	}
+}
+
 // handleCommandSequence handles OSC 133 shell command lifecycle markers.
 // A = prompt start, B = input start, C = command execution start,
 // D;<exitcode> = command finished.
@@ -159,6 +191,14 @@ func (e *Emulator) handleCommandSequence(cmd int, data []byte) {
 	}
 
 	switch parts[1][0] {
+	case 'A': // Prompt starts
+		if e.cb.PromptStart != nil {
+			e.cb.PromptStart()
+		}
+	case 'B': // Input starts
+		if e.cb.InputStart != nil {
+			e.cb.InputStart()
+		}
 	case 'C': // Command execution starts
 		if e.cb.CommandStart != nil {
 			e.cb.CommandStart()
@@ -183,6 +223,6 @@ func (e *Emulator) handleHyperlink(cmd int, data []byte) {
 		return
 	}
 
-	e.scr.cur.Link.URL = string(parts[1])
-	e.scr.cur.Link.Params = string(parts[2])
+	e.scr.cur.Link.Params = string(parts[1])
+	e.scr.cur.Link.URL = string(parts[2])
 }
