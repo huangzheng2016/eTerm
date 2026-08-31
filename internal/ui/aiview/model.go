@@ -34,6 +34,8 @@ const (
 	modeProviders
 	modeProviderForm
 	modeSessions
+	modeTasks
+	modeTaskDetail
 )
 
 type CloseMsg struct{}
@@ -97,6 +99,12 @@ type Model struct {
 	saveSeq     int
 	sessionList []SessionEntry
 	sCursor     int
+
+	taskList     []TaskEntry
+	tCursor      int
+	tasksSeq     int
+	taskDetailID string
+	dOffset      int
 }
 
 func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model {
@@ -493,6 +501,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveNow()
 		}
 		return m, nil
+	case tasksTickMsg:
+		return m, m.tasksTick(msg.seq)
 	case flushTickMsg:
 		m.flush()
 		return m, nil
@@ -554,6 +564,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.updateProviderForm(msg)
 		case modeSessions:
 			return m, m.updateSessions(msg)
+		case modeTasks:
+			return m, m.updateTasks(msg)
+		case modeTaskDetail:
+			return m, m.updateTaskDetail(msg)
 		}
 		return m.chatKey(msg)
 	}
@@ -633,6 +647,10 @@ func (m *Model) View() tea.View {
 		content = m.form.view()
 	case modeSessions:
 		content = m.sessionsView()
+	case modeTasks:
+		content = m.tasksView()
+	case modeTaskDetail:
+		content = m.taskDetailView()
 	default:
 		content = m.chatView()
 	}

@@ -16,8 +16,10 @@ import (
 // fakeAgent mimics ai.Agent: Run streams until ctx ends (then closes, like
 // the real runner), and Clear blocks while a run holds the agent mutex.
 type fakeAgent struct {
-	clearRelease chan struct{}
-	queued       []string
+	clearRelease   chan struct{}
+	queued         []string
+	snaps          []ai.TaskSnapshot
+	cancelledTasks []string
 }
 
 func (f *fakeAgent) Run(ctx context.Context, input string) <-chan ai.Event {
@@ -40,6 +42,11 @@ func (f *fakeAgent) ImportHistory(data []byte) error            { return nil }
 func (f *fakeAgent) UndoLastTurn()                              {}
 func (f *fakeAgent) Enqueue(text string)                        { f.queued = append(f.queued, text) }
 func (f *fakeAgent) ClearQueue()                                { f.queued = nil }
+func (f *fakeAgent) TaskSnapshots() []ai.TaskSnapshot           { return f.snaps }
+func (f *fakeAgent) CancelTask(id string) bool {
+	f.cancelledTasks = append(f.cancelledTasks, id)
+	return true
+}
 
 func TestCtrlLReturnsPromptlyMidRun(t *testing.T) {
 	release := make(chan struct{})
@@ -192,5 +199,38 @@ func TestSwitchCancelsInFlightRun(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("run still streaming after provider switch")
+	}
+}
+
+func TestBridgeTasksAndCancel(t *testing.T) {
+	bridge := &aiBridge{}
+	if bridge.Tasks() != nil {
+		t.Fatal("tasks without an agent must be nil")
+	}
+	bridge.CancelTask("task-1") // no agent: no-op, no panic
+
+	agent := &fakeAgent{snaps: []ai.TaskSnapshot{
+		{ID: "task-1", Task: "watch the build", Status: ai.TaskRunning, StartedSecAgo: 3, Tail: []ai.TaskActivity{
+			{Kind: "status", Text: "running"},
+			{Kind: "tool", Text: "list_tabs {}"},
+		}},
+	}}
+	bridge.agent = agent
+
+	list := bridge.Tasks()
+	if len(list) != 1 {
+		t.Fatalf("got %d tasks, want 1", len(list))
+	}
+	e := list[0]
+	if e.ID != "task-1" || e.Task != "watch the build" || e.Status != "running" || e.StartedSecAgo != 3 {
+		t.Fatalf("entry = %+v", e)
+	}
+	if len(e.Tail) != 2 || e.Tail[1].Kind != "tool" || e.Tail[1].Text != "list_tabs {}" {
+		t.Fatalf("tail = %+v", e.Tail)
+	}
+
+	bridge.CancelTask("task-1")
+	if len(agent.cancelledTasks) != 1 || agent.cancelledTasks[0] != "task-1" {
+		t.Fatalf("cancel not routed to the agent: %v", agent.cancelledTasks)
 	}
 }

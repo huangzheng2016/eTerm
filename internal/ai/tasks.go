@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,8 @@ const (
 	defaultWaitSeconds = 120
 	maxWaitSeconds     = 600
 	taskResultMaxRunes = 4000
+	taskTailMax        = 50
+	taskActivityRunes  = 120
 )
 
 type TaskStatus string
@@ -40,6 +43,23 @@ type agentTask struct {
 	started time.Time
 	cancel  context.CancelFunc
 	done    chan struct{}
+	tail    []TaskActivity
+}
+
+// TaskActivity is one entry in a task's activity tail: a text snippet, a tool
+// call summary, or a status transition.
+type TaskActivity struct {
+	Kind string // text | tool | status
+	Text string
+}
+
+// TaskSnapshot is a read-only view of one task for the panel's tasks browser.
+type TaskSnapshot struct {
+	ID            string
+	Task          string
+	Status        TaskStatus
+	StartedSecAgo int
+	Tail          []TaskActivity // oldest first, capped at taskTailMax
 }
 
 // TaskManager runs background sub-agents for an Agent. Sub-agent events are
@@ -126,6 +146,7 @@ func (tm *TaskManager) spawn(ctx context.Context, in *SpawnAgentInput) (*SpawnAg
 		started: time.Now(),
 		cancel:  cancel,
 		done:    make(chan struct{}),
+		tail:    []TaskActivity{{Kind: "status", Text: string(TaskRunning)}},
 	}
 	tm.tasks = append(tm.tasks, t)
 	tm.mu.Unlock()
@@ -144,6 +165,55 @@ func (tm *TaskManager) CancelAll() {
 			t.cancel()
 		}
 	}
+}
+
+// CancelTask cancels one running task; its wait caller unblocks with status
+// cancelled. Returns false when the id is unknown or not running.
+func (tm *TaskManager) CancelTask(id string) bool {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, t := range tm.tasks {
+		if t.id == id {
+			if t.status != TaskRunning {
+				return false
+			}
+			t.cancel()
+			return true
+		}
+	}
+	return false
+}
+
+// recordActivity appends one entry to the task's activity tail; the tail is a
+// ring buffer capped at taskTailMax (oldest dropped). Text is collapsed to
+// one line and truncated.
+func (tm *TaskManager) recordActivity(t *agentTask, kind, text string) {
+	text = strings.Join(strings.Fields(text), " ")
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	t.tail = append(t.tail, TaskActivity{Kind: kind, Text: truncateRunes(text, taskActivityRunes)})
+	if len(t.tail) > taskTailMax {
+		t.tail = t.tail[len(t.tail)-taskTailMax:]
+	}
+}
+
+// Snapshots returns every task with its activity tail, oldest spawn first.
+func (tm *TaskManager) Snapshots() []TaskSnapshot {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	out := make([]TaskSnapshot, 0, len(tm.tasks))
+	for _, t := range tm.tasks {
+		tail := make([]TaskActivity, len(t.tail))
+		copy(tail, t.tail)
+		out = append(out, TaskSnapshot{
+			ID:            t.id,
+			Task:          t.task,
+			Status:        t.status,
+			StartedSecAgo: int(time.Since(t.started).Seconds()),
+			Tail:          tail,
+		})
+	}
+	return out
 }
 
 func (tm *TaskManager) wait(ctx context.Context, in *WaitAgentInput) (*WaitAgentOutput, error) {
@@ -202,7 +272,7 @@ func (tm *TaskManager) list(ctx context.Context, in *ListAgentsInput) (*ListAgen
 // runTask executes one sub-agent turn on a detached ctx (the task keeps
 // running after the spawning tool call returns), stoppable via CancelAll.
 func (tm *TaskManager) runTask(ctx context.Context, t *agentTask, taskCtx string) {
-	result, err := tm.runAgent(ctx, t.task, taskCtx)
+	result, err := tm.runAgent(ctx, t, taskCtx)
 	tm.mu.Lock()
 	switch {
 	case ctx.Err() != nil:
@@ -216,18 +286,24 @@ func (tm *TaskManager) runTask(ctx context.Context, t *agentTask, taskCtx string
 		t.status = TaskDone
 	}
 	t.result = result
+	status := t.status
 	tm.mu.Unlock()
+	text := string(status)
+	if status == TaskError && err != nil {
+		text = "error: " + err.Error()
+	}
+	tm.recordActivity(t, "status", text)
 	close(t.done)
 }
 
-func (tm *TaskManager) runAgent(ctx context.Context, task, taskCtx string) (string, error) {
+func (tm *TaskManager) runAgent(ctx context.Context, t *agentTask, taskCtx string) (string, error) {
 	agent, err := tm.factory(ctx)
 	if err != nil {
 		return "", err
 	}
-	input := task
+	input := t.task
 	if taskCtx != "" {
-		input = task + "\n\nContext:\n" + taskCtx
+		input = t.task + "\n\nContext:\n" + taskCtx
 	}
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent, EnableStreaming: true})
 	iterator := runner.Run(ctx, []*schema.Message{schema.UserMessage(input)})
@@ -262,8 +338,15 @@ func (tm *TaskManager) runAgent(ctx context.Context, task, taskCtx string) (stri
 		} else {
 			msg = mo.Message
 		}
-		if msg != nil && mo.Role == schema.Assistant && msg.Content != "" {
+		if msg == nil || mo.Role != schema.Assistant {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			tm.recordActivity(t, "tool", tc.Function.Name+" "+tc.Function.Arguments)
+		}
+		if msg.Content != "" {
 			lastText = msg.Content
+			tm.recordActivity(t, "text", msg.Content)
 		}
 	}
 	return lastText, runErr

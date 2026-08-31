@@ -232,6 +232,23 @@ func (a *Agent) Close() {
 	}
 }
 
+// TaskSnapshots returns every background task with its activity tail, for the
+// panel's tasks browser.
+func (a *Agent) TaskSnapshots() []TaskSnapshot {
+	if a.tasks == nil {
+		return nil
+	}
+	return a.tasks.Snapshots()
+}
+
+// CancelTask cancels one running background task.
+func (a *Agent) CancelTask(id string) bool {
+	if a.tasks == nil {
+		return false
+	}
+	return a.tasks.CancelTask(id)
+}
+
 func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 	send := func(ev Event) {
 		select {

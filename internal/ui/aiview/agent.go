@@ -58,6 +58,22 @@ type ProviderStore interface {
 	Add(p Provider)
 }
 
+// TaskActivity is one entry in a background task's activity tail: a text
+// snippet, a tool call summary, or a status transition.
+type TaskActivity struct {
+	Kind string // text | tool | status
+	Text string
+}
+
+// TaskEntry describes one background sub-agent for the /tasks view.
+type TaskEntry struct {
+	ID            string
+	Task          string
+	Status        string // running | done | error | cancelled
+	StartedSecAgo int
+	Tail          []TaskActivity // oldest first
+}
+
 // SessionEntry describes one saved chat session for the /resume picker.
 type SessionEntry struct {
 	ID        string
