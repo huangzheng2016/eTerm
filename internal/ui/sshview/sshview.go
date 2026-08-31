@@ -67,6 +67,13 @@ type StreamDoneMsg struct {
 	Err      error
 }
 
+// TitleMsg carries an OSC 0/2 title change from the remote shell; StreamID
+// routes it to the owning tab in App.Update.
+type TitleMsg struct {
+	StreamID uint64
+	Title    string
+}
+
 type selectionAutoScrollMsg struct {
 	StreamID uint64
 }
@@ -143,6 +150,8 @@ type Model struct {
 
 	osc52Clipboard    []string
 	osc9Notifications []string
+	oscTitles         []string
+	lastTitle         string
 	recorder          *Recorder
 
 	// Command lifecycle from OSC 133 (set from emulator callbacks during Write).
@@ -239,6 +248,12 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		},
 		CursorVisibility: func(visible bool) {
 			m.cursorHidden = !visible
+		},
+		Title: func(name string) {
+			m.pushOSCTitle(name)
+		},
+		IconName: func(name string) {
+			m.pushOSCTitle(name)
 		},
 		Notification: func(text string) {
 			m.osc9Notifications = append(m.osc9Notifications, text)
@@ -788,6 +803,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.writeEmulator(msg.Data)
 		clipCmds := m.takeOSC52ClipboardCommands()
 		notifyCmds := m.takeOSC9NotificationCommands()
+		titleCmds := m.takeTitleCommands()
 		// Only follow new output when already at the live view (bottom). When the
 		// user has scrolled up, keep the same lines in view by compensating for the
 		// rows that the new output pushed into scrollback.
@@ -799,7 +815,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, tea.Batch(append(append(clipCmds, notifyCmds...), waitChunk(m))...)
+		cmds := append(clipCmds, notifyCmds...)
+		cmds = append(cmds, titleCmds...)
+		return m, tea.Batch(append(cmds, waitChunk(m))...)
 
 	case StreamDoneMsg:
 		if msg.StreamID != m.streamID {
@@ -1077,6 +1095,38 @@ func (m *Model) takeOSC9NotificationCommands() []tea.Cmd {
 		out = append(out, tea.Raw(osc9Sequence(text)))
 	}
 	m.osc9Notifications = nil
+	return out
+}
+
+// pushOSCTitle records a title change from OSC 0/1/2. OSC 0 fires both the
+// Title and IconName callbacks with the same text, so consecutive duplicates
+// are dropped; control characters are stripped so the tab bar cannot be
+// injected with escape sequences.
+func (m *Model) pushOSCTitle(name string) {
+	clean := strings.Map(func(r rune) rune {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, name)
+	clean = strings.TrimSpace(clean)
+	if clean == "" || clean == m.lastTitle {
+		return
+	}
+	m.lastTitle = clean
+	m.oscTitles = append(m.oscTitles, clean)
+}
+
+func (m *Model) takeTitleCommands() []tea.Cmd {
+	if len(m.oscTitles) == 0 {
+		return nil
+	}
+	out := make([]tea.Cmd, 0, len(m.oscTitles))
+	for _, title := range m.oscTitles {
+		msg := TitleMsg{StreamID: m.streamID, Title: title}
+		out = append(out, func() tea.Msg { return msg })
+	}
+	m.oscTitles = nil
 	return out
 }
 

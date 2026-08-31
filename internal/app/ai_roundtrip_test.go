@@ -34,7 +34,8 @@ func (w *syncWriteCloser) String() string {
 
 // serveAIToolRequests mimics the App.Update side of the tool bridge without a
 // tea runtime: handle each request, and for send_keys run the wait tick and
-// the done handler like the aiToolSendKeysDoneMsg case does.
+// the done handler like the aiToolSendKeysDoneMsg case does, following poll
+// re-arms until the request is answered.
 func serveAIToolRequests(a App, ch <-chan aiToolRequest) {
 	for req := range ch {
 		_, cmd := a.handleAIToolRequest(req)
@@ -42,8 +43,12 @@ func serveAIToolRequests(a App, ch <-chan aiToolRequest) {
 			continue
 		}
 		go func(cmd tea.Cmd) {
-			if msg, ok := cmd().(aiToolSendKeysDoneMsg); ok {
-				a.handleAIToolSendKeysDone(msg.req)
+			for cmd != nil {
+				msg, ok := cmd().(aiToolSendKeysDoneMsg)
+				if !ok {
+					return
+				}
+				_, cmd = a.handleAIToolSendKeysDone(msg)
 			}
 		}(cmd)
 	}

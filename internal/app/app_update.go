@@ -113,6 +113,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case sshview.TitleMsg:
+		for i := range a.tabs {
+			m, ok := a.tabs[i].Model.(*sshview.Model)
+			if !ok || m.StreamID() != msg.StreamID {
+				continue
+			}
+			if !a.tabs[i].userRenamed && msg.Title != "" && a.tabs[i].Title != msg.Title {
+				a.tabs[i].Title = msg.Title
+				a.syncTabBar()
+			}
+			return a, nil
+		}
+		return a, nil
+
 	case components.ToastTimeoutMsg:
 		a.toast, _ = a.toast.Update(msg)
 		if a.viewState != MainView || len(a.tabs) == 0 {
@@ -1051,8 +1065,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(toolCmd, waitAIToolRequest(a.aiToolCh))
 
 	case aiToolSendKeysDoneMsg:
-		a.handleAIToolSendKeysDone(msg.req)
-		return a, nil
+		return a.handleAIToolSendKeysDone(msg)
 
 	case aiToolRenameDoneMsg:
 		if msg.err == nil {
