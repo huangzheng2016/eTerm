@@ -1056,9 +1056,11 @@ func (m *Model) takeOSC52ClipboardCommands() []tea.Cmd {
 
 // osc9Sequence re-emits an OSC 9 notification to the outer terminal with
 // control characters stripped so the payload cannot inject sequences.
+// C1 controls (U+0080-U+009F) are stripped too: on C1-interpreting
+// terminals U+009C would terminate the OSC envelope early.
 func osc9Sequence(text string) string {
 	clean := strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
 			return -1
 		}
 		return r
