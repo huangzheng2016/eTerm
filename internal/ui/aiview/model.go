@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
@@ -291,12 +292,9 @@ func (m *Model) flush() {
 	m.dirty = false
 }
 
-func truncateRunes(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max]) + "..."
+// truncateCells truncates s to max terminal cells (ANSI- and wide-rune-aware).
+func truncateCells(s string, max int) string {
+	return ansi.Truncate(s, max, "...")
 }
 
 func (m *Model) renderBlock(i int) {
@@ -321,7 +319,7 @@ func (m *Model) renderBlock(i int) {
 		}
 		// Bound every line to the box interior width or the outer box
 		// re-wraps it and the frame grows a row.
-		label := truncateRunes(b.text, max(0, cw-12-stateW))
+		label := truncateCells(b.text, max(0, cw-9-stateW))
 		head := ui.SelectedStyle.Render("▸ tool: "+label) + " " + state
 		out := strings.TrimRight(b.output, "\n")
 		if out == "" {
@@ -338,7 +336,7 @@ func (m *Model) renderBlock(i int) {
 			preview = preview[:3]
 		}
 		for i, l := range preview {
-			preview[i] = truncateRunes(l, max(0, cw-3))
+			preview[i] = truncateCells(l, max(0, cw))
 		}
 		summary := strings.Join(preview, "\n")
 		if len(lines) > 3 {
@@ -590,7 +588,7 @@ func (m *Model) chatView() string {
 	title := ui.TitleStyle.Render("AI Assistant")
 	if m.store != nil && m.store.Active() != "" {
 		// "AI Assistant"(12) + " · "(3) + spinner(2) + ctx must fit in cw.
-		label := truncateRunes(m.store.Active(), max(0, cw-21-len(ctx)))
+		label := truncateCells(m.store.Active(), max(0, cw-18-len(ctx)))
 		title += ui.DimStyle.Render(" · " + label)
 	}
 	if m.status == statusRunning {
@@ -598,12 +596,13 @@ func (m *Model) chatView() string {
 	}
 	title += ui.DimStyle.Render(ctx)
 
-	hintText := truncateRunes("enter send · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close", max(0, cw-3))
+	hintText := truncateCells("enter send · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close", max(0, cw))
 	hint := ui.DimStyle.Render(hintText)
 	// The error takes the blank row above the hint so it never adds a row.
 	errLine := ""
 	if m.status == statusError {
-		errLine = ui.ErrorStyle.Render(truncateRunes("error: "+m.errMsg, max(0, cw-3)))
+		collapsed := strings.Join(strings.Fields(m.errMsg), " ")
+		errLine = ui.ErrorStyle.Render(truncateCells("error: "+collapsed, max(0, cw)))
 	}
 
 	body := m.viewport.View()

@@ -16,19 +16,19 @@ import (
 
 func TestDecodeSendKeys(t *testing.T) {
 	cases := map[string]string{
-		`\n`:             "\n",  // backslash+n -> one LF byte
-		`\\n`:            `\n`,  // escaped backslash -> literal backslash+n
+		`\n`:            "\n",            // backslash+n -> one LF byte
+		`\\n`:           `\n`,            // escaped backslash -> literal backslash+n
 		"real\nnewline": "real\nnewline", // raw control bytes pass through
-		`\t`:             "\t",
-		`\r`:             "\r",
-		`\\`:             `\`,
-		`\x41\x42`:       "AB",
-		`\x0a`:           "\n",
-		`\x4`:            `\x4`,  // incomplete hex passes through
-		`\xzz`:           `\xzz`, // invalid hex passes through
-		`\q`:             `\q`,   // unknown escape passes through
-		`a\`:             `a\`,   // trailing backslash
-		"plain":          "plain",
+		`\t`:            "\t",
+		`\r`:            "\r",
+		`\\`:            `\`,
+		`\x41\x42`:      "AB",
+		`\x0a`:          "\n",
+		`\x4`:           `\x4`,  // incomplete hex passes through
+		`\xzz`:          `\xzz`, // invalid hex passes through
+		`\q`:            `\q`,   // unknown escape passes through
+		`a\`:            `a\`,   // trailing backslash
+		"plain":         "plain",
 	}
 	for in, want := range cases {
 		if got := decodeSendKeys(in); got != want {

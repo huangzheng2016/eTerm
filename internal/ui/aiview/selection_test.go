@@ -47,8 +47,8 @@ func TestDragSelectCopiesPlainText(t *testing.T) {
 
 func TestDragSelectAcrossLines(t *testing.T) {
 	m := newSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(3, 3)))   // line 0, col 1
-	m.Update(tea.MouseMotionMsg(mouse(8, 5)))  // line 2, col 6
+	m.Update(tea.MouseClickMsg(mouse(3, 3)))  // line 0, col 1
+	m.Update(tea.MouseMotionMsg(mouse(8, 5))) // line 2, col 6
 	_, cmd := m.Update(tea.MouseReleaseMsg(mouse(8, 5)))
 	if cmd == nil {
 		t.Fatal("release after drag returned no clipboard cmd")

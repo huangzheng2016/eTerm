@@ -87,3 +87,32 @@ func TestViewLongModelNameStaysInFrame(t *testing.T) {
 		t.Fatalf("long model name: view height = %d, want 24", n)
 	}
 }
+
+func TestMultiLineErrorStaysOneRow(t *testing.T) {
+	m := newTestModel(nil)
+	m.SetSize(100, 32)
+	fillConversation(m)
+	m.status = statusError
+	m.errMsg = "provider unreachable:\nupstream said no\nplease retry"
+	out := m.View().Content
+	if n := viewRows(out); n != 32 {
+		t.Fatalf("multi-line error: view height = %d, want 32", n)
+	}
+	if !strings.Contains(plain(out), "error: provider unreachable: upstream said no please retry") {
+		t.Fatal("error line not collapsed to one row")
+	}
+}
+
+func TestCJKModelNameStaysInFrame(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	name := strings.Repeat("モデル名", 12) // 48 runes, 96 cells
+	fake.Add(Provider{Name: name, Type: "openai"})
+	fake.Switch(name, "x")
+	m := New(fake, fake)
+	m.SetSize(100, 32)
+	fillConversation(m)
+	if n := viewRows(m.View().Content); n != 32 {
+		t.Fatalf("CJK model name: view height = %d, want 32", n)
+	}
+}

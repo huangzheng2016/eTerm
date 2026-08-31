@@ -277,6 +277,8 @@ func (b *aiBridge) Switch(provider, model string) {
 	if err := b.store.SetActive(provider, model); err != nil {
 		return
 	}
+	// A switch mid-run strands the old agent's turn on the old provider.
+	b.CancelRun()
 	b.persistActive()
 }
 
