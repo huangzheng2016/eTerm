@@ -34,6 +34,7 @@ func (a App) View() tea.View {
 
 		var contentView string
 		var tabCursor *tea.Cursor
+		var aiCursor *tea.Cursor
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
 			tab := a.tabs[a.activeTab]
 			if tab.Model != nil {
@@ -111,7 +112,9 @@ func (a App) View() tea.View {
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.aiVisible && a.aiView != nil {
 			// AI panel is fullscreen: it replaces the whole frame.
-			main = a.aiView.View().Content
+			av := a.aiView.View()
+			main = av.Content
+			aiCursor = av.Cursor
 		} else if a.renamePrompt != nil {
 			overlay := a.renamePrompt.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
@@ -179,9 +182,12 @@ func (a App) View() tea.View {
 		// Propagate the tab's cursor to the frame, offset by the tab chrome,
 		// so the outer terminal's hardware cursor (and the OS IME candidate
 		// window) anchors at the inner app's cursor cell. Overlays replace
-		// the frame, so the tab cursor no longer applies.
+		// the frame, so the tab cursor no longer applies. The AI overlay is
+		// fullscreen at the frame origin, so its cursor needs no offset.
 		if tabCursor != nil && main == mainNoOverlay {
 			view.Cursor = tea.NewCursor(tabCursor.X, tabCursor.Y+topH)
+		} else if aiCursor != nil {
+			view.Cursor = aiCursor
 		}
 	default:
 		view = tea.NewView("")

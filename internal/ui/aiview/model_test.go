@@ -467,7 +467,8 @@ func TestTitleFitsWithVoiceActive(t *testing.T) {
 	m.SetVoiceActive(true)
 	m.status = statusRunning // spinner visible too
 
-	line := strings.Split(plain(m.chatView()), "\n")[0]
+	content, _ := m.chatView()
+	line := strings.Split(plain(content), "\n")[0]
 	cw := m.contentWidth()
 	if w := ansi.StringWidth(line); w > cw {
 		t.Fatalf("title width %d exceeds content width %d: %q", w, cw, line)
