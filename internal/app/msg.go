@@ -51,6 +51,7 @@ type tmuxRenameAppliedMsg struct {
 type voiceEventMsg struct{ ev voice.Event }
 type voiceProgressMsg struct{ pct float64 }
 type voiceStartedMsg struct{}
+type voiceStoppedMsg struct{}
 type voiceStartFailedMsg struct{ err error }
 type voiceTickMsg struct{ seq int }
 type voiceEngineClosedMsg struct{}

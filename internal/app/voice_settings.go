@@ -69,15 +69,10 @@ func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 }
 
 // adjust cycles the enum rows and steps the threshold; returns the persist
-// command when the row changed.
+// command when the row changed. The engine row is inert while Volcano is
+// gated (no audio passthrough yet).
 func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 	switch m.cursor {
-	case voiceRowEngine:
-		if m.cfg.Engine == voiceEngineLocal {
-			m.cfg.Engine = voiceEngineVolcano
-		} else {
-			m.cfg.Engine = voiceEngineLocal
-		}
 	case voiceRowThreshold:
 		m.cfg.VADThreshold = math.Round((m.cfg.VADThreshold+float64(dir)*0.05)*100) / 100
 		if m.cfg.VADThreshold < 0 {
@@ -94,10 +89,8 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 			m.cfg.SentenceEnd = voice.SentenceEndEnter
 		}
 		return m.persist(true)
-	default:
-		return nil
 	}
-	return m.persist(false)
+	return nil
 }
 
 func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
@@ -195,7 +188,10 @@ func (m *voiceSettingsModel) View() string {
 		}
 		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-18s", r.label)), ui.DimStyle.Render(value)))
 	}
-	lines = append(lines, "", ui.DimStyle.Render("up/down move · left/right change · enter edit · esc close"))
+	lines = append(lines,
+		ui.DimStyle.Render("volcano engine: coming soon (audio passthrough not wired)"),
+		"",
+		ui.DimStyle.Render("up/down move · left/right change · enter edit · esc close"))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).

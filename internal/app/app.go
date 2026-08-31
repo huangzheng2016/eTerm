@@ -137,6 +137,7 @@ type App struct {
 	voiceCfgLoaded     bool
 	voiceName          string
 	voiceRec           bool
+	voiceBusy          bool // engine start/stop in flight; toggles only flip voiceRec
 	voiceStartedAt     time.Time
 	voicePartial       string
 	voiceTickSeq       int

@@ -52,6 +52,7 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.helpOverlay = false
 		a.upgradePrompt = nil
 		a.connError = nil
+		a.voiceSettingsView = nil
 		if a.confirm.IsActive() {
 			a.confirm, _ = a.confirm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 			cmd := a.processConfirmResult()
@@ -100,6 +101,21 @@ func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 		if closed {
 			a.escMenu = nil
 		}
+		return a, cmd
+	}
+	return a, nil
+}
+
+// voiceSettingsMouse handles a click inside the voice settings overlay.
+// Layout: border(1) + padding(1) + title(1) + blank(1) + rows at ly=4..9.
+func (a App) voiceSettingsMouse(lx, ly int) (tea.Model, tea.Cmd) {
+	if a.voiceSettingsView == nil {
+		return a, nil
+	}
+	itemY := ly - 4
+	if itemY >= 0 && itemY < voiceRowCount {
+		a.voiceSettingsView.cursor = itemY
+		_, cmd := a.voiceSettingsView.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		return a, cmd
 	}
 	return a, nil

@@ -48,7 +48,10 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 	if database == nil {
 		return cfg
 	}
-	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil && (v == voiceEngineLocal || v == voiceEngineVolcano) {
+	// Volcano stays gated until the helper audio passthrough lands (M17):
+	// without an audio feed the cloud engine can never transcribe, so only
+	// "local" is honored for now.
+	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil && v == voiceEngineLocal {
 		cfg.Engine = v
 	}
 	if v, err := db.GetSetting(database, voiceVADSettingKey); err == nil && v != "" {
@@ -199,42 +202,67 @@ func voiceTick(seq int) tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return voiceTickMsg{seq: seq} })
 }
 
-// toggleVoice starts recording on the first press and stops on the second.
+// voiceStartCmd starts the engine; the 5-minute ctx covers the first-use
+// helper+model download.
+func voiceStartCmd(eng voice.Engine) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := eng.Start(ctx); err != nil {
+			return voiceStartFailedMsg{err: err}
+		}
+		return voiceStartedMsg{}
+	}
+}
+
+func voiceStopCmd(eng voice.Engine) tea.Cmd {
+	return func() tea.Msg {
+		if eng != nil {
+			_ = eng.Stop()
+		}
+		return voiceStoppedMsg{}
+	}
+}
+
+// toggleVoice flips the recording intent. Only one engine op runs at a time
+// (voiceBusy); a toggle during an in-flight op just records the intent and
+// the completion handler reconciles, so Start and Stop can never run out of
+// order.
 func (a App) toggleVoice() (App, tea.Cmd) {
-	if a.voiceRec {
-		return a.stopVoice()
+	a.voiceRec = !a.voiceRec
+	if a.aiView != nil {
+		a.aiView.SetVoiceActive(a.voiceRec)
+	}
+	if !a.voiceRec {
+		a.voicePartial = ""
+	}
+	if a.voiceBusy {
+		return a, nil
+	}
+	if !a.voiceRec {
+		a.voiceBusy = true
+		return a, voiceStopCmd(a.voiceEngine)
 	}
 	var cmds []tea.Cmd
 	var ensureCmd tea.Cmd
 	a, ensureCmd = a.ensureVoice()
 	cmds = append(cmds, ensureCmd)
 	if a.voiceEngine == nil {
+		a.voiceRec = false
+		if a.aiView != nil {
+			a.aiView.SetVoiceActive(false)
+		}
 		return a, tea.Batch(cmds...)
 	}
-	a.voiceRec = true
+	a.voiceBusy = true
 	a.voiceStartedAt = time.Now()
 	a.voiceTickSeq++
-	if a.aiView != nil {
-		a.aiView.SetVoiceActive(true)
-	}
-	eng := a.voiceEngine
-	cmds = append(cmds,
-		func() tea.Msg {
-			// The first start downloads the helper binary and the model.
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			if err := eng.Start(ctx); err != nil {
-				return voiceStartFailedMsg{err: err}
-			}
-			return voiceStartedMsg{}
-		},
-		voiceTick(a.voiceTickSeq),
-	)
+	cmds = append(cmds, voiceStartCmd(a.voiceEngine), voiceTick(a.voiceTickSeq))
 	return a, tea.Batch(cmds...)
 }
 
-// stopVoice ends an active recording; the engine stays alive for the next
-// toggle. Safe to call when idle (lock path).
+// stopVoice ends an active recording (lock path); the engine stays alive for
+// the next toggle. Safe to call when idle.
 func (a App) stopVoice() (App, tea.Cmd) {
 	if !a.voiceRec {
 		return a, nil
@@ -244,13 +272,12 @@ func (a App) stopVoice() (App, tea.Cmd) {
 	if a.aiView != nil {
 		a.aiView.SetVoiceActive(false)
 	}
-	eng := a.voiceEngine
-	return a, func() tea.Msg {
-		if eng != nil {
-			_ = eng.Stop()
-		}
-		return nil
+	if a.voiceBusy {
+		// A start is in flight; its completion handler issues the stop.
+		return a, nil
 	}
+	a.voiceBusy = true
+	return a, voiceStopCmd(a.voiceEngine)
 }
 
 func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
@@ -280,7 +307,11 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 
 // deliverVoiceText routes a finalized sentence: into the AI panel input when
 // the overlay is open (enter submits), else typed into the active terminal.
+// Finals in flight at lock time are dropped (Stop finalizes pending speech).
 func (a App) deliverVoiceText(text string) tea.Cmd {
+	if a.viewState != MainView {
+		return nil
+	}
 	end := a.voiceCfg.SentenceEnd
 	if a.aiVisible && a.aiView != nil {
 		if end == voice.SentenceEndEnter {

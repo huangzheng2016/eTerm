@@ -697,8 +697,12 @@ func (m *Model) chatView() string {
 	}
 	title := ui.TitleStyle.Render("AI Assistant")
 	if m.store != nil && m.store.Active() != "" {
-		// "AI Assistant"(12) + " · "(3) + spinner(2) + ctx must fit in cw.
-		label := truncateCells(m.store.Active(), max(0, cw-18-len(ctx)))
+		// "AI Assistant"(12) + " · "(3) + spinner(2) + REC(4) + ctx must fit in cw.
+		budget := 18
+		if m.voiceActive {
+			budget += 4
+		}
+		label := truncateCells(m.store.Active(), max(0, cw-budget-len(ctx)))
 		title += ui.DimStyle.Render(" · " + label)
 	}
 	if m.status == statusRunning {
