@@ -53,6 +53,10 @@ type Callbacks struct {
 	// current working directory changes.
 	WorkingDirectory func(string)
 
+	// Notification callback. When set, this function is called when the
+	// terminal receives an OSC 9 desktop notification.
+	Notification func(string)
+
 	// CommandStart callback. When set, this function is called when the shell
 	// reports the start of command execution (OSC 133;C).
 	CommandStart func()

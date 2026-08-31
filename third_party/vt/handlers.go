@@ -327,6 +327,12 @@ func (e *Emulator) registerDefaultOscHandlers() {
 		return true
 	})
 
+	e.RegisterOscHandler(9, func(data []byte) bool {
+		// iTerm2-style desktop notification
+		e.handleNotification(9, data)
+		return true
+	})
+
 	e.RegisterOscHandler(133, func(data []byte) bool {
 		// Shell command lifecycle markers
 		e.handleCommandSequence(133, data)

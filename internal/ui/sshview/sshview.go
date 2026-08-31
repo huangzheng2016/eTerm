@@ -141,8 +141,9 @@ type Model struct {
 	bracketedPaste bool
 	cursorHidden   bool
 
-	osc52Clipboard []string
-	recorder       *Recorder
+	osc52Clipboard    []string
+	osc9Notifications []string
+	recorder          *Recorder
 
 	// Command lifecycle from OSC 133 (set from emulator callbacks during Write).
 	cmdRunning   bool
@@ -238,6 +239,9 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		},
 		CursorVisibility: func(visible bool) {
 			m.cursorHidden = !visible
+		},
+		Notification: func(text string) {
+			m.osc9Notifications = append(m.osc9Notifications, text)
 		},
 		CommandStart: func() {
 			m.cmdRunning = true
@@ -783,6 +787,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		before := m.emu.ScrollbackLen()
 		m.writeEmulator(msg.Data)
 		clipCmds := m.takeOSC52ClipboardCommands()
+		notifyCmds := m.takeOSC9NotificationCommands()
 		// Only follow new output when already at the live view (bottom). When the
 		// user has scrolled up, keep the same lines in view by compensating for the
 		// rows that the new output pushed into scrollback.
@@ -794,7 +799,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, tea.Batch(append(clipCmds, waitChunk(m))...)
+		return m, tea.Batch(append(append(clipCmds, notifyCmds...), waitChunk(m))...)
 
 	case StreamDoneMsg:
 		if msg.StreamID != m.streamID {
@@ -1046,6 +1051,32 @@ func (m *Model) takeOSC52ClipboardCommands() []tea.Cmd {
 		out = append(out, tea.SetClipboard(text))
 	}
 	m.osc52Clipboard = nil
+	return out
+}
+
+// osc9Sequence re-emits an OSC 9 notification to the outer terminal with
+// control characters stripped so the payload cannot inject sequences.
+// C1 controls (U+0080-U+009F) are stripped too: on C1-interpreting
+// terminals U+009C would terminate the OSC envelope early.
+func osc9Sequence(text string) string {
+	clean := strings.Map(func(r rune) rune {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, text)
+	return "\x1b]9;" + clean + "\a"
+}
+
+func (m *Model) takeOSC9NotificationCommands() []tea.Cmd {
+	if len(m.osc9Notifications) == 0 {
+		return nil
+	}
+	out := make([]tea.Cmd, 0, len(m.osc9Notifications))
+	for _, text := range m.osc9Notifications {
+		out = append(out, tea.Raw(osc9Sequence(text)))
+	}
+	m.osc9Notifications = nil
 	return out
 }
 

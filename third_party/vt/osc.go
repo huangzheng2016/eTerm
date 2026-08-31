@@ -125,6 +125,24 @@ func (e *Emulator) handleWorkingDirectory(cmd int, data []byte) {
 	}
 }
 
+// handleNotification handles OSC 9 iTerm2-style desktop notifications.
+func (e *Emulator) handleNotification(cmd int, data []byte) {
+	if cmd != 9 {
+		// Invalid, ignore
+		return
+	}
+
+	parts := bytes.SplitN(data, []byte{';'}, 2)
+	if len(parts) != 2 || len(parts[1]) == 0 {
+		// Invalid, ignore
+		return
+	}
+
+	if e.cb.Notification != nil {
+		e.cb.Notification(string(parts[1]))
+	}
+}
+
 // handleCommandSequence handles OSC 133 shell command lifecycle markers.
 // A = prompt start, B = input start, C = command execution start,
 // D;<exitcode> = command finished.
