@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,9 +12,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/ai"
+	"github.com/huangzheng2016/eTerm/internal/config"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/tmux"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"gorm.io/gorm"
@@ -25,6 +29,15 @@ const aiSendKeysTailBytes = 2048
 var (
 	aiSendKeysMaxWait      = 10 * time.Second
 	aiSendKeysPollInterval = 100 * time.Millisecond
+)
+
+// Bounds for the open_* tab wait: how often to re-list tabs and how long to
+// wait for the new tab to appear (SSH dials can be slow). Vars so tests can
+// shrink them.
+var (
+	aiOpenPollInterval = 250 * time.Millisecond
+	aiOpenTabTimeout   = 15 * time.Second
+	aiOpenSSHTimeout   = 60 * time.Second
 )
 
 // aiSharedState is read from the agent goroutine and written on the UI
@@ -70,6 +83,10 @@ const (
 	aiToolEnterDaemon
 	aiToolCreateSession
 	aiToolRenameSession
+	aiToolOpenLocal
+	aiToolOpenSSH
+	aiToolOpenTmux
+	aiToolPollTab
 )
 
 // aiToolRequest is posted by the executor (agent goroutine) and answered on
@@ -83,7 +100,10 @@ type aiToolRequest struct {
 	maxBytes int
 	skip     int
 	waitMs   int
-	resp     chan aiToolResult
+	// beforeIDs lists tab ids to exclude (aiToolPollTab: the snapshot taken
+	// when the open was issued).
+	beforeIDs []string
+	resp      chan aiToolResult
 }
 
 type aiToolResult struct {
@@ -133,6 +153,10 @@ type aiExecutor struct {
 	mk     *security.MasterKeyManager
 	reqCh  chan<- aiToolRequest
 	shared *aiSharedState
+	// openMu serializes open_* waits across the main agent and its
+	// sub-agents (they all share this executor), so a tab landing mid-wait
+	// is attributable to the in-flight request.
+	openMu sync.Mutex
 }
 
 func (e *aiExecutor) roundTrip(ctx context.Context, req aiToolRequest) (aiToolResult, error) {
@@ -179,6 +203,116 @@ func (e *aiExecutor) CreateSession(ctx context.Context, daemon, name string) err
 func (e *aiExecutor) RenameSession(ctx context.Context, daemon, oldName, newName string) error {
 	_, err := e.roundTrip(ctx, aiToolRequest{op: aiToolRenameSession, id: daemon, arg: oldName, arg2: newName})
 	return err
+}
+
+// openAndWaitTab issues an open request and polls until the new tab appears.
+// The poll matches on creation-time identity (SSH host id, tmux session name,
+// local-shell kind) rather than the tab title: a remote OSC 0/2 or a local
+// PROMPT_COMMAND can retitle the tab right after creation, before the poll
+// sees it. Opens are serialized (openMu), so a tab landing mid-wait belongs
+// to the in-flight request; the before-snapshot captured atomically by the
+// UI handler excludes pre-existing tabs of the same host/session. A failed
+// open (unknown session, dial error) never lands a tab, so it surfaces as a
+// wait timeout. One accepted gap: a local shell tab opened by the user in the
+// same sub-second window is indistinguishable from ours (local tabs carry no
+// host/session identity).
+func (e *aiExecutor) openAndWaitTab(ctx context.Context, req aiToolRequest, timeout time.Duration) (string, error) {
+	e.openMu.Lock()
+	defer e.openMu.Unlock()
+	r, err := e.roundTrip(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	kind := ""
+	switch req.op {
+	case aiToolOpenSSH:
+		kind = "ssh"
+	case aiToolOpenTmux:
+		kind = "tmux"
+	case aiToolOpenLocal:
+		kind = "local"
+	}
+	before := make([]string, 0, len(r.tabs))
+	for _, t := range r.tabs {
+		before = append(before, t.ID)
+	}
+	poll := aiToolRequest{op: aiToolPollTab, id: kind, arg: r.text, beforeIDs: before}
+	deadline := time.Now().Add(timeout)
+	for {
+		pr, err := e.roundTrip(ctx, poll)
+		if err != nil {
+			return "", err
+		}
+		if pr.text != "" {
+			return pr.text, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timed out waiting for the new tab; the open may have failed")
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(aiOpenPollInterval):
+		}
+	}
+}
+
+func (e *aiExecutor) OpenLocalTerminal(ctx context.Context) (string, error) {
+	return e.openAndWaitTab(ctx, aiToolRequest{op: aiToolOpenLocal}, aiOpenTabTimeout)
+}
+
+func (e *aiExecutor) OpenSSH(ctx context.Context, host string) (string, error) {
+	return e.openAndWaitTab(ctx, aiToolRequest{op: aiToolOpenSSH, id: host}, aiOpenSSHTimeout)
+}
+
+func (e *aiExecutor) OpenTmux(ctx context.Context, session string) (string, error) {
+	sessions, err := e.ListTmuxSessions(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range sessions {
+		if s.Name == session {
+			return e.openAndWaitTab(ctx, aiToolRequest{op: aiToolOpenTmux, arg: session}, aiOpenTabTimeout)
+		}
+	}
+	return "", fmt.Errorf("unknown tmux session: %s", session)
+}
+
+func (e *aiExecutor) ListHosts(ctx context.Context) ([]ai.HostInfo, error) {
+	var hosts []db.Host
+	if err := e.db.WithContext(ctx).Order("alias, hostname").Find(&hosts).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ai.HostInfo, 0, len(hosts))
+	for _, h := range hosts {
+		out = append(out, ai.HostInfo{
+			Name:    hostDisplayName(h),
+			Address: fmt.Sprintf("%s:%d", h.Hostname, h.Port),
+			Tags:    h.Tags,
+			ID:      h.ID,
+		})
+	}
+	return out, nil
+}
+
+func (e *aiExecutor) ListTmuxSessions(ctx context.Context) ([]ai.SessionInfo, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	configFile, err := tmux.ResolveConfig(e.db, config.ConfigDir(), home)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := tmux.ListSessions(ctx, configFile)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ai.SessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, ai.SessionInfo{Name: s.Name, Attached: s.Attached})
+	}
+	return out, nil
 }
 
 func (e *aiExecutor) ListDaemons(ctx context.Context) ([]ai.DaemonInfo, error) {
@@ -309,8 +443,96 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 			}
 			return aiToolRenameDoneMsg{req: req, peer: peer, err: err}
 		}
+	case aiToolOpenLocal:
+		// Respond before the tab exists: the answer carries the tab snapshot
+		// and the poll matcher; the executor polls for the fresh tab id.
+		before := a.aiTabInfos()
+		var cmd tea.Cmd
+		a, cmd = a.openLocalTerminal()
+		req.respond(aiToolResult{tabs: before})
+		return a, cmd
+	case aiToolOpenTmux:
+		before := a.aiTabInfos()
+		var cmd tea.Cmd
+		a, cmd = a.openTmux(types.TmuxOpenMsg{Name: req.arg})
+		req.respond(aiToolResult{text: req.arg, tabs: before})
+		return a, cmd
+	case aiToolOpenSSH:
+		matches := findHostsByName(a.db, req.id)
+		if len(matches) == 0 {
+			req.respond(aiToolResult{err: fmt.Errorf("unknown host: %s (see list_hosts)", req.id)})
+			break
+		}
+		if len(matches) > 1 {
+			var cands []string
+			for _, h := range matches {
+				cands = append(cands, fmt.Sprintf("%s:%d (id %d)", h.Hostname, h.Port, h.ID))
+			}
+			req.respond(aiToolResult{err: fmt.Errorf("host %q is ambiguous (%s); give the hosts unique aliases to open them by name", req.id, strings.Join(cands, ", "))})
+			break
+		}
+		host := matches[0]
+		before := a.aiTabInfos()
+		req.respond(aiToolResult{text: strconv.FormatUint(uint64(host.ID), 10), tabs: before})
+		return a, func() tea.Msg { return types.SSHConnectMsg{HostID: host.ID} }
+	case aiToolPollTab:
+		req.respond(aiToolResult{text: a.findFreshAITab(req.id, req.arg, req.beforeIDs)})
 	}
 	return a, nil
+}
+
+// findHostsByName resolves a list_hosts name (alias, user@host, or hostname -
+// the same display name the command palette shows) to all matching DB rows.
+func findHostsByName(database *gorm.DB, name string) []db.Host {
+	var hosts []db.Host
+	if err := database.Order("alias, hostname").Find(&hosts).Error; err != nil {
+		return nil
+	}
+	var out []db.Host
+	for _, h := range hosts {
+		if hostDisplayName(h) == name {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// findFreshAITab returns the stream-id string of a tab created after the
+// before snapshot, matched by creation-time identity (immune to OSC
+// retitling): ssh = sshview host id, tmux = Tab.TmuxSession, local = a local
+// tab without a tmux session.
+func (a App) findFreshAITab(kind, arg string, before []string) string {
+	skip := make(map[string]bool, len(before))
+	for _, id := range before {
+		skip[id] = true
+	}
+	for i := range a.tabs {
+		m, ok := a.tabs[i].Model.(*sshview.Model)
+		if !ok {
+			continue
+		}
+		id := strconv.FormatUint(m.StreamID(), 10)
+		if skip[id] {
+			continue
+		}
+		switch kind {
+		case "ssh":
+			hostID, err := strconv.ParseUint(arg, 10, 64)
+			if err != nil || m.HostID() != uint(hostID) {
+				continue
+			}
+		case "tmux":
+			if a.tabs[i].TmuxSession != arg {
+				continue
+			}
+		case "local":
+			if a.tabs[i].Type != LocalTab || a.tabs[i].TmuxSession != "" {
+				continue
+			}
+		}
+		return id
+	}
+	return ""
 }
 
 func (a App) aiTabInfos() []ai.TabInfo {

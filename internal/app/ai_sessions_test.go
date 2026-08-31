@@ -175,7 +175,7 @@ func TestBridgeResetHistoryClearsPending(t *testing.T) {
 func TestAgentForCarriesHistoryOnSwitch(t *testing.T) {
 	bridge := testSessionBridge(testSessionDB(t))
 	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
-	bridge.agentKey = "old\x00model"
+	bridge.agentKey = "old\x00model\x00false"
 	p := &ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"}
 	agent, err := bridge.agentFor(p, "m", 0)
 	if err != nil {

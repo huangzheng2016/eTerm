@@ -171,13 +171,19 @@ func TestContextUsageInTitle(t *testing.T) {
 	fake.Delay = 0
 	m := New(ctxRunner{fake, 512, 1024}, fake, fake)
 	m.SetSize(100, 32)
-	if out := plain(m.View().Content); !strings.Contains(out, "ctx 50%") {
+	if out := plain(m.View().Content); !strings.Contains(out, "context: 50% (512/1k)") {
 		t.Fatalf("title missing context usage:\n%s", out)
+	}
+
+	m = New(ctxRunner{fake, 114688, 1048576}, fake, fake)
+	m.SetSize(100, 32)
+	if out := plain(m.View().Content); !strings.Contains(out, "context: 10% (114k/1M)") {
+		t.Fatalf("title missing humanized usage:\n%s", out)
 	}
 
 	m = New(ctxRunner{fake, 0, 0}, fake, fake)
 	m.SetSize(100, 32)
-	if strings.Contains(plain(m.View().Content), "ctx ") {
+	if strings.Contains(plain(m.View().Content), "context:") {
 		t.Fatal("ctx shown without usage data")
 	}
 

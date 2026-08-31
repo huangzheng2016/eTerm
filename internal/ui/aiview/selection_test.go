@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func newSelectionModel() *Model {
@@ -56,6 +58,33 @@ func TestDragSelectAcrossLines(t *testing.T) {
 	text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
 	if text != "ou: hello world\n\nsystem" {
 		t.Fatalf("selected text = %q", text)
+	}
+}
+
+func TestDragSelectCopyShowsToast(t *testing.T) {
+	m := newSelectionModel()
+	m.Update(tea.MouseClickMsg(mouse(2, 3)))
+	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
+	_, cmd := m.Update(tea.MouseReleaseMsg(mouse(10, 3)))
+	if cmd == nil {
+		t.Fatal("release after drag returned no clipboard cmd")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want tea.BatchMsg", cmd())
+	}
+	var success *types.SuccessMsg
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		if msg, ok := c().(types.SuccessMsg); ok {
+			m := msg
+			success = &m
+		}
+	}
+	if success == nil || success.Message != "Copied 9 chars" {
+		t.Fatalf("success msg = %+v", success)
 	}
 }
 

@@ -58,6 +58,9 @@ type Config struct {
 	MaxContextSize int
 	MaxIterations  int
 	Executor       Executor
+	// LocalTools binds the opt-in local-machine tools (bash, file editor)
+	// and mentions them in the system prompt.
+	LocalTools bool
 }
 
 func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
@@ -74,17 +77,25 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 		return nil, err
 	}
 	baseTools := append(tools, sleepTool)
+	if cfg.LocalTools {
+		localTools, err := BuildLocalTools()
+		if err != nil {
+			return nil, err
+		}
+		baseTools = append(baseTools, localTools...)
+	}
+	instruction := agentInstruction(cfg.LocalTools)
 	// Sub-agents get the base tools only: no spawn_agent, so no recursion.
 	// Steer is main-agent only: queued input targets the user's turn.
 	queue := &steerQueue{}
 	tm := NewTaskManager(func(ctx context.Context) (*adk.ChatModelAgent, error) {
-		return buildADKAgent(ctx, chatModel, baseTools, systemPrompt, cfg.MaxIterations, cfg.MaxContextSize, nil)
+		return buildADKAgent(ctx, chatModel, baseTools, instruction, cfg.MaxIterations, cfg.MaxContextSize, nil)
 	})
 	taskTools, err := tm.Tools()
 	if err != nil {
 		return nil, err
 	}
-	adkAgent, err := buildADKAgent(ctx, chatModel, append(baseTools, taskTools...), systemPrompt, cfg.MaxIterations, cfg.MaxContextSize, queue)
+	adkAgent, err := buildADKAgent(ctx, chatModel, append(baseTools, taskTools...), instruction, cfg.MaxIterations, cfg.MaxContextSize, queue)
 	if err != nil {
 		return nil, err
 	}
