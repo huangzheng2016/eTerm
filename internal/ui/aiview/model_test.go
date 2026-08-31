@@ -22,7 +22,7 @@ func newTestModel(events []AgentEvent) *Model {
 	fake := NewFakeRunner()
 	fake.Events = events
 	fake.Delay = 0
-	m := New(fake, fake)
+	m := New(fake, fake, fake)
 	m.SetSize(100, 32)
 	return m
 }
@@ -169,13 +169,13 @@ func (r ctxRunner) ContextUsage() (int, int) { return r.used, r.max }
 func TestContextUsageInTitle(t *testing.T) {
 	fake := NewFakeRunner()
 	fake.Delay = 0
-	m := New(ctxRunner{fake, 512, 1024}, fake)
+	m := New(ctxRunner{fake, 512, 1024}, fake, fake)
 	m.SetSize(100, 32)
 	if out := plain(m.View().Content); !strings.Contains(out, "ctx 50%") {
 		t.Fatalf("title missing context usage:\n%s", out)
 	}
 
-	m = New(ctxRunner{fake, 0, 0}, fake)
+	m = New(ctxRunner{fake, 0, 0}, fake, fake)
 	m.SetSize(100, 32)
 	if strings.Contains(plain(m.View().Content), "ctx ") {
 		t.Fatal("ctx shown without usage data")
@@ -185,7 +185,7 @@ func TestContextUsageInTitle(t *testing.T) {
 	long := strings.Repeat("very-long-provider-name-", 4)
 	fake.Add(Provider{Name: long, Type: "openai"})
 	fake.Switch(long, "x")
-	m = New(ctxRunner{fake, 512, 1024}, fake)
+	m = New(ctxRunner{fake, 512, 1024}, fake, fake)
 	m.SetSize(80, 24)
 	fillConversation(m)
 	if n := strings.Count(m.View().Content, "\n") + 1; n != 24 {
@@ -270,7 +270,7 @@ func TestSendIgnoredWhileRunning(t *testing.T) {
 func TestProviderPickerSwitchAndAdd(t *testing.T) {
 	fake := NewFakeRunner()
 	fake.Delay = 0
-	m := New(fake, fake)
+	m := New(fake, fake, fake)
 	m.SetSize(100, 32)
 
 	m.Update(keyMsg('p', tea.ModCtrl))

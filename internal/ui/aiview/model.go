@@ -33,6 +33,7 @@ const (
 	modeChat mode = iota
 	modeProviders
 	modeProviderForm
+	modeSessions
 )
 
 type CloseMsg struct{}
@@ -59,10 +60,12 @@ type block struct {
 type agentEventMsg struct{ ev AgentEvent }
 type streamClosedMsg struct{}
 type flushTickMsg struct{}
+type saveTickMsg struct{ seq int }
 
 type Model struct {
-	runner AgentRunner
-	store  ProviderStore
+	runner   AgentRunner
+	store    ProviderStore
+	sessions SessionStore
 
 	width  int
 	height int
@@ -88,9 +91,14 @@ type Model struct {
 	models  []ModelEntry
 	pCursor int
 	form    providerForm
+
+	sessionID   string
+	saveSeq     int
+	sessionList []SessionEntry
+	sCursor     int
 }
 
-func New(runner AgentRunner, store ProviderStore) *Model {
+func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model {
 	in := textarea.New()
 	in.Placeholder = "Ask the AI to read tabs, send keys, manage daemons..."
 	in.ShowLineNumbers = false
@@ -101,11 +109,12 @@ func New(runner AgentRunner, store ProviderStore) *Model {
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
 
 	return &Model{
-		runner:  runner,
-		store:   store,
-		input:   in,
-		spinner: sp,
-		status:  statusIdle,
+		runner:   runner,
+		store:    store,
+		sessions: sessions,
+		input:    in,
+		spinner:  sp,
+		status:   statusIdle,
 	}
 }
 
@@ -168,7 +177,13 @@ func waitEvent(ch <-chan AgentEvent) tea.Cmd {
 
 func (m *Model) send() tea.Cmd {
 	prompt := strings.TrimSpace(m.input.Value())
-	if prompt == "" || m.status == statusRunning {
+	if prompt == "" {
+		return nil
+	}
+	if strings.HasPrefix(prompt, "/") {
+		return m.runSlashCommand(prompt)
+	}
+	if m.status == statusRunning {
 		return nil
 	}
 	if m.cancel != nil {
@@ -205,6 +220,7 @@ func (m *Model) clearSession() {
 	m.status = statusIdle
 	m.errMsg = ""
 	m.sel = textselection.Selection{}
+	m.sessionID = ""
 	m.viewport.SetContent("")
 }
 
@@ -413,6 +429,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		if !terminal {
 			cmds = append(cmds, waitEvent(m.events))
+		} else {
+			cmds = append(cmds, m.scheduleSave())
 		}
 		if m.dirty && !m.flushPending {
 			m.flushPending = true
@@ -422,6 +440,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamClosedMsg:
 		if m.status == statusRunning {
 			m.finish()
+			return m, m.scheduleSave()
+		}
+		return m, nil
+	case saveTickMsg:
+		if msg.seq == m.saveSeq {
+			m.saveNow()
 		}
 		return m, nil
 	case flushTickMsg:
@@ -483,6 +507,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.updateProviders(msg)
 		case modeProviderForm:
 			return m, m.updateProviderForm(msg)
+		case modeSessions:
+			return m, m.updateSessions(msg)
 		}
 		return m.chatKey(msg)
 	}
@@ -510,7 +536,7 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.renderBlock(len(m.blocks) - 1)
 			m.events = nil
 			m.rebuild()
-			return m, nil
+			return m, m.scheduleSave()
 		}
 		m.input.SetValue("")
 		return m, nil
@@ -527,18 +553,7 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.rebuild()
 		return m, nil
 	case "ctrl+p":
-		if m.store == nil {
-			return m, nil
-		}
-		m.models = m.store.Models()
-		m.pCursor = 0
-		for i, e := range m.models {
-			if e.Label == m.store.Active() {
-				m.pCursor = i
-			}
-		}
-		m.mode = modeProviders
-		return m, nil
+		return m, m.openProviders()
 	case "enter":
 		return m, m.send()
 	case "pgup":
@@ -563,6 +578,8 @@ func (m *Model) View() tea.View {
 		content = m.providersView()
 	case modeProviderForm:
 		content = m.form.view()
+	case modeSessions:
+		content = m.sessionsView()
 	default:
 		content = m.chatView()
 	}
@@ -596,11 +613,11 @@ func (m *Model) chatView() string {
 	}
 	title += ui.DimStyle.Render(ctx)
 
-	hintText := truncateCells("enter send · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close", max(0, cw))
+	hintText := truncateCells("enter send · /help · esc close", max(0, cw))
 	hint := ui.DimStyle.Render(hintText)
 	// The error takes the blank row above the hint so it never adds a row.
 	errLine := ""
-	if m.status == statusError {
+	if m.errMsg != "" {
 		collapsed := strings.Join(strings.Fields(m.errMsg), " ")
 		errLine = ui.ErrorStyle.Render(truncateCells("error: "+collapsed, max(0, cw)))
 	}

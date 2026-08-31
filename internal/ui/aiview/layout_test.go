@@ -80,7 +80,7 @@ func TestViewLongModelNameStaysInFrame(t *testing.T) {
 	fake.Delay = 0
 	fake.Add(Provider{Name: strings.Repeat("very-long-provider-name-", 4), Type: "openai"})
 	fake.Switch(strings.Repeat("very-long-provider-name-", 4), "x")
-	m := New(fake, fake)
+	m := New(fake, fake, fake)
 	m.SetSize(80, 24)
 	fillConversation(m)
 	if n := viewRows(m.View().Content); n != 24 {
@@ -109,7 +109,7 @@ func TestCJKModelNameStaysInFrame(t *testing.T) {
 	name := strings.Repeat("モデル名", 12) // 48 runes, 96 cells
 	fake.Add(Provider{Name: name, Type: "openai"})
 	fake.Switch(name, "x")
-	m := New(fake, fake)
+	m := New(fake, fake, fake)
 	m.SetSize(100, 32)
 	fillConversation(m)
 	if n := viewRows(m.View().Content); n != 32 {

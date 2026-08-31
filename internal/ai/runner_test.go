@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -191,6 +192,120 @@ func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 	if last.Role != schema.Assistant || last.Content != strings.Repeat("a", 1000) {
 		t.Fatalf("newest answer must be kept, got %+v", last)
 	}
+}
+
+func TestExportImportHistoryRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	tools, err := BuildTools(fakeExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{agent: adkAgent}
+
+	if data, err := a.ExportHistory(0); err != nil || data != nil {
+		t.Fatalf("empty export: got %q, %v", data, err)
+	}
+	for range a.Run(ctx, "question one") {
+	}
+	data, err := a.ExportHistory(0)
+	if err != nil || len(data) == 0 {
+		t.Fatalf("export: %v, %d bytes", err, len(data))
+	}
+
+	b := &Agent{agent: adkAgent}
+	if err := b.ImportHistory(data); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.history) != len(a.history) {
+		t.Fatalf("imported %d messages, want %d", len(b.history), len(a.history))
+	}
+	for i := range a.history {
+		if a.history[i].Role != b.history[i].Role || a.history[i].Content != b.history[i].Content {
+			t.Fatalf("message %d mismatch: %+v vs %+v", i, a.history[i], b.history[i])
+		}
+	}
+	if err := b.ImportHistory([]byte("{broken")); err == nil {
+		t.Fatal("broken JSON must fail")
+	}
+}
+
+func TestExportHistoryCapDropsOldestTurns(t *testing.T) {
+	ctx := context.Background()
+	tools, err := BuildTools(fakeExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{agent: adkAgent}
+	for i := 0; i < 5; i++ {
+		for range a.Run(ctx, "question") {
+		}
+	}
+	full, err := a.ExportHistory(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capped, err := a.ExportHistory(len(full) / 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capped) >= len(full) {
+		t.Fatalf("cap did not shrink export: %d vs %d", len(capped), len(full))
+	}
+	if len(capped) > len(full)/2 {
+		t.Fatalf("cap exceeded: %d > %d", len(capped), len(full)/2)
+	}
+	var msgs []*schema.Message
+	if err := json.Unmarshal(capped, &msgs); err != nil {
+		t.Fatal(err)
+	}
+	if msgs[0].Role != schema.User {
+		t.Fatalf("capped history must start on a turn boundary, got %s", msgs[0].Role)
+	}
+}
+
+func TestUndoLastTurn(t *testing.T) {
+	ctx := context.Background()
+	tools, err := BuildTools(fakeExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{agent: adkAgent}
+	for range a.Run(ctx, "first") {
+	}
+	for range a.Run(ctx, "second") {
+	}
+	before := len(a.history)
+
+	a.UndoLastTurn()
+	if len(a.history) >= before {
+		t.Fatalf("undo did not shrink history: %d -> %d", before, len(a.history))
+	}
+	for _, m := range a.history {
+		if m.Content == "second" {
+			t.Fatal("undone turn still in history")
+		}
+	}
+	if a.history[len(a.history)-1].Role != schema.Assistant {
+		t.Fatalf("remaining history must end on the first turn's answer, got %s", a.history[len(a.history)-1].Role)
+	}
+
+	a.UndoLastTurn()
+	if len(a.history) != 0 {
+		t.Fatalf("undo of last turn must empty history, got %d", len(a.history))
+	}
+	a.UndoLastTurn() // no-op on empty history
 }
 
 func TestTrimHistoryKeepsNewestTurnOverBudget(t *testing.T) {

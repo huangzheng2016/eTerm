@@ -12,6 +12,19 @@ type FakeRunner struct {
 
 	providers []Provider
 	active    string
+
+	// In-memory SessionStore: History stands in for the agent's exported
+	// history; sessions is ordered most-recent-first like the SQL query.
+	History   []byte
+	sessions  []fakeSession
+	undoCalls int
+	resets    int
+}
+
+type fakeSession struct {
+	entry   SessionEntry
+	history []byte
+	forkOf  string
 }
 
 func NewFakeRunner() *FakeRunner {
@@ -30,6 +43,9 @@ func (f *FakeRunner) Run(ctx context.Context, prompt string) (<-chan AgentEvent,
 	if events == nil {
 		events = demoEvents(prompt)
 	}
+	// A real run grows the agent history; mirror that so SaveSession has
+	// something to persist.
+	f.History = []byte("turn")
 	ch := make(chan AgentEvent, 64)
 	go func() {
 		defer close(ch)
@@ -92,3 +108,47 @@ func (f *FakeRunner) Add(p Provider) {
 	}
 	f.providers = append(f.providers, p)
 }
+
+func (f *FakeRunner) SaveSession(id, title, forkOf string) {
+	for i := range f.sessions {
+		if f.sessions[i].entry.ID == id {
+			f.sessions[i].history = f.History
+			if title != "" {
+				f.sessions[i].entry.Title = title
+			}
+			e := f.sessions[i]
+			f.sessions = append(f.sessions[:i], f.sessions[i+1:]...)
+			f.sessions = append([]fakeSession{e}, f.sessions...)
+			return
+		}
+	}
+	if len(f.History) == 0 {
+		return
+	}
+	f.sessions = append([]fakeSession{{
+		entry:   SessionEntry{ID: id, Title: title, UpdatedAt: time.Now()},
+		history: f.History,
+		forkOf:  forkOf,
+	}}, f.sessions...)
+}
+
+func (f *FakeRunner) Sessions() []SessionEntry {
+	out := make([]SessionEntry, 0, len(f.sessions))
+	for _, s := range f.sessions {
+		out = append(out, s.entry)
+	}
+	return out
+}
+
+func (f *FakeRunner) LoadSession(id string) ([]byte, bool) {
+	for _, s := range f.sessions {
+		if s.entry.ID == id {
+			return s.history, true
+		}
+	}
+	return nil, false
+}
+
+func (f *FakeRunner) UndoLastTurn() { f.undoCalls++ }
+
+func (f *FakeRunner) ResetHistory() { f.resets++; f.History = nil }
