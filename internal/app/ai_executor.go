@@ -236,7 +236,7 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 			req.respond(aiToolResult{err: fmt.Errorf("unknown or non-terminal tab id: %s", req.id)})
 			break
 		}
-		if !m.SendRaw(req.arg) {
+		if !m.SendRaw(decodeSendKeys(req.arg)) {
 			req.respond(aiToolResult{err: fmt.Errorf("tab %s is not writable", req.id)})
 			break
 		}
@@ -333,6 +333,63 @@ func (a App) handleAIToolSendKeysDone(req aiToolRequest) {
 	} else {
 		req.respond(aiToolResult{err: fmt.Errorf("tab %s is gone", req.id)})
 	}
+}
+
+// decodeSendKeys decodes escape sequences in an AI-provided keys string
+// before it is written to the pty: \\ -> \, \n -> LF, \r -> CR, \t -> TAB,
+// \xHH -> raw byte. Unknown escapes, incomplete hex and raw control bytes
+// pass through unchanged.
+func decodeSendKeys(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		switch s[i+1] {
+		case '\\':
+			b.WriteByte('\\')
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 't':
+			b.WriteByte('\t')
+		case 'x':
+			hi, ok1 := hexVal(s, i+2)
+			lo, ok2 := hexVal(s, i+3)
+			if !ok1 || !ok2 {
+				b.WriteByte('\\')
+				continue
+			}
+			b.WriteByte(hi<<4 | lo)
+			i += 2
+		default:
+			b.WriteByte('\\')
+			continue
+		}
+		i++
+	}
+	return b.String()
+}
+
+func hexVal(s string, i int) (byte, bool) {
+	if i >= len(s) {
+		return 0, false
+	}
+	switch c := s[i]; {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
 }
 
 // windowTranscript slices a tail-biased window out of the full transcript:

@@ -98,6 +98,51 @@ func TestAIExecutorRoundTrip(t *testing.T) {
 	}
 }
 
+// sendKeysToPty runs one SendKeys call against a fake pty and returns the
+// bytes written to its stdin.
+func sendKeysToPty(t *testing.T, keys string) string {
+	t.Helper()
+	ch := make(chan aiToolRequest, 16)
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	a := App{
+		tabs:     []Tab{{Type: SSHTab, Title: "prod", Model: sv}},
+		aiShared: &aiSharedState{},
+	}
+	exec := &aiExecutor{reqCh: ch, shared: a.aiShared}
+	go serveAIToolRequests(a, ch)
+	defer close(ch)
+
+	tabs, err := exec.ListTabs(context.Background())
+	if err != nil || len(tabs) != 1 {
+		t.Fatalf("ListTabs = %+v %v", tabs, err)
+	}
+	if _, err := exec.SendKeys(context.Background(), tabs[0].ID, keys, 5); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for sink.String() == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("nothing written to pty stdin")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return sink.String()
+}
+
+func TestSendKeysEscapeDecoding(t *testing.T) {
+	if got := sendKeysToPty(t, `\n`); got != "\n" {
+		t.Fatalf(`backslash+n wrote %q, want one LF byte`, got)
+	}
+	if got := sendKeysToPty(t, `\\n`); got != `\n` {
+		t.Fatalf(`backslash-backslash-n wrote %q, want literal backslash+n`, got)
+	}
+	if got := sendKeysToPty(t, "real\n"); got != "real\n" {
+		t.Fatalf("raw newline wrote %q, want unchanged", got)
+	}
+}
+
 func TestAIExecutorRoundTripCancel(t *testing.T) {
 	exec := &aiExecutor{reqCh: make(chan aiToolRequest), shared: &aiSharedState{}}
 	ctx, cancel := context.WithCancel(context.Background())
