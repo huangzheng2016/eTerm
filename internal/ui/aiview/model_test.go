@@ -349,3 +349,34 @@ func TestToolCallEndRerenders(t *testing.T) {
 		t.Fatal("tool block not re-rendered on end")
 	}
 }
+
+func TestToolOutputSummaryAndExpand(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventToolCallStart, Text: "read_tab"},
+		{Kind: EventToolCallEnd, Text: "line1\nline2\nline3\nline4\nline5"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	m.handleEvent(<-m.events)
+	m.handleEvent(<-m.events)
+
+	summary := plain(m.blocks[1].cache)
+	if !strings.Contains(summary, "line3") || strings.Contains(summary, "line4") {
+		t.Fatalf("summary should show first 3 lines only, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "2 more lines") {
+		t.Fatal("summary missing more-lines note")
+	}
+
+	m.Update(keyMsg('o', tea.ModCtrl))
+	expanded := plain(m.blocks[1].cache)
+	if !strings.Contains(expanded, "line5") {
+		t.Fatal("ctrl+o did not expand tool output")
+	}
+
+	m.Update(keyMsg('o', tea.ModCtrl))
+	if strings.Contains(plain(m.blocks[1].cache), "line4") {
+		t.Fatal("ctrl+o did not collapse tool output")
+	}
+}

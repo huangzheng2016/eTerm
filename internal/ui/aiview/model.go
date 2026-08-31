@@ -2,6 +2,7 @@ package aiview
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -46,6 +47,7 @@ const (
 type block struct {
 	kind     blockKind
 	text     string
+	output   string // tool result (blockTool only)
 	toolDone bool
 	final    bool
 	cache    string
@@ -75,6 +77,7 @@ type Model struct {
 
 	dirty        bool
 	flushPending bool
+	expandTools  bool
 
 	md *markdown
 
@@ -217,6 +220,7 @@ func (m *Model) handleEvent(ev AgentEvent) bool {
 		for i := len(m.blocks) - 1; i >= 0; i-- {
 			if m.blocks[i].kind == blockTool && !m.blocks[i].toolDone {
 				m.blocks[i].toolDone = true
+				m.blocks[i].output = ev.Text
 				m.renderBlock(i)
 				m.dirty = true
 				break
@@ -280,6 +284,14 @@ func (m *Model) flush() {
 	m.dirty = false
 }
 
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "..."
+}
+
 func (m *Model) renderBlock(i int) {
 	b := &m.blocks[i]
 	cw := m.contentWidth()
@@ -295,7 +307,29 @@ func (m *Model) renderBlock(i int) {
 		if b.toolDone {
 			state = ui.SuccessStyle.Render("done")
 		}
-		b.cache = ui.SelectedStyle.Render("▸ tool: "+b.text) + " " + state
+		head := ui.SelectedStyle.Render("▸ tool: "+b.text) + " " + state
+		out := strings.TrimRight(b.output, "\n")
+		if out == "" {
+			b.cache = head
+			break
+		}
+		if m.expandTools {
+			b.cache = head + "\n" + ui.DimStyle.Render(out)
+			break
+		}
+		lines := strings.Split(out, "\n")
+		preview := lines
+		if len(preview) > 3 {
+			preview = preview[:3]
+		}
+		for i, l := range preview {
+			preview[i] = truncateRunes(l, 200)
+		}
+		summary := strings.Join(preview, "\n")
+		if len(lines) > 3 {
+			summary += fmt.Sprintf("\n... (%d more lines, ctrl+o to expand)", len(lines)-3)
+		}
+		b.cache = head + "\n" + ui.DimStyle.Render(summary)
 	case blockAssistant:
 		final := b.final || m.status != statusRunning
 		out := m.md.render(b.text, final)
@@ -406,6 +440,15 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+l":
 		m.clearSession()
 		return m, nil
+	case "ctrl+o":
+		m.expandTools = !m.expandTools
+		for i := range m.blocks {
+			if m.blocks[i].kind == blockTool {
+				m.renderBlock(i)
+			}
+		}
+		m.rebuild()
+		return m, nil
 	case "ctrl+p":
 		if m.store == nil {
 			return m, nil
@@ -466,7 +509,7 @@ func (m *Model) chatView() string {
 		title += " " + m.spinner.View()
 	}
 
-	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+l clear · ctrl+p models · esc close")
+	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close")
 	if m.status == statusError {
 		hint = ui.ErrorStyle.Render("error: "+m.errMsg) + "\n" + hint
 	}

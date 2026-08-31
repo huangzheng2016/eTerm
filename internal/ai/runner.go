@@ -23,7 +23,7 @@ const (
 
 type Event struct {
 	Type     EventType
-	Text     string // delta text for EventTextDelta/EventThinkingDelta, truncated preview for EventToolResult
+	Text     string // delta text for EventTextDelta/EventThinkingDelta, tool output (capped, display-only) for EventToolResult
 	ToolName string
 	ToolArgs string
 	Err      error
@@ -138,7 +138,8 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 				send(Event{Type: EventToolCall, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
 			}
 		case schema.Tool:
-			send(Event{Type: EventToolResult, ToolName: mo.ToolName, Text: truncateRunes(msg.Content, 500)})
+			// Display-only: the LLM already saw the full output; cap the panel copy.
+			send(Event{Type: EventToolResult, ToolName: mo.ToolName, Text: truncateRunes(msg.Content, 20000)})
 		}
 	}
 	send(Event{Type: EventDone})
