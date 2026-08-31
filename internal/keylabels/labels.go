@@ -7,6 +7,3 @@ const KeysTab = "C-t"
 
 // KeysTabListHint matches KeysTab (single chord).
 const KeysTabListHint = "C-t"
-
-// AIOverlay is the display label for Ctrl+K (AI assistant overlay).
-const AIOverlay = "C-k"

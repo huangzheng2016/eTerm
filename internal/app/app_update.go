@@ -201,10 +201,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// AI overlay intercepts all keys when visible; esc emits aiview.CloseMsg.
 		if a.aiVisible && a.aiView != nil {
+			cmd := a.updateAIView(msg)
 			if msg.String() == "ctrl+l" {
+				// Async: Agent.Clear blocks on the run mutex otherwise.
 				a.aiBridge.Clear()
 			}
-			return a, a.updateAIView(msg)
+			return a, cmd
 		}
 
 		if a.renamePrompt != nil {
@@ -968,6 +970,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.viewState = LoginView
 		a.statusBar = a.statusBar.SetLocked(true)
 		a.aiVisible = false
+		if a.aiBridge != nil {
+			a.aiBridge.CancelRun()
+		}
 		return a, nil
 
 	case types.ErrorMsg:

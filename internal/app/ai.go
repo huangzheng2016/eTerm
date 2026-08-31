@@ -29,8 +29,15 @@ type aiBridge struct {
 	exec  ai.Executor
 
 	mu       sync.Mutex
-	agent    *ai.Agent
+	agent    aiAgent
 	agentKey string
+	cancel   context.CancelFunc
+}
+
+// aiAgent is the part of ai.Agent the bridge uses; a seam for tests.
+type aiAgent interface {
+	Run(ctx context.Context, input string) <-chan ai.Event
+	Clear()
 }
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
@@ -110,10 +117,15 @@ func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentE
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	b.mu.Lock()
+	b.cancel = cancel
+	b.mu.Unlock()
 	src := agent.Run(ctx, prompt)
 	out := make(chan aiview.AgentEvent, 64)
 	go func() {
 		defer close(out)
+		defer cancel()
 		for ev := range src {
 			ae, ok := aiEventToView(ev)
 			if !ok {
@@ -129,7 +141,7 @@ func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentE
 	return out, nil
 }
 
-func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (*ai.Agent, error) {
+func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, error) {
 	key := p.Name + "\x00" + model
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -151,11 +163,25 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (*ai.Agent
 }
 
 // Clear resets the agent conversation history (wired to the overlay's ctrl+l).
+// Agent.Clear blocks on the run mutex for the rest of the turn, so it runs
+// off the caller's goroutine: the overlay cancels the run in the same key
+// handling, and the clear lands as soon as the turn unwinds.
 func (b *aiBridge) Clear() {
 	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent != nil {
+		go agent.Clear()
+	}
+}
+
+// CancelRun aborts the in-flight run, if any (used on lock).
+func (b *aiBridge) CancelRun() {
+	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.agent != nil {
-		b.agent.Clear()
+	if b.cancel != nil {
+		b.cancel()
+		b.cancel = nil
 	}
 }
 

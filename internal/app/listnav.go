@@ -55,6 +55,10 @@ func (a App) switchListView(delta int) (App, tea.Cmd) {
 		}
 	}
 	next := (current + delta + len(listViewTypes)) % len(listViewTypes)
+	if listViewTypes[next] == AITab {
+		// AI is an overlay, not a cycle stop; skip it so cycling wraps.
+		next = (next + delta + len(listViewTypes)) % len(listViewTypes)
+	}
 	return a.openListView(listViewTypes[next])
 }
 
