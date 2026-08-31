@@ -77,3 +77,42 @@ func TestBridgeCancelRun(t *testing.T) {
 	}
 	bridge.CancelRun() // no panic when idle
 }
+
+type usageAgent struct{ fakeAgent }
+
+func (usageAgent) Usage() (int, int) { return 100, 1000 }
+
+func TestBridgeContextUsage(t *testing.T) {
+	bridge := &aiBridge{}
+	if used, max := bridge.ContextUsage(); used != 0 || max != 0 {
+		t.Fatal("expected zero usage without agent")
+	}
+	bridge.agent = &usageAgent{}
+	used, max := bridge.ContextUsage()
+	if used != 100 || max != 1000 {
+		t.Fatalf("got %d/%d, want 100/1000", used, max)
+	}
+}
+
+type closeAgent struct {
+	fakeAgent
+	closed chan struct{}
+}
+
+func (a *closeAgent) Close() { close(a.closed) }
+
+func TestAgentForClosesReplacedAgent(t *testing.T) {
+	closed := make(chan struct{})
+	bridge := &aiBridge{}
+	bridge.agent = &closeAgent{closed: closed}
+	bridge.agentKey = "old\x00model"
+	p := &ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"}
+	if _, err := bridge.agentFor(p, "m", 0); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-closed:
+	default:
+		t.Fatal("replaced agent not closed")
+	}
+}

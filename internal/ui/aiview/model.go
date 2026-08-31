@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/ui"
+	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
 )
 
 const streamFlushInterval = 50 * time.Millisecond
@@ -79,6 +80,7 @@ type Model struct {
 	dirty        bool
 	flushPending bool
 	expandTools  bool
+	sel          textselection.Selection
 
 	md *markdown
 
@@ -117,7 +119,8 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	_, _, cw, vh := m.layout()
-	m.input.SetWidth(cw)
+	// The input box is cw-2 wide total; its interior wrap is cw-6.
+	m.input.SetWidth(cw - 6)
 	m.viewport = viewport.New(viewport.WithWidth(cw), viewport.WithHeight(vh))
 	if m.md == nil || m.md.width != cw {
 		m.md = newMarkdown(cw)
@@ -135,7 +138,9 @@ func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
 	if boxH < 8 {
 		boxH = 8
 	}
-	contentW = boxW - 4
+	// lipgloss v2 Width includes border and padding: the box is boxW-2 wide
+	// total, so its interior wrap width is boxW-2-2(border)-2(padding).
+	contentW = boxW - 6
 	viewH = boxH - 2 - 1 - 5 - 1 - 3
 	if viewH < 1 {
 		viewH = 1
@@ -198,6 +203,7 @@ func (m *Model) clearSession() {
 	m.dirty = false
 	m.status = statusIdle
 	m.errMsg = ""
+	m.sel = textselection.Selection{}
 	m.viewport.SetContent("")
 }
 
@@ -308,17 +314,22 @@ func (m *Model) renderBlock(i int) {
 			Render(b.text)
 	case blockTool:
 		state := ui.DimStyle.Render("running...")
+		stateW := 10
 		if b.toolDone {
 			state = ui.SuccessStyle.Render("done")
+			stateW = 4
 		}
-		head := ui.SelectedStyle.Render("▸ tool: "+b.text) + " " + state
+		// Bound every line to the box interior width or the outer box
+		// re-wraps it and the frame grows a row.
+		label := truncateRunes(b.text, max(0, cw-12-stateW))
+		head := ui.SelectedStyle.Render("▸ tool: "+label) + " " + state
 		out := strings.TrimRight(b.output, "\n")
 		if out == "" {
 			b.cache = head
 			break
 		}
 		if m.expandTools {
-			b.cache = head + "\n" + ui.DimStyle.Render(out)
+			b.cache = head + "\n" + ui.DimStyle.Width(cw).Render(out)
 			break
 		}
 		lines := strings.Split(out, "\n")
@@ -327,7 +338,7 @@ func (m *Model) renderBlock(i int) {
 			preview = preview[:3]
 		}
 		for i, l := range preview {
-			preview[i] = truncateRunes(l, 200)
+			preview[i] = truncateRunes(l, max(0, cw-3))
 		}
 		summary := strings.Join(preview, "\n")
 		if len(lines) > 3 {
@@ -337,7 +348,9 @@ func (m *Model) renderBlock(i int) {
 	case blockAssistant:
 		final := b.final || m.status != statusRunning
 		out := m.md.render(b.text, final)
-		b.cache = strings.Trim(out, "\n")
+		// Glamour does not break overlong words (URLs); hard-wrap so no
+		// line exceeds the box interior width.
+		b.cache = strings.Trim(lipgloss.NewStyle().Width(cw).Render(out), "\n")
 		if final {
 			b.final = true
 		}
@@ -360,10 +373,33 @@ func (m *Model) rebuild() {
 	for i := range m.blocks {
 		parts = append(parts, m.blocks[i].cache)
 	}
-	m.viewport.SetContent(strings.Join(parts, "\n\n"))
+	content := strings.Join(parts, "\n\n")
+	if m.sel.Active {
+		lines := strings.Split(content, "\n")
+		for i := range lines {
+			lines[i] = m.sel.RenderLine(lines[i], i)
+		}
+		content = strings.Join(lines, "\n")
+	}
+	m.viewport.SetContent(content)
 	if atBottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+// contentPoint maps overlay-local mouse coords to a conversation content
+// line and column: the viewport starts below border+title+blank (row 3)
+// and right of border+padding (col 2).
+func (m *Model) contentPoint(x, y int) (line, col int) {
+	_, _, _, vh := m.layout()
+	row := y - 3
+	if row < 0 {
+		row = 0
+	}
+	if row > vh-1 {
+		row = vh - 1
+	}
+	return m.viewport.YOffset() + row, x - 2
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -411,6 +447,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.ScrollDown(3)
 		}
 		return m, nil
+	case tea.MouseClickMsg:
+		if m.mode == modeChat && msg.Button == tea.MouseLeft {
+			m.sel.Begin(m.contentPoint(msg.X, msg.Y))
+			m.rebuild()
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		if m.sel.Dragging {
+			m.sel.Move(m.contentPoint(msg.X, msg.Y))
+			m.rebuild()
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if m.sel.Dragging {
+			if m.sel.End(m.contentPoint(msg.X, msg.Y)) {
+				m.rebuild()
+				text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
+				if text != "" {
+					return m, tea.SetClipboard(text)
+				}
+				return m, nil
+			}
+			m.rebuild()
+		}
+		return m, nil
 	case tea.PasteMsg:
 		if m.mode == modeChat {
 			var cmd tea.Cmd
@@ -433,6 +494,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.sel = textselection.Selection{}
+		m.rebuild()
 		// Esc only hides the panel; the run keeps going in the background
 		// (status bar shows "ai running"). ctrl+c is the interrupt.
 		return m, func() tea.Msg { return CloseMsg{} }
@@ -517,17 +580,30 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) chatView() string {
+	cw := m.contentWidth()
+	ctx := ""
+	if cu, ok := m.runner.(interface{ ContextUsage() (int, int) }); ok {
+		if used, max := cu.ContextUsage(); max > 0 {
+			ctx = fmt.Sprintf(" · ctx %d%%", used*100/max)
+		}
+	}
 	title := ui.TitleStyle.Render("AI Assistant")
 	if m.store != nil && m.store.Active() != "" {
-		title += ui.DimStyle.Render(" · " + m.store.Active())
+		// "AI Assistant"(12) + " · "(3) + spinner(2) + ctx must fit in cw.
+		label := truncateRunes(m.store.Active(), max(0, cw-21-len(ctx)))
+		title += ui.DimStyle.Render(" · " + label)
 	}
 	if m.status == statusRunning {
 		title += " " + m.spinner.View()
 	}
+	title += ui.DimStyle.Render(ctx)
 
-	hint := ui.DimStyle.Render("enter send · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close")
+	hintText := truncateRunes("enter send · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close", max(0, cw-3))
+	hint := ui.DimStyle.Render(hintText)
+	// The error takes the blank row above the hint so it never adds a row.
+	errLine := ""
 	if m.status == statusError {
-		hint = ui.ErrorStyle.Render("error: "+m.errMsg) + "\n" + hint
+		errLine = ui.ErrorStyle.Render(truncateRunes("error: "+m.errMsg, max(0, cw-3)))
 	}
 
 	body := m.viewport.View()
@@ -548,7 +624,7 @@ func (m *Model) chatView() string {
 		body,
 		"",
 		inputBox,
-		"",
+		errLine,
 		hint,
 	)
 }
