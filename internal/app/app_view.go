@@ -79,12 +79,13 @@ func (a App) View() tea.View {
 					disc = sm.Disconnected()
 				}
 			}
-			statusBar = statusBar.SetText(mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, tabDetaches(tab)))
+			hint := mainViewStatusBarHint(a.keyMap, a.kbConfig, tab.Type, disc, tabDetaches(tab))
 			if provider, ok := tab.Model.(interface{ StatusBarHint() string }); ok {
-				if hint := provider.StatusBarHint(); hint != "" {
-					statusBar = statusBar.SetText(hint)
+				if h := provider.StatusBarHint(); h != "" {
+					hint = h
 				}
 			}
+			statusBar = statusBar.SetText(a.withAIStatusHint(hint))
 		}
 		statusView := statusBar.View()
 
@@ -108,6 +109,8 @@ func (a App) View() tea.View {
 		} else if a.commandPalette != nil {
 			overlay := a.commandPalette.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.aiVisible && a.aiView != nil {
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, a.aiView.View().Content)
 		} else if a.renamePrompt != nil {
 			overlay := a.renamePrompt.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)

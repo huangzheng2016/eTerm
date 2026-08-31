@@ -11,11 +11,13 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	"github.com/huangzheng2016/eTerm/internal/remote"
+	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
 	"github.com/huangzheng2016/eTerm/internal/syncshare"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"gorm.io/gorm"
 )
 
 var (
@@ -33,13 +35,17 @@ var (
 // a tunnel; the caller either closes it (short-lived calls) or attaches it to
 // the session via AddCloser (long-lived relay sessions).
 func (a App) syncHTTPBase(cfg esync.Config) (string, *esync.Tunnel, error) {
+	return syncHTTPBaseFor(a.db, a.masterKey, cfg)
+}
+
+func syncHTTPBaseFor(database *gorm.DB, mk *security.MasterKeyManager, cfg esync.Config) (string, *esync.Tunnel, error) {
 	if cfg.Mode != "ssh" {
 		return cfg.ServerURL, nil, nil
 	}
 	if cfg.SSHHostID == 0 {
 		return "", nil, fmt.Errorf("no SSH host configured for sync")
 	}
-	tunnel, err := esync.OpenTunnel(a.db, a.masterKey, cfg.SSHHostID, cfg.RemotePort)
+	tunnel, err := esync.OpenTunnel(database, mk, cfg.SSHHostID, cfg.RemotePort)
 	if err != nil {
 		return "", nil, err
 	}
