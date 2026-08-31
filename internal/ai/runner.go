@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
@@ -30,13 +31,17 @@ type Event struct {
 }
 
 type Agent struct {
-	agent   *adk.ChatModelAgent
-	mu      sync.Mutex
+	agent *adk.ChatModelAgent
+	mu    sync.Mutex // serializes runs
+	// histMu guards history alone, so Usage can read it mid-run without
+	// waiting for the whole turn to finish.
+	histMu  sync.Mutex
 	history []*schema.Message
 	// historyBudget bounds the estimated tokens kept in history across
 	// turns; oldest turns are evicted. Set below the middleware clear
 	// threshold so compaction is not re-paid every turn.
 	historyBudget int64
+	contextWindow int
 }
 
 type Config struct {
@@ -56,7 +61,20 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	adkAgent, err := buildADKAgent(ctx, chatModel, tools, systemPrompt, cfg.MaxIterations, cfg.MaxContextSize)
+	sleepTool, err := buildSleepTool()
+	if err != nil {
+		return nil, err
+	}
+	baseTools := append(tools, sleepTool)
+	// Sub-agents get the base tools only: no spawn_agent, so no recursion.
+	tm := NewTaskManager(func(ctx context.Context) (*adk.ChatModelAgent, error) {
+		return buildADKAgent(ctx, chatModel, baseTools, systemPrompt, cfg.MaxIterations, cfg.MaxContextSize)
+	})
+	taskTools, err := tm.Tools()
+	if err != nil {
+		return nil, err
+	}
+	adkAgent, err := buildADKAgent(ctx, chatModel, append(baseTools, taskTools...), systemPrompt, cfg.MaxIterations, cfg.MaxContextSize)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +82,11 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	if contextWindow <= 0 {
 		contextWindow = defaultContextWindow
 	}
-	return &Agent{agent: adkAgent, historyBudget: int64(float64(contextWindow) * historyBudgetRatio)}, nil
+	return &Agent{
+		agent:         adkAgent,
+		historyBudget: int64(float64(contextWindow) * historyBudgetRatio),
+		contextWindow: contextWindow,
+	}, nil
 }
 
 // Run starts one agent turn with the given user input and returns a channel
@@ -85,17 +107,33 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 func (a *Agent) Clear() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
 	a.history = nil
 }
 
+// Usage returns the estimated token count of the current history and the
+// configured context window. Safe to call while a run is in flight.
+func (a *Agent) Usage() (usedTokens, maxTokens int) {
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	return int(countTokens(a.history, nil)), a.contextWindow
+}
+
 func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
+	a.histMu.Lock()
 	a.history = append(a.history, schema.UserMessage(input))
+	// The runner keeps reading the slice while history grows below.
+	msgs := slices.Clone(a.history)
+	a.histMu.Unlock()
 	defer func() {
+		a.histMu.Lock()
+		defer a.histMu.Unlock()
 		a.history = trimHistory(a.history, a.historyBudget)
 	}()
 
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: a.agent, EnableStreaming: true})
-	iterator := runner.Run(ctx, a.history)
+	iterator := runner.Run(ctx, msgs)
 
 	send := func(ev Event) {
 		select {
@@ -124,14 +162,16 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 		mo := event.Output.MessageOutput
 		var msg *schema.Message
 		if mo.IsStreaming {
-			msg = a.consumeStream(mo, send)
+			msg = consumeStream(mo, send)
 		} else {
 			msg = mo.Message
 		}
 		if msg == nil {
 			continue
 		}
+		a.histMu.Lock()
 		a.history = append(a.history, msg)
+		a.histMu.Unlock()
 		switch mo.Role {
 		case schema.Assistant:
 			for _, tc := range msg.ToolCalls {
@@ -146,8 +186,8 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 }
 
 // consumeStream reads one streaming message, forwarding text and thinking
-// deltas, and returns the concatenated full message.
-func (a *Agent) consumeStream(mo *adk.MessageVariant, send func(Event)) *schema.Message {
+// deltas via send, and returns the concatenated full message.
+func consumeStream(mo *adk.MessageVariant, send func(Event)) *schema.Message {
 	defer mo.MessageStream.Close()
 	var frames []*schema.Message
 	for {

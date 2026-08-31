@@ -35,8 +35,10 @@ type Executor interface {
 	// visible screen): up to maxBytes ending skipFromEnd bytes before the
 	// transcript tail, plus the total transcript size in bytes.
 	ReadTab(ctx context.Context, id string, maxBytes, skipFromEnd int) (text string, totalBytes int, err error)
-	// SendKeys writes keys as raw bytes to the tab's pty stdin, waits waitMs,
-	// and returns the tab's visible-screen tail.
+	// SendKeys decodes escape sequences in keys (\\ -> \, \n -> LF, \r -> CR,
+	// \t -> TAB, \xHH -> raw byte; unknown escapes pass through unchanged),
+	// writes the result to the tab's pty stdin, waits waitMs, and returns
+	// the tab's visible-screen tail.
 	SendKeys(ctx context.Context, id string, keys string, waitMs int) (string, error)
 	ListDaemons(ctx context.Context) ([]DaemonInfo, error)
 	ListDaemonSessions(ctx context.Context, daemon string) ([]SessionInfo, error)
@@ -67,7 +69,7 @@ type ReadTabOutput struct {
 
 type SendKeysInput struct {
 	ID     string `json:"id" jsonschema_description:"Tab id from list_tabs"`
-	Keys   string `json:"keys" jsonschema_description:"Raw bytes typed into the pty. Literal text as-is; \\n = Enter; \\t = Tab; \\x03 = Ctrl+C; \\x04 = Ctrl+D; \\x1b = Esc; \\x7f = Backspace; \\x1b[A/B/C/D = arrow up/down/right/left. Examples: run a command = \"ls -la\\n\"; interrupt = \"\\x03\"; exit REPL = \"\\x04\""`
+	Keys   string `json:"keys" jsonschema_description:"Keys typed into the pty. The executor decodes escape sequences before writing: \\\\ -> \\, \\n -> LF (Enter), \\r -> CR, \\t -> TAB, \\xHH -> raw byte (\\x03 = Ctrl+C, \\x04 = Ctrl+D, \\x1b = Esc, \\x7f = Backspace, \\x1b[A/B/C/D = arrows). Unknown escapes pass through unchanged; raw control bytes in the string also pass through. To type a literal backslash use \\\\. Examples: run a command = \"ls -la\\n\"; interrupt = \"\\x03\"; exit REPL = \"\\x04\""`
 	WaitMs int    `json:"wait_ms,omitempty" jsonschema_description:"Milliseconds to wait for output before returning the screen tail (default 300)"`
 }
 
@@ -152,7 +154,7 @@ func BuildTools(exec Executor) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build read_tab: %w", err)
 	}
-	sendKeys, err := utils.InferTool("send_keys", "Inject raw keystrokes into a tab's pty and return the visible-screen tail after a short wait. Literal text is typed as-is; \\n = Enter, \\t = Tab, \\x03 = Ctrl+C, \\x04 = Ctrl+D, \\x1b = Esc, \\x7f = Backspace, \\x1b[A/B/C/D = arrows. Always read_tab first to confirm the prompt state", tb.sendKeys)
+	sendKeys, err := utils.InferTool("send_keys", "Inject keystrokes into a tab's pty and return the visible-screen tail after a short wait. Escape sequences are decoded before writing: \\\\ -> \\, \\n -> Enter, \\r -> CR, \\t -> Tab, \\xHH -> raw byte (\\x03 = Ctrl+C, \\x1b = Esc, \\x1b[A/B/C/D = arrows); to type a literal backslash use \\\\. Always read_tab first to confirm the prompt state", tb.sendKeys)
 	if err != nil {
 		return nil, fmt.Errorf("build send_keys: %w", err)
 	}

@@ -129,10 +129,9 @@ func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 		}
 	}
 
-	a := &Agent{}
 	done := make(chan struct{})
 	go func() {
-		a.consumeStream(mo, send)
+		consumeStream(mo, send)
 		close(done)
 	}()
 	time.Sleep(100 * time.Millisecond) // by now the buffer is full and send blocks
@@ -203,4 +202,75 @@ func TestTrimHistoryKeepsNewestTurnOverBudget(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("single turn over budget must be kept whole, got %d messages", len(got))
 	}
+}
+
+func TestUsageReflectsHistory(t *testing.T) {
+	ctx := context.Background()
+	tools, err := BuildTools(fakeExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{agent: adkAgent, historyBudget: 100000, contextWindow: 100000}
+
+	used, max := a.Usage()
+	if used != 0 || max != 100000 {
+		t.Fatalf("empty usage: got (%d, %d), want (0, 100000)", used, max)
+	}
+	for range a.Run(ctx, "question") {
+	}
+	used1, _ := a.Usage()
+	if used1 <= used {
+		t.Fatalf("usage must grow after a turn: %d -> %d", used, used1)
+	}
+	for range a.Run(ctx, "question") {
+	}
+	used2, _ := a.Usage()
+	if used2 <= used1 {
+		t.Fatalf("usage must keep growing: %d -> %d", used1, used2)
+	}
+	a.Clear()
+	if used3, _ := a.Usage(); used3 != 0 {
+		t.Fatalf("usage after Clear: got %d, want 0", used3)
+	}
+}
+
+// Usage must not take the run mutex: a run blocked in the model still lets
+// Usage report the history written so far.
+func TestUsageDuringRunDoesNotBlock(t *testing.T) {
+	ctx := context.Background()
+	m := &gatedModel{release: make(chan struct{}), entered: make(chan struct{})}
+	tools, err := BuildTools(fakeExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adkAgent, err := buildADKAgent(ctx, m, tools, "test instruction", 4, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{agent: adkAgent, historyBudget: 100000, contextWindow: 100000}
+
+	runDone := make(chan struct{})
+	go func() {
+		for range a.Run(ctx, "question") {
+		}
+		close(runDone)
+	}()
+	<-m.entered // run in flight, model blocked
+
+	usageDone := make(chan struct{})
+	go func() {
+		a.Usage()
+		close(usageDone)
+	}()
+	select {
+	case <-usageDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Usage blocked while a run was in flight")
+	}
+	close(m.release)
+	<-runDone
 }
