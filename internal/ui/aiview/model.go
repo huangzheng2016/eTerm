@@ -287,6 +287,7 @@ func (m *Model) finish() {
 		m.cancel = nil
 	}
 	m.status = statusIdle
+	m.errMsg = ""
 	for i := range m.blocks {
 		m.renderBlock(i)
 	}

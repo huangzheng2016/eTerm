@@ -102,6 +102,7 @@ func (m *Model) forkSession() {
 		m.slashError("nothing to fork yet")
 		return
 	}
+	m.saveNow() // flush a pending autosave so the parent keeps its last turn
 	newID := newSessionID()
 	m.sessions.SaveSession(newID, title, m.sessionID)
 	m.sessionID = newID

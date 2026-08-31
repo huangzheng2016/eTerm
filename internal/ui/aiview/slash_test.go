@@ -218,6 +218,61 @@ func TestSlashForkEmptyShowsError(t *testing.T) {
 	}
 }
 
+func TestSlashForkFlushesPendingSave(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	m := New(fake, fake, fake)
+	m.SetSize(100, 32)
+	m.input.SetValue("hi")
+	m.send()
+	for {
+		ev := <-m.events
+		m.Update(agentEventMsg{ev: ev})
+		if ev.Kind == EventDone {
+			break
+		}
+	}
+	// Fork inside the debounce window: the pending tick has not fired, so
+	// without a flush the parent's last turn would never be saved.
+	sendSlash(t, m, "/fork")
+	forkID := m.sessionID
+	m.Update(saveTickMsg{seq: m.saveSeq})
+
+	if len(fake.sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2 (parent flushed + fork)", len(fake.sessions))
+	}
+	var parent *fakeSession
+	for i := range fake.sessions {
+		if fake.sessions[i].entry.ID != forkID {
+			parent = &fake.sessions[i]
+		}
+	}
+	if parent == nil || len(parent.history) == 0 {
+		t.Fatal("parent session lost its last turn")
+	}
+}
+
+func TestSlashRejectionClearedOnFinish(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventTextDelta, Text: "slow"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	m.input.SetValue("/new")
+	m.send()
+	if !strings.Contains(m.errMsg, "run in progress") {
+		t.Fatalf("rejection not shown, got %q", m.errMsg)
+	}
+	pumpEvents(t, m)
+	if m.errMsg != "" {
+		t.Fatalf("stale error after run finished: %q", m.errMsg)
+	}
+	if strings.Contains(plain(m.View().Content), "run in progress") {
+		t.Fatal("stale error still rendered")
+	}
+}
+
 func TestSlashBlockedWhileRunning(t *testing.T) {
 	m := newTestModel([]AgentEvent{
 		{Kind: EventTextDelta, Text: "slow"},
