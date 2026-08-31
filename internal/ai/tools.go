@@ -36,9 +36,9 @@ type Executor interface {
 	// transcript tail, plus the total transcript size in bytes.
 	ReadTab(ctx context.Context, id string, maxBytes, skipFromEnd int) (text string, totalBytes int, err error)
 	// SendKeys decodes escape sequences in keys (\\ -> \, \n -> LF, \r -> CR,
-	// \t -> TAB, \xHH -> raw byte; unknown escapes pass through unchanged),
-	// writes the result to the tab's pty stdin, waits waitMs, and returns
-	// the tab's visible-screen tail.
+	// \t -> TAB, \xHH -> raw byte; unknown escapes and raw control bytes pass
+	// through unchanged), writes the result to the tab's pty stdin, waits
+	// waitMs, and returns the tab's visible-screen tail.
 	SendKeys(ctx context.Context, id string, keys string, waitMs int) (string, error)
 	ListDaemons(ctx context.Context) ([]DaemonInfo, error)
 	ListDaemonSessions(ctx context.Context, daemon string) ([]SessionInfo, error)

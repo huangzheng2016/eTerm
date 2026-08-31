@@ -22,9 +22,10 @@ const (
 type TaskStatus string
 
 const (
-	TaskRunning TaskStatus = "running"
-	TaskDone    TaskStatus = "done"
-	TaskError   TaskStatus = "error"
+	TaskRunning   TaskStatus = "running"
+	TaskDone      TaskStatus = "done"
+	TaskError     TaskStatus = "error"
+	TaskCancelled TaskStatus = "cancelled"
 )
 
 // agentFactory builds a fresh sub-agent: same model, tools and middlewares as
@@ -37,6 +38,7 @@ type agentTask struct {
 	status  TaskStatus
 	result  string
 	started time.Time
+	cancel  context.CancelFunc
 	done    chan struct{}
 }
 
@@ -69,7 +71,7 @@ type WaitAgentInput struct {
 }
 
 type WaitAgentOutput struct {
-	Status string `json:"status"` // running | done | error
+	Status string `json:"status"` // running | done | error | cancelled
 	Result string `json:"result,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
@@ -79,7 +81,7 @@ type ListAgentsInput struct{}
 type AgentInfo struct {
 	ID            string `json:"id"`
 	Task          string `json:"task"`
-	Status        string `json:"status"` // running | done | error
+	Status        string `json:"status"` // running | done | error | cancelled
 	StartedSecAgo int    `json:"started_sec_ago"`
 }
 
@@ -92,11 +94,11 @@ func (tm *TaskManager) Tools() ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build spawn_agent: %w", err)
 	}
-	wait, err := utils.InferTool("wait_agent", "Block until a background agent finishes or the timeout elapses, then return its status (running/done/error) and, when finished, its final text. If it is still running, wait again later or do other work and check back with list_agents", tm.wait)
+	wait, err := utils.InferTool("wait_agent", "Block until a background agent finishes or the timeout elapses, then return its status (running/done/error/cancelled) and, when finished, its final text. If it is still running, wait again later or do other work and check back with list_agents", tm.wait)
 	if err != nil {
 		return nil, fmt.Errorf("build wait_agent: %w", err)
 	}
-	list, err := utils.InferTool("list_agents", "List the background agents you spawned with their id, task, status (running/done/error) and how many seconds ago each started", tm.list)
+	list, err := utils.InferTool("list_agents", "List the background agents you spawned with their id, task, status (running/done/error/cancelled) and how many seconds ago each started", tm.list)
 	if err != nil {
 		return nil, fmt.Errorf("build list_agents: %w", err)
 	}
@@ -116,18 +118,32 @@ func (tm *TaskManager) spawn(ctx context.Context, in *SpawnAgentInput) (*SpawnAg
 		return &SpawnAgentOutput{Error: fmt.Sprintf("%d background agents already running (max %d); wait for one to finish", running, maxConcurrentTasks)}, nil
 	}
 	tm.counter++
+	ctx, cancel := context.WithCancel(context.Background())
 	t := &agentTask{
 		id:      fmt.Sprintf("task-%d", tm.counter),
 		task:    in.Task,
 		status:  TaskRunning,
 		started: time.Now(),
+		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
 	tm.tasks = append(tm.tasks, t)
 	tm.mu.Unlock()
 
-	go tm.runTask(t, in.Context)
+	go tm.runTask(ctx, t, in.Context)
 	return &SpawnAgentOutput{ID: t.id}, nil
+}
+
+// CancelAll cancels every running task; their wait callers unblock with
+// status cancelled. Called when the owning Agent is replaced.
+func (tm *TaskManager) CancelAll() {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, t := range tm.tasks {
+		if t.status == TaskRunning {
+			t.cancel()
+		}
+	}
 }
 
 func (tm *TaskManager) wait(ctx context.Context, in *WaitAgentInput) (*WaitAgentOutput, error) {
@@ -183,18 +199,20 @@ func (tm *TaskManager) list(ctx context.Context, in *ListAgentsInput) (*ListAgen
 	return out, nil
 }
 
-// runTask executes one sub-agent turn detached from the caller's ctx, so the
-// task keeps running after the spawning tool call returns.
-func (tm *TaskManager) runTask(t *agentTask, taskCtx string) {
-	ctx := context.Background()
+// runTask executes one sub-agent turn on a detached ctx (the task keeps
+// running after the spawning tool call returns), stoppable via CancelAll.
+func (tm *TaskManager) runTask(ctx context.Context, t *agentTask, taskCtx string) {
 	result, err := tm.runAgent(ctx, t.task, taskCtx)
 	tm.mu.Lock()
-	if err != nil {
+	switch {
+	case ctx.Err() != nil:
+		t.status = TaskCancelled
+	case err != nil:
 		t.status = TaskError
 		if result == "" {
 			result = err.Error()
 		}
-	} else {
+	default:
 		t.status = TaskDone
 	}
 	t.result = result

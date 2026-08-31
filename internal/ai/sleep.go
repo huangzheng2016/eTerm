@@ -17,7 +17,6 @@ type SleepInput struct {
 
 type SleepOutput struct {
 	SleptSeconds float64 `json:"slept_seconds"`
-	Error        string  `json:"error,omitempty"`
 }
 
 func buildSleepTool() (tool.BaseTool, error) {

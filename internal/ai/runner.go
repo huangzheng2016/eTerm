@@ -42,6 +42,7 @@ type Agent struct {
 	// threshold so compaction is not re-paid every turn.
 	historyBudget int64
 	contextWindow int
+	tasks         *TaskManager
 }
 
 type Config struct {
@@ -86,6 +87,7 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 		agent:         adkAgent,
 		historyBudget: int64(float64(contextWindow) * historyBudgetRatio),
 		contextWindow: contextWindow,
+		tasks:         tm,
 	}, nil
 }
 
@@ -118,6 +120,15 @@ func (a *Agent) Usage() (usedTokens, maxTokens int) {
 	a.histMu.Lock()
 	defer a.histMu.Unlock()
 	return int(countTokens(a.history, nil)), a.contextWindow
+}
+
+// Close cancels all running background tasks. The app layer must call it when
+// replacing the Agent (aiBridge.agentFor on provider/model switch), otherwise
+// orphaned sub-agents keep running on the old provider's credentials.
+func (a *Agent) Close() {
+	if a.tasks != nil {
+		a.tasks.CancelAll()
+	}
 }
 
 func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {

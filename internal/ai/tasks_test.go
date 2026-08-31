@@ -131,3 +131,31 @@ func TestTaskManagerRejectsBeyondMaxConcurrent(t *testing.T) {
 		t.Fatalf("spawn beyond max must be rejected: got %+v", out)
 	}
 }
+
+// Agent.Close must cancel running tasks so they cannot outlive the Agent
+// (provider/model switch); blocked wait_agent callers unblock as cancelled.
+func TestTaskManagerCancelAllOnClose(t *testing.T) {
+	m := &gatedModel{release: make(chan struct{})} // never released
+	tm := NewTaskManager(testFactory(m))
+	a := &Agent{tasks: tm}
+
+	spawnOut, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "watch"})
+	if err != nil || spawnOut.ID == "" {
+		t.Fatalf("spawn: %+v, %v", spawnOut, err)
+	}
+
+	a.Close()
+
+	waitOut, err := tm.wait(context.Background(), &WaitAgentInput{ID: spawnOut.ID, TimeoutSeconds: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waitOut.Status != string(TaskCancelled) {
+		t.Fatalf("wait after Close: got %+v, want status cancelled", waitOut)
+	}
+
+	listOut, _ := tm.list(context.Background(), &ListAgentsInput{})
+	if len(listOut.Agents) != 1 || listOut.Agents[0].Status != string(TaskCancelled) {
+		t.Fatalf("list after Close: got %+v", listOut.Agents)
+	}
+}
