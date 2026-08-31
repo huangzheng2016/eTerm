@@ -42,6 +42,7 @@ const (
 	blockAssistant
 	blockThinking
 	blockTool
+	blockSystem
 )
 
 type block struct {
@@ -302,6 +303,9 @@ func (m *Model) renderBlock(i int) {
 	case blockThinking:
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#666")).Italic(true).Width(cw).
 			Render("Thinking: " + b.text)
+	case blockSystem:
+		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#666")).Italic(true).Width(cw).
+			Render(b.text)
 	case blockTool:
 		state := ui.DimStyle.Render("running...")
 		if b.toolDone {
@@ -429,14 +433,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.cancel != nil {
-			m.cancel()
-			m.cancel = nil
-		}
-		if m.status == statusRunning {
-			m.status = statusIdle
-		}
+		// Esc only hides the panel; the run keeps going in the background
+		// (status bar shows "ai running"). ctrl+c is the interrupt.
 		return m, func() tea.Msg { return CloseMsg{} }
+	case "ctrl+c":
+		if m.status == statusRunning {
+			m.finish()
+			for i := range m.blocks {
+				if m.blocks[i].kind == blockTool && !m.blocks[i].toolDone {
+					m.blocks[i].toolDone = true
+					m.renderBlock(i)
+				}
+			}
+			m.blocks = append(m.blocks, block{kind: blockSystem, text: "Interrupted by user (ctrl+c)"})
+			m.renderBlock(len(m.blocks) - 1)
+			m.events = nil
+			m.rebuild()
+			return m, nil
+		}
+		m.input.SetValue("")
+		return m, nil
 	case "ctrl+l":
 		m.clearSession()
 		return m, nil
@@ -509,7 +525,7 @@ func (m *Model) chatView() string {
 		title += " " + m.spinner.View()
 	}
 
-	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close")
+	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close")
 	if m.status == statusError {
 		hint = ui.ErrorStyle.Render("error: "+m.errMsg) + "\n" + hint
 	}

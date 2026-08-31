@@ -295,7 +295,7 @@ func TestThrottleFlushScheduling(t *testing.T) {
 	}
 }
 
-func TestEscCancelsRun(t *testing.T) {
+func TestEscKeepsRunInBackground(t *testing.T) {
 	m := newTestModel([]AgentEvent{
 		{Kind: EventTextDelta, Text: "slow"},
 		{Kind: EventDone},
@@ -306,11 +306,36 @@ func TestEscCancelsRun(t *testing.T) {
 		t.Fatal("status not running")
 	}
 	m.chatKey(keyMsg(tea.KeyEscape, 0))
-	if m.status != statusIdle {
-		t.Fatal("status not idle after esc")
+	if m.status != statusRunning {
+		t.Fatal("esc should keep the run going in the background")
 	}
-	if m.cancel != nil {
-		t.Fatal("run not cancelled after esc")
+	if m.cancel == nil {
+		t.Fatal("esc should not cancel the run")
+	}
+}
+
+func TestCtrlCInterruptsRun(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventTextDelta, Text: "partial"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	m.handleEvent(<-m.events)
+	m.chatKey(keyMsg('c', tea.ModCtrl))
+	if m.status != statusIdle {
+		t.Fatal("status not idle after ctrl+c")
+	}
+	last := m.blocks[len(m.blocks)-1]
+	if last.kind != blockSystem || !strings.Contains(last.text, "Interrupted") {
+		t.Fatalf("missing interruption marker, got %+v", last)
+	}
+	if m.events != nil {
+		t.Fatal("events should be dropped after ctrl+c")
+	}
+	m.chatKey(keyMsg('c', tea.ModCtrl))
+	if m.input.Value() != "" {
+		t.Fatal("idle ctrl+c should clear the input")
 	}
 }
 
