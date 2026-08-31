@@ -101,7 +101,18 @@ func TestBridgeEnqueueRoutesToAgent(t *testing.T) {
 	bridge.agent = agent
 	bridge.agentKey = "p\x00m"
 
-	bridge.Enqueue("steer this")
+	if err := bridge.Enqueue("too early"); err == nil {
+		t.Fatal("Enqueue without a run must fail")
+	}
+	if len(agent.queued) != 0 {
+		t.Fatalf("failed Enqueue must not queue: %v", agent.queued)
+	}
+	if _, err := bridge.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.Enqueue("steer this"); err != nil {
+		t.Fatal(err)
+	}
 	if len(agent.queued) != 1 || agent.queued[0] != "steer this" {
 		t.Fatalf("queued: %v", agent.queued)
 	}

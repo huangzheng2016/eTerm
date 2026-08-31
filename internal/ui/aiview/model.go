@@ -187,8 +187,12 @@ func (m *Model) send() tea.Cmd {
 	if m.status == statusRunning {
 		// Queue instead of blocking: the agent injects it at the next step
 		// boundary and acks with EventSteer, which undims the block.
+		if err := m.runner.Enqueue(prompt); err != nil {
+			// Keep the input so the message is not lost.
+			m.errMsg = "queue failed: " + err.Error()
+			return nil
+		}
 		m.input.Reset()
-		m.runner.Enqueue(prompt)
 		m.blocks = append(m.blocks, block{kind: blockUser, text: prompt, queued: true})
 		m.renderBlock(len(m.blocks) - 1)
 		m.rebuild()
@@ -575,11 +579,14 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			dropped := m.dropQueued()
 			m.runner.ClearQueue()
+			at := len(m.blocks)
 			m.blocks = append(m.blocks, block{kind: blockSystem, text: "Interrupted by user (ctrl+c)"})
 			if dropped > 0 {
 				m.blocks = append(m.blocks, block{kind: blockSystem, text: fmt.Sprintf("%d queued message(s) discarded", dropped)})
 			}
-			m.renderBlock(len(m.blocks) - 1)
+			for i := at; i < len(m.blocks); i++ {
+				m.renderBlock(i)
+			}
 			m.events = nil
 			m.rebuild()
 			return m, m.scheduleSave()

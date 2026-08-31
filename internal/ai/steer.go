@@ -17,9 +17,6 @@ const steerPrefix = "[steer] "
 type steerQueue struct {
 	mu   sync.Mutex
 	msgs []string
-	// onInject reports each message as it enters the turn (history record +
-	// panel notification). Set by Agent.run for the duration of a run.
-	onInject func(string)
 }
 
 func (q *steerQueue) enqueue(text string) {
@@ -58,12 +55,6 @@ func (q *steerQueue) clear() {
 	q.msgs = nil
 }
 
-func (q *steerQueue) setHook(f func(string)) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.onInject = f
-}
-
 // steerMiddleware injects queued user messages into the running turn before
 // each model call. eino v0.9.18 persists the returned state, so the appended
 // messages are seen by this and all later iterations of the turn.
@@ -78,13 +69,16 @@ func newSteerMiddleware(q *steerQueue) *steerMiddleware {
 
 func (m *steerMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
 	for _, text := range m.q.drain() {
-		state.Messages = append(state.Messages, schema.UserMessage(steerPrefix+text))
-		m.q.mu.Lock()
-		onInject := m.q.onInject
-		m.q.mu.Unlock()
-		if onInject != nil {
-			onInject(text)
-		}
+		msg := schema.UserMessage(steerPrefix + text)
+		state.Messages = append(state.Messages, msg)
+		// Surface the injection as an event at exactly this stream position:
+		// the runner records it into history on its own goroutine in event
+		// order, so the middleware never writes history from the ADK flow
+		// goroutine (a user message between an assistant tool call and its
+		// tool result breaks the pair for the API).
+		_ = adk.SendEvent(ctx, &adk.AgentEvent{Output: &adk.AgentOutput{
+			MessageOutput: &adk.MessageVariant{Message: msg, Role: schema.User},
+		}})
 	}
 	return ctx, state, nil
 }

@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -217,4 +218,62 @@ func TestSteerCancelClearsQueue(t *testing.T) {
 	if _, ok := queue.pop(); ok {
 		t.Fatal("queue not cleared after cancel")
 	}
+}
+
+// Regression: a mid-turn steer injection must never split an assistant
+// tool-call / tool-result pair in history. The previous onInject hook
+// appended from the ADK flow goroutine and raced the runner's event loop,
+// producing assistant(tool_calls) -> user([steer]) -> tool in 3/300 runs;
+// both that interleave and the patched duplicate it triggers in
+// patchtoolcalls are rejected by the model APIs.
+func TestSteerInjectionNeverSplitsToolPairs(t *testing.T) {
+	ctx := context.Background()
+	for i := 0; i < 300; i++ {
+		m := &steerToolModel{release: make(chan struct{}), entered: make(chan struct{})}
+		queue := &steerQueue{}
+		a := newSteerAgent(t, m, queue)
+
+		done := drainRun(a, ctx, "list tabs")
+		<-m.entered
+		a.Enqueue("steer mid turn")
+		close(m.release)
+		r := <-done
+
+		if r.sawErr || !r.sawDone {
+			t.Fatalf("run %d: done=%v err=%v", i, r.sawDone, r.sawErr)
+		}
+		if len(r.steers) != 1 || r.steers[0] != "steer mid turn" {
+			t.Fatalf("run %d: steers: %v", i, r.steers)
+		}
+		a.histMu.Lock()
+		hist := slices.Clone(a.history)
+		a.histMu.Unlock()
+		for j, msg := range hist {
+			if msg.Role != schema.Assistant || len(msg.ToolCalls) == 0 {
+				continue
+			}
+			for k := range msg.ToolCalls {
+				if j+1+k >= len(hist) || hist[j+1+k].Role != schema.Tool {
+					t.Fatalf("run %d: tool pair split at message %d: %s", i, j, roleList(hist))
+				}
+			}
+		}
+		steers := 0
+		for _, msg := range hist {
+			if msg.Role == schema.User && strings.HasPrefix(msg.Content, steerPrefix) {
+				steers++
+			}
+		}
+		if steers != 1 {
+			t.Fatalf("run %d: steer messages in history: %d, want 1", i, steers)
+		}
+	}
+}
+
+func roleList(hist []*schema.Message) string {
+	var roles []string
+	for _, msg := range hist {
+		roles = append(roles, string(msg.Role))
+	}
+	return strings.Join(roles, ",")
 }

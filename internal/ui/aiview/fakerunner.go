@@ -16,8 +16,9 @@ type FakeRunner struct {
 
 	// Queued collects Enqueue calls; a run acks each one with EventSteer at
 	// the next event boundary, like the real agent's step-boundary injection.
-	mu     sync.Mutex
-	Queued []string
+	mu         sync.Mutex
+	Queued     []string
+	EnqueueErr error
 
 	// In-memory SessionStore: History stands in for the agent's exported
 	// history; sessions is ordered most-recent-first like the SQL query.
@@ -90,10 +91,14 @@ func (f *FakeRunner) Run(ctx context.Context, prompt string) (<-chan AgentEvent,
 	return ch, nil
 }
 
-func (f *FakeRunner) Enqueue(text string) {
+func (f *FakeRunner) Enqueue(text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.EnqueueErr != nil {
+		return f.EnqueueErr
+	}
 	f.Queued = append(f.Queued, text)
+	return nil
 }
 
 func (f *FakeRunner) ClearQueue() {

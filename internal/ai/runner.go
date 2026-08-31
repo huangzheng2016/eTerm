@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
@@ -239,21 +240,6 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 		}
 	}
 
-	if a.queue != nil {
-		// Mid-turn injections surface as EventSteer and join the history.
-		// Ordering note: the middleware runs on the ADK flow goroutine, so a
-		// steer message can land in history just before the streamed messages
-		// it actually followed; cosmetic only, patchtoolcalls keeps the
-		// sequence valid for the model.
-		a.queue.setHook(func(text string) {
-			a.histMu.Lock()
-			a.history = append(a.history, schema.UserMessage(steerPrefix+text))
-			a.histMu.Unlock()
-			send(Event{Type: EventSteer, Text: text})
-		})
-		defer a.queue.setHook(nil)
-	}
-
 	for {
 		ok := a.runTurn(ctx, input, send)
 		if a.queue != nil && ctx.Err() != nil {
@@ -329,6 +315,13 @@ func (a *Agent) runTurn(ctx context.Context, input string, send func(Event)) boo
 		a.history = append(a.history, msg)
 		a.histMu.Unlock()
 		switch mo.Role {
+		case schema.User:
+			// Steer injection surfaced by the steer middleware via
+			// adk.SendEvent; the append above already recorded it in exact
+			// stream order.
+			if strings.HasPrefix(msg.Content, steerPrefix) {
+				send(Event{Type: EventSteer, Text: strings.TrimPrefix(msg.Content, steerPrefix)})
+			}
 		case schema.Assistant:
 			for _, tc := range msg.ToolCalls {
 				send(Event{Type: EventToolCall, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})

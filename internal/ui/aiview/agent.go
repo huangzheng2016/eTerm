@@ -27,8 +27,9 @@ type AgentEvent struct {
 type AgentRunner interface {
 	Run(ctx context.Context, prompt string) (<-chan AgentEvent, error)
 	// Enqueue queues input submitted while a run is active; the agent
-	// injects it at the next step boundary (acked with EventSteer).
-	Enqueue(text string)
+	// injects it at the next step boundary (acked with EventSteer). It
+	// fails when there is nothing to queue onto.
+	Enqueue(text string) error
 	// ClearQueue drops queued messages not yet injected (ctrl+c, ctrl+l).
 	ClearQueue()
 }

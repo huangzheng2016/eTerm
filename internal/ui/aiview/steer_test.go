@@ -1,6 +1,7 @@
 package aiview
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -79,6 +80,9 @@ func TestCtrlCDuringRunDiscardsQueue(t *testing.T) {
 		if b.kind == blockUser && b.queued {
 			t.Fatalf("queued block survived ctrl+c: %+v", b)
 		}
+		if b.kind == blockSystem && b.cache == "" {
+			t.Fatalf("system block %q was never rendered (blank gap)", b.text)
+		}
 	}
 	fake.mu.Lock()
 	remaining := fake.Queued
@@ -119,5 +123,33 @@ func TestCtrlLClearsQueue(t *testing.T) {
 	}
 	if len(m.blocks) != 0 {
 		t.Fatalf("blocks not cleared: %d", len(m.blocks))
+	}
+}
+
+func TestEnqueueFailureKeepsInputAndShowsError(t *testing.T) {
+	m, fake := newSteerTestModel()
+	fake.EnqueueErr = errors.New("no run in progress")
+
+	m.input.SetValue("first")
+	m.send()
+	m.input.SetValue("second")
+	m.send()
+
+	if m.errMsg == "" {
+		t.Fatal("enqueue failure must surface an error")
+	}
+	if m.input.Value() != "second" {
+		t.Fatalf("input must be kept on enqueue failure, got %q", m.input.Value())
+	}
+	for _, b := range m.blocks {
+		if b.kind == blockUser && b.queued {
+			t.Fatalf("failed enqueue must not add a queued block: %+v", b)
+		}
+	}
+	fake.mu.Lock()
+	remaining := fake.Queued
+	fake.mu.Unlock()
+	if len(remaining) != 0 {
+		t.Fatalf("failed enqueue must not reach the runner queue: %v", remaining)
 	}
 }
