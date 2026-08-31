@@ -24,6 +24,16 @@ func (a App) activeTabIsEditor() bool {
 	return a.tabs[a.activeTab].Type == EditorTab
 }
 
+func (a App) activeTabIsSettings() bool {
+	if a.viewState != MainView {
+		return false
+	}
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return false
+	}
+	return a.tabs[a.activeTab].Type == SettingsTab
+}
+
 // nextTabOfType returns the index of the next tab of the given type after activeTab (wrapping).
 // Returns -1 if no tab of that type exists.
 func (a App) nextTabOfType(t TabType) int {

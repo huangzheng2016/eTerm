@@ -453,3 +453,20 @@ func TestToolOutputSummaryAndExpand(t *testing.T) {
 		t.Fatal("ctrl+o did not collapse tool output")
 	}
 }
+
+func TestTitleFitsWithVoiceActive(t *testing.T) {
+	m := newTestModel(nil)
+	m.store.Add(Provider{Name: "a-very-long-provider-name-for-width-testing", Type: "openai", Model: "m"})
+	m.store.Switch("a-very-long-provider-name-for-width-testing", "m")
+	m.SetVoiceActive(true)
+	m.status = statusRunning // spinner visible too
+
+	line := strings.Split(plain(m.chatView()), "\n")[0]
+	cw := m.contentWidth()
+	if w := ansi.StringWidth(line); w > cw {
+		t.Fatalf("title width %d exceeds content width %d: %q", w, cw, line)
+	}
+	if !strings.Contains(line, "REC") {
+		t.Fatal("REC missing from title")
+	}
+}

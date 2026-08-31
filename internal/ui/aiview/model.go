@@ -105,6 +105,8 @@ type Model struct {
 	tasksSeq     int
 	taskDetailID string
 	dOffset      int
+
+	voiceActive bool // recording indicator in the title (voice input)
 }
 
 func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model {
@@ -173,6 +175,26 @@ func (m *Model) contentWidth() int {
 }
 
 func (m *Model) Running() bool { return m.status == statusRunning }
+
+// SetVoiceActive toggles the recording indicator in the title bar.
+func (m *Model) SetVoiceActive(v bool) { m.voiceActive = v }
+
+// InsertText appends dictated text to the chat input (voice delivery).
+func (m *Model) InsertText(text string) {
+	if m.mode != modeChat {
+		return
+	}
+	m.input.SetValue(m.input.Value() + text)
+}
+
+// SubmitInput sends the current input as if enter was pressed (voice
+// sentence-end "enter" with the panel open).
+func (m *Model) SubmitInput() tea.Cmd {
+	if m.mode != modeChat {
+		return nil
+	}
+	return m.send()
+}
 
 func waitEvent(ch <-chan AgentEvent) tea.Cmd {
 	return func() tea.Msg {
@@ -675,12 +697,19 @@ func (m *Model) chatView() string {
 	}
 	title := ui.TitleStyle.Render("AI Assistant")
 	if m.store != nil && m.store.Active() != "" {
-		// "AI Assistant"(12) + " · "(3) + spinner(2) + ctx must fit in cw.
-		label := truncateCells(m.store.Active(), max(0, cw-18-len(ctx)))
+		// "AI Assistant"(12) + " · "(3) + spinner(2) + REC(4) + ctx must fit in cw.
+		budget := 18
+		if m.voiceActive {
+			budget += 4
+		}
+		label := truncateCells(m.store.Active(), max(0, cw-budget-len(ctx)))
 		title += ui.DimStyle.Render(" · " + label)
 	}
 	if m.status == statusRunning {
 		title += " " + m.spinner.View()
+	}
+	if m.voiceActive {
+		title += " " + ui.ErrorStyle.Render("REC")
 	}
 	title += ui.DimStyle.Render(ctx)
 

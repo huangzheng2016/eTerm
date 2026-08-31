@@ -85,7 +85,7 @@ func (a App) View() tea.View {
 					hint = h
 				}
 			}
-			statusBar = statusBar.SetText(a.withAIStatusHint(hint))
+			statusBar = statusBar.SetText(a.withVoiceStatusHint(a.withAIStatusHint(hint)))
 		}
 		statusView := statusBar.View()
 
@@ -147,6 +147,9 @@ func (a App) View() tea.View {
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.escMenu != nil {
 			overlay := a.escMenu.View()
+			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
+		} else if a.voiceSettingsView != nil {
+			overlay := a.voiceSettingsView.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.helpOverlay {
 			// Keep tab chrome + status bar fixed like SSH/SFTP; only the content band shows the dialog.

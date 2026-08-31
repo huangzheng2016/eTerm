@@ -35,6 +35,7 @@ type KeyBindingConfig struct {
 	SnippetsTab    []string `json:"snippets_tab"`
 	CommandPalette []string `json:"command_palette"`
 	AIOverlay      []string `json:"ai_overlay"`
+	VoiceInput     []string `json:"voice_input"`
 	LocalTerminal  []string `json:"local_terminal"`
 	RenameTab      []string `json:"rename_tab"`
 	PasteImageURL  []string `json:"paste_image_url"`
@@ -116,6 +117,7 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		SnippetsTab:    []string{"ctrl+shift+b"},
 		CommandPalette: []string{"ctrl+p"},
 		AIOverlay:      []string{"ctrl+k"},
+		VoiceInput:     []string{"ctrl+r"},
 		LocalTerminal:  []string{"ctrl+shift+t"},
 		RenameTab:      []string{"ctrl+shift+r"},
 		PasteImageURL:  []string{"ctrl+shift+i"},
@@ -349,6 +351,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		AIOverlay: key.NewBinding(
 			key.WithKeys(cfg.AIOverlay...),
 			key.WithHelp(helpLabel(cfg.AIOverlay), "ai"),
+		),
+		VoiceInput: key.NewBinding(
+			key.WithKeys(cfg.VoiceInput...),
+			key.WithHelp(helpLabel(cfg.VoiceInput), "voice"),
 		),
 		LocalTerminal: key.NewBinding(
 			key.WithKeys(cfg.LocalTerminal...),

@@ -11,6 +11,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
 	"github.com/huangzheng2016/eTerm/internal/ui/shareview"
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 
 	bubbleshelp "charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
@@ -129,6 +130,21 @@ type App struct {
 	aiVisible bool
 	aiToolCh  chan aiToolRequest
 	aiShared  *aiSharedState
+
+	// Voice input (engine built lazily on the first hotkey press)
+	voiceEngine        voice.Engine
+	voiceCfg           voiceSettings
+	voiceCfgLoaded     bool
+	voiceName          string
+	voiceRec           bool
+	voiceBusy          bool // engine start/stop in flight; toggles only flip voiceRec
+	voiceStartedAt     time.Time
+	voicePartial       string
+	voiceTickSeq       int
+	voiceProgressCh    chan float64
+	voiceProgressArmed bool
+	voiceMake          func(voiceSettings, func(float64)) (voice.Engine, error)
+	voiceSettingsView  *voiceSettingsModel
 
 	connError *connErrorModel
 

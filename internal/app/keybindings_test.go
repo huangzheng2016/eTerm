@@ -104,6 +104,7 @@ func TestDefaultAIAndPaletteKeys(t *testing.T) {
 			"lock": cfg.Lock, "lock_app": cfg.LockApp,
 			"forward_tab": cfg.ForwardTab, "snippets_tab": cfg.SnippetsTab,
 			"command_palette": cfg.CommandPalette, "ai_overlay": cfg.AIOverlay,
+			"voice_input":    cfg.VoiceInput,
 			"local_terminal": cfg.LocalTerminal, "rename_tab": cfg.RenameTab,
 			"paste_image_url": cfg.PasteImageURL,
 		}
