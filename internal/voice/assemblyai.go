@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +52,7 @@ func (c AssemblyAIConfig) wsURL() string {
 
 // AssemblyAIEngine is one AssemblyAI realtime stream: 16kHz mono S16LE PCM
 // in via WriteAudio, partial transcripts out as partials, the final
-// transcript emitted on Stop (Terminate).
+// transcript emitted on Stop (terminate_session).
 type AssemblyAIEngine struct {
 	cfg AssemblyAIConfig
 
@@ -61,8 +62,8 @@ type AssemblyAIEngine struct {
 	closed    bool
 	stopping  bool
 	sentAudio bool
-	finalText string // last FinalTranscript text
-	interim   string // last PartialTranscript text
+	finals    []string // FinalTranscript segments
+	interim   string   // last PartialTranscript text
 
 	events  chan Event
 	done    chan struct{}
@@ -107,7 +108,7 @@ func (e *AssemblyAIEngine) Start(ctx context.Context) error {
 	e.started = true
 	e.stopping = false
 	e.sentAudio = false
-	e.finalText = ""
+	e.finals = nil
 	e.interim = ""
 	e.finalCh = make(chan struct{})
 	e.wg.Add(1)
@@ -130,7 +131,7 @@ func (e *AssemblyAIEngine) WriteAudio(pcm []byte) error {
 	return nil
 }
 
-// Stop sends Terminate and waits for the stream to drain; the final
+// Stop sends terminate_session and waits for the stream to drain; the final
 // transcript surfaces as a final event from the read loop.
 func (e *AssemblyAIEngine) Stop() error {
 	e.mu.Lock()
@@ -151,7 +152,7 @@ func (e *AssemblyAIEngine) Stop() error {
 	}
 	if sentAudio {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		conn.Write(ctx, websocket.MessageText, []byte(`{"type":"Terminate"}`))
+		conn.Write(ctx, websocket.MessageText, []byte(`{"terminate_session":true}`))
 		cancel()
 		select {
 		case <-finalCh:
@@ -220,19 +221,25 @@ func (e *AssemblyAIEngine) readLoop(conn *websocket.Conn, finalCh chan struct{})
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
-		if msg.Text == "" {
-			continue
-		}
 		switch msg.MessageType {
 		case "PartialTranscript":
+			if msg.Text == "" {
+				continue
+			}
 			e.mu.Lock()
 			e.interim = msg.Text
 			e.mu.Unlock()
 			e.emit(Event{Type: EventPartial, Text: msg.Text})
 		case "FinalTranscript":
+			if msg.Text == "" {
+				continue
+			}
 			e.mu.Lock()
-			e.finalText = msg.Text
+			e.finals = append(e.finals, msg.Text)
 			e.mu.Unlock()
+		case "SessionTerminated":
+			// graceful drain after terminate_session
+			return
 		}
 	}
 }
@@ -242,7 +249,7 @@ func (e *AssemblyAIEngine) readLoop(conn *websocket.Conn, finalCh chan struct{})
 func (e *AssemblyAIEngine) finish(finalCh chan struct{}, once *sync.Once) {
 	once.Do(func() {
 		e.mu.Lock()
-		text := e.finalText
+		text := strings.Join(e.finals, " ")
 		if text == "" {
 			text = e.interim
 		}

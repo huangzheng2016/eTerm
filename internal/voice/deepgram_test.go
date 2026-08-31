@@ -107,6 +107,7 @@ func (s *deepgramServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.closeStream <- struct{}{}
 		conn.Write(ctx, websocket.MessageText, []byte(`{"type":"Results","is_final":true,"channel":{"alternatives":[{"transcript":"hello"}]}}`))
+		conn.Write(ctx, websocket.MessageText, []byte(`{"type":"Results","is_final":true,"channel":{"alternatives":[{"transcript":"world"}]}}`))
 		time.Sleep(50 * time.Millisecond)
 		return
 	}
@@ -149,7 +150,7 @@ func TestDeepgramEngineLifecycle(t *testing.T) {
 		t.Fatal("server did not receive CloseStream")
 	}
 	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
-	if final.Text != "hello" {
+	if final.Text != "hello world" {
 		t.Fatalf("final: %q", final.Text)
 	}
 
@@ -212,7 +213,7 @@ func TestDeepgramFeedRoutesPassthrough(t *testing.T) {
 		t.Fatal("server did not receive CloseStream")
 	}
 	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
-	if final.Text != "hello" {
+	if final.Text != "hello world" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
 

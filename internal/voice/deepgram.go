@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,8 +85,8 @@ type DeepgramEngine struct {
 	closed    bool
 	stopping  bool
 	sentAudio bool
-	finalText string // last is_final transcript
-	interim   string // last interim transcript
+	finals    []string // is_final transcript segments
+	interim   string   // last interim transcript
 
 	events  chan Event
 	done    chan struct{}
@@ -130,7 +131,7 @@ func (e *DeepgramEngine) Start(ctx context.Context) error {
 	e.started = true
 	e.stopping = false
 	e.sentAudio = false
-	e.finalText = ""
+	e.finals = nil
 	e.interim = ""
 	e.finalCh = make(chan struct{})
 	e.wg.Add(1)
@@ -257,7 +258,7 @@ func (e *DeepgramEngine) readLoop(conn *websocket.Conn, finalCh chan struct{}) {
 		}
 		e.mu.Lock()
 		if res.IsFinal {
-			e.finalText = text
+			e.finals = append(e.finals, text)
 		} else {
 			e.interim = text
 		}
@@ -273,7 +274,7 @@ func (e *DeepgramEngine) readLoop(conn *websocket.Conn, finalCh chan struct{}) {
 func (e *DeepgramEngine) finish(finalCh chan struct{}, once *sync.Once) {
 	once.Do(func() {
 		e.mu.Lock()
-		text := e.finalText
+		text := strings.Join(e.finals, " ")
 		if text == "" {
 			text = e.interim
 		}

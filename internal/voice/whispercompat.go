@@ -49,6 +49,10 @@ const (
 	whisperCompatFinalTimeout   = 30 * time.Second
 )
 
+// whisperCompatHTTPClient bounds one transcription POST; a hung endpoint
+// must not stall the single transcription queue until Close.
+var whisperCompatHTTPClient = &http.Client{Timeout: whisperCompatFinalTimeout}
+
 // whisperCompatLocalhost reports whether base points at a local server, in
 // which case no API key is required. Empty means the default (remote) URL.
 func whisperCompatLocalhost(base string) bool {
@@ -364,7 +368,7 @@ func whisperCompatTranscribe(ctx context.Context, cfg WhisperCompatConfig, pcm [
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := whisperCompatHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("whisper transcribe: %w", err)
 	}

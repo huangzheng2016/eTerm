@@ -38,8 +38,8 @@ func TestAssemblyAIDescriptor(t *testing.T) {
 }
 
 // assemblyAIServer is a fake AssemblyAI realtime endpoint. Each connection
-// reads binary audio frames until a Terminate text message, answers with a
-// final transcript, and closes.
+// reads binary audio frames until a terminate_session message, answers with
+// final transcripts and SessionTerminated, and closes.
 type assemblyAIServer struct {
 	t         *testing.T
 	connN     int32 // atomic
@@ -91,12 +91,14 @@ func (s *assemblyAIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		if !strings.Contains(string(data), "Terminate") {
+		if !strings.Contains(string(data), `"terminate_session":true`) {
 			s.t.Errorf("unexpected text frame: %s", data)
 			continue
 		}
 		s.terminate <- struct{}{}
 		conn.Write(ctx, websocket.MessageText, []byte(`{"message_type":"FinalTranscript","text":"hello"}`))
+		conn.Write(ctx, websocket.MessageText, []byte(`{"message_type":"FinalTranscript","text":"world"}`))
+		conn.Write(ctx, websocket.MessageText, []byte(`{"message_type":"SessionTerminated"}`))
 		time.Sleep(50 * time.Millisecond)
 		return
 	}
@@ -136,10 +138,10 @@ func TestAssemblyAIEngineLifecycle(t *testing.T) {
 	select {
 	case <-srv.terminate:
 	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive Terminate")
+		t.Fatal("server did not receive terminate_session")
 	}
 	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
-	if final.Text != "hello" {
+	if final.Text != "hello world" {
 		t.Fatalf("final: %q", final.Text)
 	}
 
@@ -168,8 +170,8 @@ func TestAssemblyAIEngineRequiresKey(t *testing.T) {
 }
 
 // Passthrough flow: fake helper audio lands as assemblyai audio frames,
-// utterance_end sends Terminate, the final transcript surfaces, and the next
-// utterance gets a fresh connection.
+// utterance_end sends terminate_session, the final transcript surfaces, and
+// the next utterance gets a fresh connection.
 func TestAssemblyAIFeedRoutesPassthrough(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
@@ -199,10 +201,10 @@ func TestAssemblyAIFeedRoutesPassthrough(t *testing.T) {
 	select {
 	case <-srv.terminate:
 	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive Terminate")
+		t.Fatal("server did not receive terminate_session")
 	}
 	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
-	if final.Text != "hello" {
+	if final.Text != "hello world" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
 
