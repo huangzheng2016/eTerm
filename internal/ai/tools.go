@@ -31,7 +31,10 @@ type SessionInfo struct {
 // and daemon operations behind the agent's tools.
 type Executor interface {
 	ListTabs(ctx context.Context) ([]TabInfo, error)
-	ReadTab(ctx context.Context, id string, maxBytes int) (string, error)
+	// ReadTab returns a window of the tab's full transcript (scrollback +
+	// visible screen): up to maxBytes ending skipFromEnd bytes before the
+	// transcript tail, plus the total transcript size in bytes.
+	ReadTab(ctx context.Context, id string, maxBytes, skipFromEnd int) (text string, totalBytes int, err error)
 	// SendKeys writes keys as raw bytes to the tab's pty stdin, waits waitMs,
 	// and returns the tab's visible-screen tail.
 	SendKeys(ctx context.Context, id string, keys string, waitMs int) (string, error)
@@ -51,13 +54,15 @@ type ListTabsOutput struct {
 }
 
 type ReadTabInput struct {
-	ID       string `json:"id" jsonschema_description:"Tab id from list_tabs"`
-	MaxBytes int    `json:"max_bytes,omitempty" jsonschema_description:"Max bytes of terminal scrollback to return (default 8192). The most recent output is kept"`
+	ID          string `json:"id" jsonschema_description:"Tab id from list_tabs"`
+	MaxBytes    int    `json:"max_bytes,omitempty" jsonschema_description:"Max bytes of transcript to return (default 8192)"`
+	SkipFromEnd int    `json:"skip_from_end,omitempty" jsonschema_description:"Bytes to skip back from the end of the transcript (default 0 = most recent content). Increase to page into earlier history"`
 }
 
 type ReadTabOutput struct {
-	Content string `json:"content"`
-	Error   string `json:"error,omitempty"`
+	Content    string `json:"content"`
+	TotalBytes int    `json:"total_bytes"`
+	Error      string `json:"error,omitempty"`
 }
 
 type SendKeysInput struct {
@@ -143,7 +148,7 @@ func BuildTools(exec Executor) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build list_tabs: %w", err)
 	}
-	readTab, err := utils.InferTool("read_tab", "Read the recent terminal content of a tab. Read before sending keys to see the current state", tb.readTab)
+	readTab, err := utils.InferTool("read_tab", "Read a window of a tab's terminal transcript (scrollback + visible screen). Default shows the most recent content; increase skip_from_end to see EARLIER history, using total_bytes to know how far back you can page. History is bounded by the emulator's in-memory scrollback; older output is gone for good. Read before sending keys to see the current state", tb.readTab)
 	if err != nil {
 		return nil, fmt.Errorf("build read_tab: %w", err)
 	}
@@ -192,11 +197,15 @@ func (tb *toolBuilder) readTab(ctx context.Context, in *ReadTabInput) (*ReadTabO
 	if maxBytes <= 0 {
 		maxBytes = 8192
 	}
-	content, err := tb.exec.ReadTab(ctx, in.ID, maxBytes)
+	skip := in.SkipFromEnd
+	if skip < 0 {
+		skip = 0
+	}
+	content, total, err := tb.exec.ReadTab(ctx, in.ID, maxBytes, skip)
 	if err != nil {
 		return &ReadTabOutput{Error: err.Error()}, nil
 	}
-	return &ReadTabOutput{Content: content}, nil
+	return &ReadTabOutput{Content: content, TotalBytes: total}, nil
 }
 
 func (tb *toolBuilder) sendKeys(ctx context.Context, in *SendKeysInput) (*SendKeysOutput, error) {
