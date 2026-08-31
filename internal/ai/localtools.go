@@ -26,6 +26,14 @@ const (
 // localOperator implements the eino-ext commandline.Operator interface
 // against the host filesystem (the official package ships only a Docker
 // sandbox operator).
+//
+// Scope is deliberately unrestricted: reads and writes go to any path the
+// user account can. That is the product decision behind ai_local_tools - the
+// tools are opt-in (default off, toggled via /tools) and run without
+// permission gates; the LLM-facing prompt (localToolsPrompt) warns that the
+// tools are unsandboxed. A home-dir jail would break legitimate work outside
+// ~ (projects in /opt, /tmp scratch files), and a blocklist of sensitive
+// paths would be security theater next to an unrestricted bash tool.
 type localOperator struct{}
 
 func (localOperator) ReadFile(_ context.Context, path string) (string, error) {
@@ -158,7 +166,7 @@ func BuildLocalTools() ([]tool.BaseTool, error) {
 		}
 		return &BashOutput{Stdout: out.Stdout, Stderr: out.Stderr, ExitCode: out.ExitCode}, nil
 	}
-	bashTool, err := utils.InferTool("bash", "Run a shell command on the user's local machine via bash -c and return stdout, stderr and the exit code. A non-zero exit code is a normal result, not a tool failure. 120s timeout; long output is clipped to the last 16000 chars", run)
+	bashTool, err := utils.InferTool("bash", "Run a shell command on the user's local machine via bash -c (unsandboxed, full user privileges) and return stdout, stderr and the exit code. A non-zero exit code is a normal result, not a tool failure. 120s timeout; long output is clipped to the last 16000 chars", run)
 	if err != nil {
 		return nil, fmt.Errorf("build bash: %w", err)
 	}

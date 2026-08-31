@@ -31,7 +31,8 @@ const localToolsPrompt = `
 
 Local machine tools (the user enabled these explicitly):
 - bash: run a shell command on the user's local machine; returns stdout, stderr and the exit code.
-- str_replace_editor: view, create and edit local files; absolute paths only.`
+- str_replace_editor: view, create and edit local files; absolute paths only.
+These tools are not sandboxed: they run with the user's full local privileges and can read and write any path the user account can. Be careful with destructive commands and with files outside the user's project (shell rc files, SSH config, system directories); use them only when the task clearly calls for it.`
 
 func agentInstruction(localTools bool) string {
 	if localTools {

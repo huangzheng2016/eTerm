@@ -31,6 +31,9 @@ type HostInfo struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Tags    string `json:"tags,omitempty"`
+	// ID is the database row id, so duplicate display names stay
+	// distinguishable in list_hosts output.
+	ID uint `json:"id"`
 }
 
 // Executor is implemented by the app layer. It performs the actual terminal

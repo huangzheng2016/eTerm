@@ -79,7 +79,7 @@ func (m *Model) toggleLocalTools() {
 	}
 	text := "local tools disabled (bash, str_replace_editor) - applies to new runs"
 	if t.ToggleLocalTools() {
-		text = "local tools enabled (bash, str_replace_editor) - applies to new runs"
+		text = "local tools enabled (bash, str_replace_editor; unsandboxed, full user filesystem privileges) - applies to new runs"
 	}
 	m.blocks = append(m.blocks, block{kind: blockSystem, text: text})
 	m.renderBlock(len(m.blocks) - 1)

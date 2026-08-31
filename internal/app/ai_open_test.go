@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,26 +27,29 @@ func aiTestDB(t *testing.T) *gorm.DB {
 	return database
 }
 
-func TestFindHostByName(t *testing.T) {
+func TestFindHostsByName(t *testing.T) {
 	database := aiTestDB(t)
 	database.Create(&db.Host{Alias: "prod", Hostname: "prod.internal", Port: 22, Username: "deploy", Tags: "web"})
 	database.Create(&db.Host{Hostname: "plain.example.com", Port: 2222, Username: "root"})
+	database.Create(&db.Host{Hostname: "plain.example.com", Port: 22, Username: "root"})
 
-	host, ok := findHostByName(database, "prod")
-	if !ok || host.Hostname != "prod.internal" {
-		t.Fatalf("alias lookup = %+v, %v", host, ok)
+	hosts := findHostsByName(database, "prod")
+	if len(hosts) != 1 || hosts[0].Hostname != "prod.internal" {
+		t.Fatalf("alias lookup = %+v", hosts)
 	}
-	if _, ok := findHostByName(database, "root@plain.example.com"); !ok {
-		t.Fatal("user@host lookup failed")
+	if got := findHostsByName(database, "root@plain.example.com"); len(got) != 2 {
+		t.Fatalf("duplicate display name: got %d matches, want 2", len(got))
 	}
-	if _, ok := findHostByName(database, "nope"); ok {
-		t.Fatal("unknown host resolved")
+	if got := findHostsByName(database, "nope"); len(got) != 0 {
+		t.Fatalf("unknown host resolved: %+v", got)
 	}
 }
 
 func TestListHostsTool(t *testing.T) {
 	database := aiTestDB(t)
 	database.Create(&db.Host{Alias: "prod", Hostname: "prod.internal", Port: 22, Username: "deploy", Tags: "web"})
+	var host db.Host
+	database.First(&host)
 	exec := &aiExecutor{db: database, shared: &aiSharedState{}}
 
 	hosts, err := exec.ListHosts(context.Background())
@@ -53,23 +57,28 @@ func TestListHostsTool(t *testing.T) {
 		t.Fatalf("ListHosts = %+v, %v", hosts, err)
 	}
 	h := hosts[0]
-	if h.Name != "prod" || h.Address != "prod.internal:22" || h.Tags != "web" {
+	if h.Name != "prod" || h.Address != "prod.internal:22" || h.Tags != "web" || h.ID != host.ID {
 		t.Fatalf("host = %+v", h)
 	}
 }
 
 // serveOpenRequests emulates the UI side for the open_* ops: the open request
-// is handled (and its connect cmd dropped); when landTab is set, a tab with
-// the expected title materializes right after, like applyOpenSSHUITab would.
+// is handled (and its connect cmd dropped); when landTab is set, a tab for the
+// host materializes right after, like applyOpenSSHUITab would. The tab title
+// is deliberately NOT the host alias (a remote OSC 0/2 can retitle the tab
+// before the poll sees it); matching must rely on the host id.
 func serveOpenRequests(a App, ch <-chan aiToolRequest, landTab bool) {
 	for req := range ch {
 		_, cmd := a.handleAIToolRequest(req)
 		_ = cmd
 		if landTab && req.op == aiToolOpenSSH {
-			host, _ := findHostByName(a.db, req.id)
+			hosts := findHostsByName(a.db, req.id)
+			if len(hosts) != 1 {
+				continue
+			}
 			is := &internalssh.InteractiveSession{Done: make(chan error, 1)}
-			sv := sshview.New(is, hostDisplayName(host), 0, BuildSSHKeys(DefaultKeyBindingConfig()))
-			a.tabs = append(a.tabs, Tab{Type: SSHTab, Title: hostDisplayName(host), Model: sv})
+			sv := sshview.New(is, "renamed-by-osc", hosts[0].ID, BuildSSHKeys(DefaultKeyBindingConfig()))
+			a.tabs = append(a.tabs, Tab{Type: SSHTab, Title: "renamed-by-osc", Model: sv})
 		}
 	}
 }
@@ -83,6 +92,7 @@ func TestOpenSSHLandsNewTabID(t *testing.T) {
 	go serveOpenRequests(a, ch, true)
 	defer close(ch)
 
+	// The tab lands already retitled; the host-id match must still find it.
 	id, err := exec.OpenSSH(context.Background(), "prod")
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +103,25 @@ func TestOpenSSHLandsNewTabID(t *testing.T) {
 
 	if _, err := exec.OpenSSH(context.Background(), "nope"); err == nil || !strings.Contains(err.Error(), "unknown host") {
 		t.Fatalf("unknown host err = %v", err)
+	}
+}
+
+func TestOpenSSHAmbiguousHostName(t *testing.T) {
+	database := aiTestDB(t)
+	database.Create(&db.Host{Hostname: "dup.example.com", Port: 22, Username: "root"})
+	database.Create(&db.Host{Hostname: "dup.example.com", Port: 2222, Username: "root"})
+	ch := make(chan aiToolRequest, 16)
+	a := App{db: database, aiShared: &aiSharedState{}}
+	exec := &aiExecutor{db: database, reqCh: ch, shared: a.aiShared}
+	go serveOpenRequests(a, ch, true)
+	defer close(ch)
+
+	_, err := exec.OpenSSH(context.Background(), "root@dup.example.com")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "dup.example.com:2222") {
+		t.Fatalf("error must list candidates: %v", err)
 	}
 }
 
@@ -112,6 +141,41 @@ func TestOpenSSHTimeoutWhenNoTabLands(t *testing.T) {
 	_, err := exec.OpenSSH(context.Background(), "prod")
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestFindFreshAITab(t *testing.T) {
+	streamID := func(tab Tab) string {
+		return strconv.FormatUint(tab.Model.(*sshview.Model).StreamID(), 10)
+	}
+	newTab := func(typ TabType, title string, hostID uint, tmuxSession string) Tab {
+		is := &internalssh.InteractiveSession{Done: make(chan error, 1)}
+		sv := sshview.New(is, title, hostID, BuildSSHKeys(DefaultKeyBindingConfig()))
+		return Tab{Type: typ, Title: title, Model: sv, TmuxSession: tmuxSession}
+	}
+	sshTab := newTab(SSHTab, "whatever", 42, "")
+	tmuxTab := newTab(LocalTab, "whatever", 0, "work")
+	localTab := newTab(LocalTab, "whatever", 0, "")
+	a := App{tabs: []Tab{sshTab, tmuxTab, localTab}}
+
+	if got := a.findFreshAITab("ssh", "42", nil); got != streamID(sshTab) {
+		t.Fatalf("ssh match = %q, want %s", got, streamID(sshTab))
+	}
+	if got := a.findFreshAITab("ssh", "7", nil); got != "" {
+		t.Fatalf("wrong host matched: %q", got)
+	}
+	if got := a.findFreshAITab("ssh", "42", []string{streamID(sshTab)}); got != "" {
+		t.Fatal("before-set id not excluded")
+	}
+	if got := a.findFreshAITab("tmux", "work", nil); got != streamID(tmuxTab) {
+		t.Fatalf("tmux match = %q", got)
+	}
+	if got := a.findFreshAITab("tmux", "other", nil); got != "" {
+		t.Fatalf("wrong session matched: %q", got)
+	}
+	// The tmux tab is LocalTab too; the local matcher must skip it.
+	if got := a.findFreshAITab("local", "", nil); got != streamID(localTab) {
+		t.Fatalf("local match = %q, want %s", got, streamID(localTab))
 	}
 }
 
@@ -146,7 +210,7 @@ func TestOpenSSHRequestEmitsPaletteConnectMsg(t *testing.T) {
 	req := aiToolRequest{op: aiToolOpenSSH, id: "prod", resp: make(chan aiToolResult, 1)}
 	_, cmd := a.handleAIToolRequest(req)
 	r := <-req.resp
-	if r.err != nil || r.text != "prod" {
+	if r.err != nil || r.text == "" {
 		t.Fatalf("result = %+v", r)
 	}
 	if cmd == nil {
