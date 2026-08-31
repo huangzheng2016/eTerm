@@ -56,7 +56,13 @@ On first `start` the helper downloads into the model dir (`-model-dir`, default
 - `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2` from k2-fsa
   releases, extracted; fp32 `model.onnx` is preferred over `model.int8.onnx`
 
-## Build / CI (release artifact recipe)
+## Build / CI
+
+Release assets are built by `.github/workflows/voicehelper.yml`: on `v*`
+tags it runs the recipe below for darwin-arm64 and linux-amd64 and uploads
+`voicehelper-<os>-<arch>.tar.gz` plus a `.sha256` sidecar to the GitHub
+release. `workflow_dispatch` runs the same build without publishing (assets
+land as workflow artifacts).
 
 The sherpa-onnx-go Go modules ship prebuilt shared libraries, so a plain
 build works; the resulting binary has an rpath into the Go module cache and
@@ -85,8 +91,9 @@ shasum -a 256 voicehelper-darwin-arm64.tar.gz   # publish checksum with the rele
 ```
 
 Linux x86_64 equivalent: use `sherpa-onnx-go-linux@v1.13.3/lib/x86_64-unknown-linux-gnu`
-and patchelf instead of install_name_tool. Upload the tarball plus its
-sha256 as the release asset eTerm's internal/voice package downloads.
+and patchelf instead of install_name_tool. The workflow uploads the tarball
+plus its sha256 as the release assets eTerm's internal/voice package
+downloads.
 The artifact contract: `voicehelper-<os>-<arch>.tar.gz` with the binary
 (named `voicehelper`) and its dylibs flat at the top level; eTerm verifies
 the sha256 and extracts it into a cache dir so the dylibs sit next to the
