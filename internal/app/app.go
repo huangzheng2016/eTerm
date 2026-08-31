@@ -145,6 +145,13 @@ type App struct {
 	voiceProgressArmed bool
 	voiceMake          func(voiceSettings, func(float64)) (voice.Engine, error)
 	voiceSettingsView  *voiceSettingsModel
+	voiceTest          bool // settings-panel test recording active
+	voiceTestSeq       int
+	voiceSwallowFinal  bool // drop one final flushed by a cancelled test
+	voiceDlCh          chan voiceDownloadMsg
+	voiceDlActive      bool
+	voiceReady         func(voiceSettings) bool          // test hook; nil = real check
+	voiceDownload      func(string, func(float64)) error // test hook; nil = real download
 
 	connError *connErrorModel
 

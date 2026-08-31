@@ -41,6 +41,7 @@ type LocalConfig struct {
 type helperCommand struct {
 	Cmd  string `json:"cmd"`
 	Path string `json:"path,omitempty"`
+	Kind string `json:"kind,omitempty"`
 
 	Threshold       *float64 `json:"threshold,omitempty"`
 	MinSilence      *float64 `json:"min_silence,omitempty"`
@@ -74,6 +75,8 @@ type LocalEngine struct {
 	restarts  int
 	spawnedAt time.Time
 	vad       VADParams
+	asrDir    string // selected model dir; sent as set_model on start
+	asrKind   string
 
 	wg     sync.WaitGroup
 	events chan Event
@@ -107,6 +110,11 @@ func (e *LocalEngine) Start(ctx context.Context) error {
 	}
 	if err := e.sendVADLocked(); err != nil {
 		return err
+	}
+	if e.asrDir != "" {
+		if err := e.sendLocked(helperCommand{Cmd: "set_model", Path: e.asrDir, Kind: e.asrKind}); err != nil {
+			return err
+		}
 	}
 	startCmd := "start"
 	if e.cfg.Passthrough {
@@ -142,6 +150,19 @@ func (e *LocalEngine) SetVAD(p VADParams) error {
 		return nil
 	}
 	return e.sendVADLocked()
+}
+
+// SetModel selects the ASR model directory and recognizer kind; it applies
+// to the running helper immediately and to future (re)spawns.
+func (e *LocalEngine) SetModel(dir, kind string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.asrDir = dir
+	e.asrKind = kind
+	if e.cmd == nil {
+		return nil
+	}
+	return e.sendLocked(helperCommand{Cmd: "set_model", Path: dir, Kind: kind})
 }
 
 func (e *LocalEngine) Close() error {

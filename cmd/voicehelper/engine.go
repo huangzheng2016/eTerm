@@ -121,6 +121,7 @@ type asrEngine struct {
 
 	modelRoot string
 	asrDir    string
+	asrKind   string // recognizer family; empty = sensevoice
 	vadPath   string
 
 	rec *sherpa.OfflineRecognizer
@@ -152,19 +153,30 @@ func (e *asrEngine) loadRecognizer() error {
 	if e.asrDir == "" {
 		return nil
 	}
-	model, tokens, err := asrModelPaths(e.asrDir)
+	kind := e.asrKind
+	if kind == "" {
+		kind = "sensevoice"
+	}
+	model, tokens, err := asrModelPaths(e.asrDir, kind)
 	if err != nil {
 		return err
 	}
 	cfg := &sherpa.OfflineRecognizerConfig{}
 	cfg.FeatConfig.SampleRate = sampleRate
 	cfg.FeatConfig.FeatureDim = 80
-	cfg.ModelConfig.SenseVoice.Model = model
-	cfg.ModelConfig.SenseVoice.Language = "auto"
-	cfg.ModelConfig.SenseVoice.UseInverseTextNormalization = 1
 	cfg.ModelConfig.Tokens = tokens
 	cfg.ModelConfig.NumThreads = 2
 	cfg.ModelConfig.Provider = "cpu"
+	switch kind {
+	case "sensevoice", "sensevoice-int8":
+		cfg.ModelConfig.SenseVoice.Model = model
+		cfg.ModelConfig.SenseVoice.Language = "auto"
+		cfg.ModelConfig.SenseVoice.UseInverseTextNormalization = 1
+	case "paraformer":
+		cfg.ModelConfig.Paraformer.Model = model
+	default:
+		return fmt.Errorf("unknown model kind: %s", kind)
+	}
 	rec := sherpa.NewOfflineRecognizer(cfg)
 	if rec == nil {
 		return fmt.Errorf("failed to load ASR model: %s", model)
@@ -227,16 +239,21 @@ func (e *asrEngine) startMode(ctx context.Context, passthrough bool) {
 			e.vadPath = vadPath
 		}
 	} else {
-		if e.asrDir == "" || !fileExists(e.vadPath) {
-			asrDir, vadPath, err := ensureModels(ctx, e.modelRoot, e.ev)
+		if !fileExists(e.vadPath) {
+			vadPath, err := ensureVADModel(ctx, e.modelRoot, e.ev)
 			if err != nil {
 				e.ev.errorf("model setup: %v", err)
 				return
 			}
-			if e.asrDir == "" {
-				e.asrDir = asrDir
-			}
 			e.vadPath = vadPath
+		}
+		if e.asrDir == "" {
+			asrDir, err := ensureSenseVoice(ctx, e.modelRoot, e.ev)
+			if err != nil {
+				e.ev.errorf("model setup: %v", err)
+				return
+			}
+			e.asrDir = asrDir
 		}
 		if e.rec == nil {
 			if err := e.loadRecognizer(); err != nil {
@@ -387,16 +404,28 @@ func (e *asrEngine) onChunk(samples []float32, now time.Time) {
 	}
 }
 
-func (e *asrEngine) setModel(path string) {
+func (e *asrEngine) setModel(path, kind string) {
 	if path == "" {
 		e.asrDir = ""
+		e.asrKind = ""
 		return
 	}
-	if _, _, err := asrModelPaths(path); err != nil {
+	k := kind
+	if k == "" {
+		k = "sensevoice"
+	}
+	switch k {
+	case "sensevoice", "sensevoice-int8", "paraformer":
+	default:
+		e.ev.errorf("set_model: unknown model kind: %s", k)
+		return
+	}
+	if _, _, err := asrModelPaths(path, k); err != nil {
 		e.ev.errorf("set_model: %v", err)
 		return
 	}
 	e.asrDir = path
+	e.asrKind = kind
 	if err := e.loadRecognizer(); err != nil {
 		e.ev.errorf("set_model: %v", err)
 	}

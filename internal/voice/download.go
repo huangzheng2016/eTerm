@@ -2,6 +2,8 @@ package voice
 
 import (
 	"archive/tar"
+	"bufio"
+	"compress/bzip2"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -33,6 +35,47 @@ func helperDir(cacheDir string) string {
 	return filepath.Join(cacheDir, "voicehelper")
 }
 
+// DefaultCacheDir is the eterm cache root; the helper and the voice models
+// live under it.
+func DefaultCacheDir() string {
+	d, err := os.UserCacheDir()
+	if err != nil {
+		d = os.TempDir()
+	}
+	return filepath.Join(d, "eterm")
+}
+
+// HelperInstallPath is where the managed helper binary lives.
+func HelperInstallPath() string {
+	return filepath.Join(helperDir(DefaultCacheDir()), helperBinaryName())
+}
+
+// HelperInstalled reports whether the managed helper binary exists.
+func HelperInstalled() bool {
+	_, err := os.Stat(HelperInstallPath())
+	return err == nil
+}
+
+// DownloadHelper installs the helper binary from url (DefaultHelperURL when
+// empty), reporting download progress.
+func DownloadHelper(ctx context.Context, url string, onProgress func(pct float64)) error {
+	if url == "" {
+		url = DefaultHelperURL
+	}
+	cacheDir := DefaultCacheDir()
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return err
+	}
+	if err := downloadAndExtract(ctx, url, cacheDir, "", onProgress); err != nil {
+		return fmt.Errorf("download voice helper: %w", err)
+	}
+	binPath := HelperInstallPath()
+	if _, err := os.Stat(binPath); err != nil {
+		return fmt.Errorf("voice helper archive did not contain %s", helperBinaryName())
+	}
+	return os.Chmod(binPath, 0o755)
+}
+
 // ensureHelperBinary locates or downloads the helper binary.
 func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 	if cfg.BinPath != "" {
@@ -44,11 +87,7 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 
 	cacheDir := cfg.CacheDir
 	if cacheDir == "" {
-		d, err := os.UserCacheDir()
-		if err != nil {
-			return "", err
-		}
-		cacheDir = filepath.Join(d, "eterm")
+		cacheDir = DefaultCacheDir()
 	}
 	binPath := filepath.Join(helperDir(cacheDir), helperBinaryName())
 	if _, err := os.Stat(binPath); err == nil {
@@ -75,6 +114,30 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 // downloadAndExtract downloads the helper tarball, verifies sha256Hex when
 // non-empty, and extracts it into helperDir(cacheDir) via an atomic rename.
 func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, onProgress func(pct float64)) error {
+	tmp := filepath.Join(cacheDir, ".voicehelper.tar.gz.tmp")
+	defer os.Remove(tmp)
+	if err := downloadFile(ctx, url, tmp, sha256Hex, onProgress); err != nil {
+		return err
+	}
+
+	staging := filepath.Join(cacheDir, ".voicehelper-staging")
+	os.RemoveAll(staging)
+	defer os.RemoveAll(staging)
+	if err := untar(tmp, staging); err != nil {
+		return err
+	}
+
+	dest := helperDir(cacheDir)
+	if _, err := os.Stat(dest); err == nil {
+		// another process installed it meanwhile
+		return nil
+	}
+	return os.Rename(staging, dest)
+}
+
+// downloadFile fetches url into dest with progress, verifying sha256Hex when
+// non-empty. The file lands atomically (temp file + rename).
+func downloadFile(ctx context.Context, url, dest, sha256Hex string, onProgress func(pct float64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -88,8 +151,7 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, on
 		return fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 
-	tmp := filepath.Join(cacheDir, ".voicehelper.tar.gz.tmp")
-	defer os.Remove(tmp)
+	tmp := dest + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
@@ -105,6 +167,7 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, on
 		if n > 0 {
 			if _, werr := w.Write(buf[:n]); werr != nil {
 				f.Close()
+				os.Remove(tmp)
 				return werr
 			}
 			got += int64(n)
@@ -117,47 +180,53 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, on
 		}
 		if rerr != nil {
 			f.Close()
+			os.Remove(tmp)
 			return rerr
 		}
 	}
 	if err := f.Close(); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 
 	if sha256Hex != "" {
 		if got := hex.EncodeToString(h.Sum(nil)); got != sha256Hex {
+			os.Remove(tmp)
 			return fmt.Errorf("sha256 mismatch: got %s, want %s", got, sha256Hex)
 		}
 	}
-
-	staging := filepath.Join(cacheDir, ".voicehelper-staging")
-	os.RemoveAll(staging)
-	defer os.RemoveAll(staging)
-	if err := untarGz(tmp, staging); err != nil {
-		return err
-	}
-
-	dest := helperDir(cacheDir)
-	if _, err := os.Stat(dest); err == nil {
-		// another process installed it meanwhile
-		return nil
-	}
-	return os.Rename(staging, dest)
+	return os.Rename(tmp, dest)
 }
 
-func untarGz(archive, destDir string) error {
+// untar extracts a tar.gz or tar.bz2 archive (detected by magic bytes).
+func untar(archive, destDir string) error {
 	f, err := os.Open(archive)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
 
-	tr := tar.NewReader(gz)
+	br := bufio.NewReader(f)
+	magic, err := br.Peek(3)
+	if err != nil {
+		return fmt.Errorf("read archive: %w", err)
+	}
+	var r io.Reader
+	switch {
+	case magic[0] == 0x1f && magic[1] == 0x8b:
+		gz, err := gzip.NewReader(br)
+		if err != nil {
+			return err
+		}
+		defer gz.Close()
+		r = gz
+	case magic[0] == 'B' && magic[1] == 'Z' && magic[2] == 'h':
+		r = bzip2.NewReader(br)
+	default:
+		return fmt.Errorf("unknown archive format: %s", archive)
+	}
+
+	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {

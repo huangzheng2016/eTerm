@@ -26,20 +26,30 @@ func defaultModelRoot() string {
 	return filepath.Join(cache, "eterm", "voice-models")
 }
 
-// asrModelPaths returns (model, tokens) for a SenseVoice model directory,
-// preferring fp32 model.onnx over model.int8.onnx.
-func asrModelPaths(dir string) (string, string, error) {
+// asrModelPaths returns (model, tokens) for a model directory, picking the
+// model file by recognizer kind: sensevoice prefers fp32 over int8,
+// sensevoice-int8 requires the quantized file, paraformer prefers int8.
+func asrModelPaths(dir, kind string) (string, string, error) {
 	tokens := filepath.Join(dir, "tokens.txt")
 	if _, err := os.Stat(tokens); err != nil {
 		return "", "", fmt.Errorf("tokens.txt not found in %s", dir)
 	}
-	for _, name := range []string{"model.onnx", "model.int8.onnx"} {
+	var names []string
+	switch kind {
+	case "sensevoice-int8":
+		names = []string{"model.int8.onnx"}
+	case "paraformer":
+		names = []string{"model.int8.onnx", "model.onnx"}
+	default: // sensevoice
+		names = []string{"model.onnx", "model.int8.onnx"}
+	}
+	for _, name := range names {
 		p := filepath.Join(dir, name)
 		if _, err := os.Stat(p); err == nil {
 			return p, tokens, nil
 		}
 	}
-	return "", "", fmt.Errorf("no model.onnx or model.int8.onnx in %s", dir)
+	return "", "", fmt.Errorf("no %s in %s", strings.Join(names, " or "), dir)
 }
 
 func fileExists(p string) bool {
@@ -54,12 +64,35 @@ func ensureVADModel(ctx context.Context, root string, ev *eventWriter) (string, 
 	}
 	vadPath := filepath.Join(root, "silero_vad.onnx")
 	if !fileExists(vadPath) {
-		ev.errorf("downloading silero_vad.onnx")
+		ev.infof("downloading silero_vad.onnx")
 		if err := downloadTo(ctx, sileroVadURL, vadPath, ev); err != nil {
 			return "", fmt.Errorf("download VAD model: %w", err)
 		}
 	}
 	return vadPath, nil
+}
+
+// ensureSenseVoice downloads the default SenseVoice model into root on first
+// use, reporting progress through ev. Returns the model directory.
+func ensureSenseVoice(ctx context.Context, root string, ev *eventWriter) (string, error) {
+	asrDir := filepath.Join(root, senseVoiceDir)
+	if _, _, err := asrModelPaths(asrDir, "sensevoice"); err != nil {
+		archive := filepath.Join(root, senseVoiceDir+".tar.bz2")
+		if !fileExists(archive) {
+			ev.infof("downloading SenseVoice model (about 1 GB, one time)")
+			if err := downloadTo(ctx, senseVoiceURL, archive, ev); err != nil {
+				return "", fmt.Errorf("download ASR model: %w", err)
+			}
+		}
+		if err := untarBz2(archive, root); err != nil {
+			return "", fmt.Errorf("extract ASR model: %w", err)
+		}
+		os.Remove(archive)
+		if _, _, err := asrModelPaths(asrDir, "sensevoice"); err != nil {
+			return "", err
+		}
+	}
+	return asrDir, nil
 }
 
 // ensureModels downloads the default ASR model and VAD model into root on
@@ -69,25 +102,10 @@ func ensureModels(ctx context.Context, root string, ev *eventWriter) (string, st
 	if err != nil {
 		return "", "", err
 	}
-
-	asrDir := filepath.Join(root, senseVoiceDir)
-	if _, _, err := asrModelPaths(asrDir); err != nil {
-		archive := filepath.Join(root, senseVoiceDir+".tar.bz2")
-		if !fileExists(archive) {
-			ev.errorf("downloading SenseVoice model (about 700 MB, one time)")
-			if err := downloadTo(ctx, senseVoiceURL, archive, ev); err != nil {
-				return "", "", fmt.Errorf("download ASR model: %w", err)
-			}
-		}
-		if err := untarBz2(archive, root); err != nil {
-			return "", "", fmt.Errorf("extract ASR model: %w", err)
-		}
-		os.Remove(archive)
-		if _, _, err := asrModelPaths(asrDir); err != nil {
-			return "", "", err
-		}
+	asrDir, err := ensureSenseVoice(ctx, root, ev)
+	if err != nil {
+		return "", "", err
 	}
-
 	return asrDir, vadPath, nil
 }
 

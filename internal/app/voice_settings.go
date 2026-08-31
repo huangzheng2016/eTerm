@@ -20,6 +20,11 @@ import (
 
 const (
 	voiceRowEngine = iota
+	voiceRowHelper
+	voiceRowModel0
+	voiceRowModel1
+	voiceRowModel2
+	voiceRowTest
 	voiceRowThreshold
 	voiceRowSilence
 	voiceRowSentenceEnd
@@ -29,8 +34,14 @@ const (
 	voiceRowCount
 )
 
+// voiceHelperTarget is the download target id for the helper binary; model
+// downloads use the catalog model ID.
+const voiceHelperTarget = "helper"
+
 // voiceSettingsModel is the voice input settings overlay (opened from the
-// command palette; settingsview's keybinding section is a separate surface).
+// command palette, the esc menu, or by ctrl+r while the setup is
+// incomplete). It guides the local setup: helper download, model
+// download/selection, and a test recording.
 type voiceSettingsModel struct {
 	db     *gorm.DB
 	mk     *security.MasterKeyManager
@@ -38,12 +49,41 @@ type voiceSettingsModel struct {
 	cursor int
 	edit   int // editing key row, -1 when not editing
 	input  textinput.Model
+
+	modelsRoot        string
+	helperInstalledFn func() bool // test hook; nil = voice.HelperInstalled
+	helperOK          bool
+	modelOK           []bool
+
+	dlTarget    string // "" when no download is running
+	dlPct       float64
+	dlErr       string
+	dlErrTarget string
+
+	testing  bool
+	testText string // partial while recording, final when done
+	testErr  string
 }
 
 func newVoiceSettingsModel(database *gorm.DB, mk *security.MasterKeyManager, cfg voiceSettings) *voiceSettingsModel {
 	ti := textinput.New()
 	ti.CharLimit = 256
-	return &voiceSettingsModel{db: database, mk: mk, cfg: cfg, edit: -1, input: ti}
+	m := &voiceSettingsModel{db: database, mk: mk, cfg: cfg, edit: -1, input: ti, modelsRoot: voice.ModelsRoot()}
+	m.refreshInstallState()
+	return m
+}
+
+func (m *voiceSettingsModel) refreshInstallState() {
+	installed := m.helperInstalledFn
+	if installed == nil {
+		installed = helperInstalledFn
+	}
+	m.helperOK = installed()
+	catalog := voice.ModelCatalog()
+	m.modelOK = make([]bool, len(catalog))
+	for i, spec := range catalog {
+		m.modelOK[i] = spec.Installed(m.modelsRoot)
+	}
 }
 
 func (m *voiceSettingsModel) keyValue(row int) string {
@@ -81,6 +121,7 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		} else {
 			m.cfg.Engine = voiceEngineLocal
 		}
+		m.cfg.Verified = false
 		return m.persist(false)
 	case voiceRowThreshold:
 		m.cfg.VADThreshold = math.Round((m.cfg.VADThreshold+float64(dir)*0.05)*100) / 100
@@ -109,6 +150,36 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		return m.persist(true)
 	}
 	return nil
+}
+
+// startDownload requests a helper or model download; one download runs at a
+// time.
+func (m *voiceSettingsModel) startDownload(target string) tea.Cmd {
+	if m.dlTarget != "" {
+		return nil
+	}
+	if target == voiceHelperTarget && m.helperOK {
+		return nil
+	}
+	m.dlErr = ""
+	m.dlErrTarget = ""
+	return func() tea.Msg { return voiceDownloadRequestMsg{target: target} }
+}
+
+// modelAction selects an installed model (persisted) or starts its download.
+func (m *voiceSettingsModel) modelAction(i int) tea.Cmd {
+	spec := voice.ModelCatalog()[i]
+	if m.modelOK[i] {
+		if m.cfg.ModelID == spec.ID {
+			return nil
+		}
+		m.cfg.ModelID = spec.ID
+		m.cfg.Verified = false
+		m.testText = ""
+		m.testErr = ""
+		return m.persist(true)
+	}
+	return m.startDownload(spec.ID)
 }
 
 func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
@@ -151,7 +222,19 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 	case "right", "l", " ":
 		return false, m.adjust(1)
 	case "enter":
-		if m.cursor >= voiceRowAPIKey {
+		switch {
+		case m.cursor == voiceRowHelper:
+			return false, m.startDownload(voiceHelperTarget)
+		case m.cursor >= voiceRowModel0 && m.cursor <= voiceRowModel2:
+			return false, m.modelAction(m.cursor - voiceRowModel0)
+		case m.cursor == voiceRowTest:
+			if m.testing {
+				return false, func() tea.Msg { return voiceTestRequestMsg{stop: true} }
+			}
+			m.testText = ""
+			m.testErr = ""
+			return false, func() tea.Msg { return voiceTestRequestMsg{} }
+		case m.cursor >= voiceRowAPIKey:
 			m.edit = m.cursor
 			m.input.SetValue(m.keyValue(m.cursor))
 			m.input.SetWidth(40)
@@ -168,11 +251,139 @@ func (m *voiceSettingsModel) paste(msg tea.PasteMsg) {
 	}
 }
 
+// downloadStarted marks a download in flight (the app accepted the request).
+func (m *voiceSettingsModel) downloadStarted(target string) {
+	m.dlTarget = target
+	m.dlPct = 0
+}
+
+// downloadUpdate applies one progress/done event; failures stay visible on
+// the affected row until the next attempt.
+func (m *voiceSettingsModel) downloadUpdate(msg voiceDownloadMsg) {
+	if !msg.done {
+		if m.dlTarget == msg.target {
+			m.dlPct = msg.pct
+		}
+		return
+	}
+	m.dlTarget = ""
+	if msg.err != nil {
+		m.dlErr = msg.err.Error()
+		m.dlErrTarget = msg.target
+	} else {
+		m.dlErr = ""
+		m.dlErrTarget = ""
+	}
+	m.refreshInstallState()
+}
+
+func (m *voiceSettingsModel) testStarted() {
+	m.testing = true
+	m.testText = ""
+	m.testErr = ""
+}
+
+func (m *voiceSettingsModel) testPartial(text string) { m.testText = text }
+
+func (m *voiceSettingsModel) testDone(text string) {
+	m.testing = false
+	m.testText = text
+	m.testErr = ""
+	m.cfg.Verified = true
+}
+
+func (m *voiceSettingsModel) testError(err string) {
+	m.testing = false
+	m.testErr = err
+}
+
+func (m *voiceSettingsModel) testStopped() {
+	m.testing = false
+	if m.testText == "" && m.testErr == "" {
+		m.testErr = "no speech detected"
+	}
+}
+
 func maskVoiceKey(v string) string {
 	if v == "" {
 		return "(not set)"
 	}
 	return "(set)"
+}
+
+func (m *voiceSettingsModel) helperValue() string {
+	switch {
+	case m.dlTarget == voiceHelperTarget:
+		return fmt.Sprintf("downloading %.0f%%", m.dlPct)
+	case m.dlErrTarget == voiceHelperTarget && m.dlErr != "":
+		return "failed: " + m.dlErr
+	case m.helperOK:
+		return "installed"
+	}
+	return "missing - enter to download"
+}
+
+func (m *voiceSettingsModel) modelValue(i int) string {
+	spec := voice.ModelCatalog()[i]
+	value := "not downloaded (" + spec.Size + ")"
+	switch {
+	case m.dlTarget == spec.ID:
+		value = fmt.Sprintf("downloading %.0f%%", m.dlPct)
+	case m.dlErrTarget == spec.ID && m.dlErr != "":
+		value = "failed: " + m.dlErr
+	case m.modelOK[i]:
+		value = "installed"
+	}
+	if m.cfg.ModelID == spec.ID {
+		value = "[active] " + value
+	}
+	return value
+}
+
+func (m *voiceSettingsModel) testValue() string {
+	shorten := func(s string) string {
+		if r := []rune(s); len(r) > 40 {
+			return string(r[:40]) + "..."
+		}
+		return s
+	}
+	switch {
+	case m.testing:
+		if m.testText != "" {
+			return "recording... " + shorten(m.testText)
+		}
+		return "recording... speak now (enter stops)"
+	case m.testErr != "":
+		return "failed: " + shorten(m.testErr)
+	case m.testText != "":
+		return "heard: " + shorten(m.testText)
+	case m.cfg.Verified:
+		return "verified - enter to test again"
+	}
+	return "enter to record a sample"
+}
+
+// statusLine summarizes the readiness gate (what ctrl+r does next).
+func (m *voiceSettingsModel) statusLine() string {
+	if m.cfg.Engine == voiceEngineVolcano {
+		if m.cfg.VolcanoAPIKey != "" && m.cfg.VolcanoAppKey != "" && m.cfg.VolcanoAccessKey != "" {
+			return "ready - ctrl+r starts recording"
+		}
+		return "setup incomplete - enter the Volcano API keys"
+	}
+	activeInstalled := false
+	for i, spec := range voice.ModelCatalog() {
+		if spec.ID == m.cfg.ModelID && m.modelOK[i] {
+			activeInstalled = true
+		}
+	}
+	switch {
+	case !m.helperOK:
+		return "setup incomplete - download the helper binary, then a model"
+	case !activeInstalled:
+		return "setup incomplete - download the active model"
+	}
+	return "ready - ctrl+r starts recording"
 }
 
 func (m *voiceSettingsModel) View() string {
@@ -185,6 +396,11 @@ func (m *voiceSettingsModel) View() string {
 		value string
 	}{
 		{"Engine", m.cfg.Engine},
+		{"Helper binary", m.helperValue()},
+		{voice.ModelCatalog()[0].Name, m.modelValue(0)},
+		{voice.ModelCatalog()[1].Name, m.modelValue(1)},
+		{voice.ModelCatalog()[2].Name, m.modelValue(2)},
+		{"Microphone test", m.testValue()},
 		{"speech sensitivity (0-1)", threshold},
 		{"end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)},
 		{"Sentence end", string(m.cfg.SentenceEnd)},
@@ -209,7 +425,8 @@ func (m *voiceSettingsModel) View() string {
 	}
 	lines = append(lines,
 		"",
-		ui.DimStyle.Render("up/down move · left/right change · enter edit · esc close"))
+		ui.DimStyle.Render(m.statusLine()),
+		ui.DimStyle.Render("up/down move · left/right change · enter select/edit · esc close"))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).

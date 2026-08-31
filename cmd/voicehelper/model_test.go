@@ -48,7 +48,7 @@ func TestAsrModelPathsPrefersFp32(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "tokens.txt"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("i8"), 0o644)
 
-	model, tokens, err := asrModelPaths(dir)
+	model, tokens, err := asrModelPaths(dir, "sensevoice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAsrModelPathsPrefersFp32(t *testing.T) {
 	}
 
 	os.WriteFile(filepath.Join(dir, "model.onnx"), []byte("fp32"), 0o644)
-	model, _, err = asrModelPaths(dir)
+	model, _, err = asrModelPaths(dir, "sensevoice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,8 +65,37 @@ func TestAsrModelPathsPrefersFp32(t *testing.T) {
 		t.Fatalf("expected fp32 preferred, got %s", model)
 	}
 
-	if _, _, err := asrModelPaths(filepath.Join(dir, "missing")); err == nil {
+	if _, _, err := asrModelPaths(filepath.Join(dir, "missing"), "sensevoice"); err == nil {
 		t.Fatal("expected error for missing dir")
+	}
+}
+
+func TestAsrModelPathsByKind(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "tokens.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "model.onnx"), []byte("fp32"), 0o644)
+	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("i8"), 0o644)
+
+	// sensevoice-int8 requires the quantized file even when fp32 exists
+	model, _, err := asrModelPaths(dir, "sensevoice-int8")
+	if err != nil || filepath.Base(model) != "model.int8.onnx" {
+		t.Fatalf("sensevoice-int8: %s %v", model, err)
+	}
+	os.Remove(filepath.Join(dir, "model.int8.onnx"))
+	if _, _, err := asrModelPaths(dir, "sensevoice-int8"); err == nil {
+		t.Fatal("sensevoice-int8 must not fall back to fp32")
+	}
+
+	// paraformer prefers int8, tolerates fp32-only dirs
+	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("i8"), 0o644)
+	model, _, err = asrModelPaths(dir, "paraformer")
+	if err != nil || filepath.Base(model) != "model.int8.onnx" {
+		t.Fatalf("paraformer: %s %v", model, err)
+	}
+	os.Remove(filepath.Join(dir, "model.int8.onnx"))
+	model, _, err = asrModelPaths(dir, "paraformer")
+	if err != nil || filepath.Base(model) != "model.onnx" {
+		t.Fatalf("paraformer fp32 fallback: %s %v", model, err)
 	}
 }
 

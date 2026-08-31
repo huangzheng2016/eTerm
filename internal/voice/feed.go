@@ -146,6 +146,9 @@ func (e *VolcanoFeedEngine) SetVAD(p VADParams) error {
 	return helper.SetVAD(p)
 }
 
+// SetModel is a no-op: the passthrough helper does no local ASR.
+func (e *VolcanoFeedEngine) SetModel(string, string) error { return nil }
+
 func (e *VolcanoFeedEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {
