@@ -55,6 +55,17 @@ func TestRenderSmokeEmpty(t *testing.T) {
 	}
 }
 
+func TestViewFillsFrameExactly(t *testing.T) {
+	m := newTestModel(nil)
+	out := plain(m.View().Content)
+	if n := strings.Count(out, "\n") + 1; n != 32 {
+		t.Fatalf("view height = %d lines, want 32", n)
+	}
+	if !strings.Contains(out, "Ask the AI to read tabs") {
+		t.Fatal("missing input placeholder hint")
+	}
+}
+
 func TestSendStreamsAndFinalizes(t *testing.T) {
 	m := newTestModel([]AgentEvent{
 		{Kind: EventThinkingDelta, Text: "let me check"},

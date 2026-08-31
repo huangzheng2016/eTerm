@@ -89,7 +89,7 @@ type Model struct {
 
 func New(runner AgentRunner, store ProviderStore) *Model {
 	in := textarea.New()
-	in.Placeholder = "Ask the AI..."
+	in.Placeholder = "Ask the AI to read tabs, send keys, manage daemons..."
 	in.ShowLineNumbers = false
 	in.Prompt = ""
 	in.SetHeight(3)
@@ -136,7 +136,7 @@ func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
 		boxH = 8
 	}
 	contentW = boxW - 4
-	viewH = boxH - 2 - 1 - 3 - 1 - 2
+	viewH = boxH - 2 - 1 - 5 - 1 - 3
 	if viewH < 1 {
 		viewH = 1
 	}
@@ -511,7 +511,7 @@ func (m *Model) View() tea.View {
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(0, 1).
 		Width(boxW - 2).
-		Height(boxH - 2).
+		Height(boxH).
 		Render(content)
 	return tea.NewView(box)
 }
@@ -525,7 +525,7 @@ func (m *Model) chatView() string {
 		title += " " + m.spinner.View()
 	}
 
-	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close")
+	hint := ui.DimStyle.Render("enter send · ctrl+c stop · ctrl+l clear · ctrl+o tools · ctrl+p models · esc close")
 	if m.status == statusError {
 		hint = ui.ErrorStyle.Render("error: "+m.errMsg) + "\n" + hint
 	}
@@ -535,12 +535,19 @@ func (m *Model) chatView() string {
 		body = ui.DimStyle.Render("Ask the AI to help with your terminal session.")
 	}
 
+	inputBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#45475A")).
+		Padding(0, 1).
+		Width(m.contentWidth() - 2).
+		Render(m.input.View())
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		title,
 		"",
 		body,
 		"",
-		m.input.View(),
+		inputBox,
 		"",
 		hint,
 	)
