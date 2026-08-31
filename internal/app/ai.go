@@ -32,15 +32,22 @@ type aiBridge struct {
 	agent    aiAgent
 	agentKey string
 	cancel   context.CancelFunc
+	// pendingHistory holds a resumed session's history until the first agent
+	// exists (no runs yet in this process).
+	pendingHistory []byte
 }
 
 // aiAgent is the part of ai.Agent the bridge uses; a seam for tests.
 type aiAgent interface {
 	Run(ctx context.Context, input string) <-chan ai.Event
 	Clear()
+	ExportHistory(capBytes int) ([]byte, error)
+	ImportHistory(data []byte) error
+	UndoLastTurn()
 }
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
+	_ = database.AutoMigrate(&aiSession{})
 	return &aiBridge{store: loadAIStore(database, mk), db: database, mk: mk, exec: exec}
 }
 
@@ -157,8 +164,19 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 	if err != nil {
 		return nil, err
 	}
-	// Close is added to ai.Agent by the capabilities branch; it cancels
-	// background tasks so a replaced agent does not leak them.
+	// Keep the conversation across the swap: a resumed session waiting for
+	// the first agent, or the replaced agent's history on a provider/model
+	// switch (the panel keeps its blocks, so the agent keeps its context).
+	if b.pendingHistory != nil {
+		_ = agent.ImportHistory(b.pendingHistory)
+		b.pendingHistory = nil
+	} else if b.agent != nil {
+		if data, err := b.agent.ExportHistory(0); err == nil && len(data) > 0 {
+			_ = agent.ImportHistory(data)
+		}
+	}
+	// Close is not on the aiAgent seam; it cancels background tasks so a
+	// replaced agent does not leak them.
 	if old, ok := b.agent.(interface{ Close() }); ok {
 		old.Close()
 	}
@@ -191,8 +209,8 @@ func (b *aiBridge) CancelRun() {
 }
 
 // ContextUsage reports the active agent's context token usage (aiview title
-// bar). Zero values when no agent exists yet; Usage is added to ai.Agent by
-// the capabilities branch, hence the assertion instead of the aiAgent seam.
+// bar). Zero values when no agent exists yet; Usage is not on the aiAgent
+// seam, hence the assertion.
 func (b *aiBridge) ContextUsage() (used, max int) {
 	b.mu.Lock()
 	agent := b.agent
@@ -307,7 +325,7 @@ func (a App) ensureAI() (App, tea.Cmd) {
 	}
 	exec := &aiExecutor{db: a.db, mk: a.masterKey, reqCh: a.aiToolCh, shared: a.aiShared}
 	a.aiBridge = newAIBridge(a.db, a.masterKey, exec)
-	a.aiView = aiview.New(a.aiBridge, a.aiBridge)
+	a.aiView = aiview.New(a.aiBridge, a.aiBridge, a.aiBridge)
 	if a.width > 0 && a.height > 0 {
 		a.aiView.SetSize(a.width, a.height)
 	}

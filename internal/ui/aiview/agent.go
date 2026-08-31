@@ -1,6 +1,9 @@
 package aiview
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type EventKind int
 
@@ -44,4 +47,26 @@ type ProviderStore interface {
 	Active() string // Label of the active entry
 	Switch(provider, model string)
 	Add(p Provider)
+}
+
+// SessionEntry describes one saved chat session for the /resume picker.
+type SessionEntry struct {
+	ID        string
+	Title     string
+	Provider  string
+	Model     string
+	UpdatedAt time.Time
+}
+
+// SessionStore persists chat sessions; implemented by the app bridge.
+// SaveSession exports the agent history and upserts the row (create only when
+// the history is non-empty; title and forkOf apply on create, a non-empty
+// title also updates). LoadSession imports the session's history into the
+// agent and returns it for block rebuilding.
+type SessionStore interface {
+	SaveSession(id, title, forkOf string)
+	Sessions() []SessionEntry // ordered by updated_at desc
+	LoadSession(id string) (history []byte, ok bool)
+	UndoLastTurn()
+	ResetHistory()
 }

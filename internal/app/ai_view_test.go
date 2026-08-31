@@ -17,7 +17,7 @@ func TestAIOverlayFillsFrameExactly(t *testing.T) {
 		w, h := sz[0], sz[1]
 		fake := aiview.NewFakeRunner()
 		fake.Delay = 0
-		av := aiview.New(fake, fake)
+		av := aiview.New(fake, fake, fake)
 		av.SetSize(w, h)
 		a := App{
 			viewState: MainView,
@@ -71,7 +71,7 @@ func TestAIOverlayForwardsDragSelection(t *testing.T) {
 		{Kind: aiview.EventTextDelta, Text: "ok"},
 		{Kind: aiview.EventDone},
 	}
-	av := aiview.New(fake, fake)
+	av := aiview.New(fake, fake, fake)
 	av.SetSize(80, 24)
 	av.Init() // focuses the input
 	// Load a conversation through the public API (paste prompt, enter, drain).

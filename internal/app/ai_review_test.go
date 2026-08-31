@@ -32,13 +32,17 @@ func (f *fakeAgent) Clear() {
 	}
 }
 
+func (f *fakeAgent) ExportHistory(capBytes int) ([]byte, error) { return nil, nil }
+func (f *fakeAgent) ImportHistory(data []byte) error            { return nil }
+func (f *fakeAgent) UndoLastTurn()                              {}
+
 func TestCtrlLReturnsPromptlyMidRun(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
 	bridge := &aiBridge{}
 	bridge.agent = &fakeAgent{clearRelease: release}
 	a := App{
-		aiView:    aiview.New(bridge, bridge),
+		aiView:    aiview.New(bridge, bridge, bridge),
 		aiBridge:  bridge,
 		aiVisible: true,
 	}

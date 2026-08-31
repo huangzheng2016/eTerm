@@ -2,7 +2,9 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"sync"
@@ -112,6 +114,80 @@ func (a *Agent) Clear() {
 	a.histMu.Lock()
 	defer a.histMu.Unlock()
 	a.history = nil
+}
+
+// ExportHistory serializes the conversation history as JSON for session
+// persistence. Empty history exports as nil. When capBytes > 0, oldest whole
+// turns are dropped until the JSON fits (the newest turn is always kept).
+func (a *Agent) ExportHistory(capBytes int) ([]byte, error) {
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	if len(a.history) == 0 {
+		return nil, nil
+	}
+	msgs := a.history
+	data, err := json.Marshal(msgs)
+	if err != nil {
+		return nil, err
+	}
+	for capBytes > 0 && len(data) > capBytes {
+		i := 1
+		for i < len(msgs) && msgs[i].Role != schema.User {
+			i++
+		}
+		if i == len(msgs) {
+			break
+		}
+		msgs = msgs[i:]
+		if data, err = json.Marshal(msgs); err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
+}
+
+// ImportHistory replaces the conversation history with a previously exported
+// one. It blocks on the run mutex, so callers must not invoke it mid-run.
+func (a *Agent) ImportHistory(data []byte) error {
+	var msgs []*schema.Message
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		return fmt.Errorf("import history: %w", err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	a.history = msgs
+	return nil
+}
+
+// UndoLastTurn truncates the history to just before the last user message,
+// rewinding one turn.
+func (a *Agent) UndoLastTurn() {
+	a.histMu.Lock()
+	defer a.histMu.Unlock()
+	for i := len(a.history) - 1; i >= 0; i-- {
+		if a.history[i].Role == schema.User {
+			a.history = a.history[:i]
+			return
+		}
+	}
+	a.history = nil
+}
+
+// UndoLastTurnJSON rewinds one turn in an exported history, for callers that
+// hold the JSON form (a resumed session not yet loaded into an Agent).
+func UndoLastTurnJSON(data []byte) ([]byte, error) {
+	var msgs []*schema.Message
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		return nil, err
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == schema.User {
+			return json.Marshal(msgs[:i])
+		}
+	}
+	return json.Marshal([]*schema.Message{})
 }
 
 // Usage returns the estimated token count of the current history and the
