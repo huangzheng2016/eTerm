@@ -54,6 +54,7 @@ type block struct {
 	output   string // tool result (blockTool only)
 	toolDone bool
 	final    bool
+	queued   bool // blockUser only: submitted mid-run, not yet acked by the agent
 	cache    string
 }
 
@@ -184,6 +185,17 @@ func (m *Model) send() tea.Cmd {
 		return m.runSlashCommand(prompt)
 	}
 	if m.status == statusRunning {
+		// Queue instead of blocking: the agent injects it at the next step
+		// boundary and acks with EventSteer, which undims the block.
+		if err := m.runner.Enqueue(prompt); err != nil {
+			// Keep the input so the message is not lost.
+			m.errMsg = "queue failed: " + err.Error()
+			return nil
+		}
+		m.input.Reset()
+		m.blocks = append(m.blocks, block{kind: blockUser, text: prompt, queued: true})
+		m.renderBlock(len(m.blocks) - 1)
+		m.rebuild()
 		return nil
 	}
 	if m.cancel != nil {
@@ -214,6 +226,7 @@ func (m *Model) clearSession() {
 		m.cancel()
 		m.cancel = nil
 	}
+	m.runner.ClearQueue()
 	m.blocks = nil
 	m.events = nil
 	m.dirty = false
@@ -245,6 +258,16 @@ func (m *Model) handleEvent(ev AgentEvent) bool {
 			if m.blocks[i].kind == blockTool && !m.blocks[i].toolDone {
 				m.blocks[i].toolDone = true
 				m.blocks[i].output = ev.Text
+				m.renderBlock(i)
+				m.dirty = true
+				break
+			}
+		}
+	case EventSteer:
+		// Oldest queued block first; the agent acks in queue order.
+		for i := range m.blocks {
+			if m.blocks[i].kind == blockUser && m.blocks[i].queued {
+				m.blocks[i].queued = false
 				m.renderBlock(i)
 				m.dirty = true
 				break
@@ -295,6 +318,23 @@ func (m *Model) finish() {
 	m.dirty = false
 }
 
+// dropQueued removes queued (not yet injected) user blocks; returns the count.
+func (m *Model) dropQueued() int {
+	var kept []block
+	n := 0
+	for _, b := range m.blocks {
+		if b.kind == blockUser && b.queued {
+			n++
+			continue
+		}
+		kept = append(kept, b)
+	}
+	if n > 0 {
+		m.blocks = kept
+	}
+	return n
+}
+
 func (m *Model) flush() {
 	m.flushPending = false
 	if !m.dirty {
@@ -319,6 +359,10 @@ func (m *Model) renderBlock(i int) {
 	cw := m.contentWidth()
 	switch b.kind {
 	case blockUser:
+		if b.queued {
+			b.cache = ui.DimStyle.Width(cw).Render("Queued: " + b.text)
+			break
+		}
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fd7ff")).Width(cw).
 			Render("You: " + b.text)
 	case blockThinking:
@@ -533,8 +577,16 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					m.renderBlock(i)
 				}
 			}
+			dropped := m.dropQueued()
+			m.runner.ClearQueue()
+			at := len(m.blocks)
 			m.blocks = append(m.blocks, block{kind: blockSystem, text: "Interrupted by user (ctrl+c)"})
-			m.renderBlock(len(m.blocks) - 1)
+			if dropped > 0 {
+				m.blocks = append(m.blocks, block{kind: blockSystem, text: fmt.Sprintf("%d queued message(s) discarded", dropped)})
+			}
+			for i := at; i < len(m.blocks); i++ {
+				m.renderBlock(i)
+			}
 			m.events = nil
 			m.rebuild()
 			return m, m.scheduleSave()

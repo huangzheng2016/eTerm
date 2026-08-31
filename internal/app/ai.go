@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 
@@ -32,6 +33,10 @@ type aiBridge struct {
 	agent    aiAgent
 	agentKey string
 	cancel   context.CancelFunc
+	// running reports a run is in flight (guarded by mu, runGen defeats a
+	// stale pump goroutine clearing a newer run's flag).
+	running bool
+	runGen  int
 	// pendingHistory holds a resumed session's history until the first agent
 	// exists (no runs yet in this process).
 	pendingHistory []byte
@@ -44,6 +49,8 @@ type aiAgent interface {
 	ExportHistory(capBytes int) ([]byte, error)
 	ImportHistory(data []byte) error
 	UndoLastTurn()
+	Enqueue(text string)
+	ClearQueue()
 }
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
@@ -127,12 +134,22 @@ func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentE
 	ctx, cancel := context.WithCancel(ctx)
 	b.mu.Lock()
 	b.cancel = cancel
+	b.runGen++
+	b.running = true
+	gen := b.runGen
 	b.mu.Unlock()
 	src := agent.Run(ctx, prompt)
 	out := make(chan aiview.AgentEvent, 64)
 	go func() {
 		defer close(out)
 		defer cancel()
+		defer func() {
+			b.mu.Lock()
+			if b.runGen == gen {
+				b.running = false
+			}
+			b.mu.Unlock()
+		}()
 		for ev := range src {
 			ae, ok := aiEventToView(ev)
 			if !ok {
@@ -198,13 +215,49 @@ func (b *aiBridge) Clear() {
 	}
 }
 
+// Enqueue implements aiview.AgentRunner: input submitted mid-run is queued on
+// the agent, which injects it at the next step boundary. It fails rather than
+// dropping the message silently when there is no run to steer.
+func (b *aiBridge) Enqueue(text string) error {
+	p, model, maxCtx, err := b.store.Resolve()
+	if err != nil {
+		return err
+	}
+	agent, err := b.agentFor(p, model, maxCtx)
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	running := b.running
+	b.mu.Unlock()
+	if !running {
+		return errors.New("no run in progress")
+	}
+	agent.Enqueue(text)
+	return nil
+}
+
+// ClearQueue implements aiview.AgentRunner.
+func (b *aiBridge) ClearQueue() {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent != nil {
+		agent.ClearQueue()
+	}
+}
+
 // CancelRun aborts the in-flight run, if any (used on lock).
 func (b *aiBridge) CancelRun() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.running = false
 	if b.cancel != nil {
 		b.cancel()
 		b.cancel = nil
+	}
+	if b.agent != nil {
+		b.agent.ClearQueue()
 	}
 }
 
@@ -233,6 +286,8 @@ func aiEventToView(ev ai.Event) (aiview.AgentEvent, bool) {
 		return aiview.AgentEvent{Kind: aiview.EventToolCallEnd, Text: ev.Text}, true
 	case ai.EventDone:
 		return aiview.AgentEvent{Kind: aiview.EventDone}, true
+	case ai.EventSteer:
+		return aiview.AgentEvent{Kind: aiview.EventSteer, Text: ev.Text}, true
 	case ai.EventError:
 		text := ""
 		if ev.Err != nil {

@@ -244,7 +244,7 @@ func TestScrollKeys(t *testing.T) {
 	}
 }
 
-func TestSendIgnoredWhileRunning(t *testing.T) {
+func TestSendQueuedWhileRunning(t *testing.T) {
 	m := newTestModel([]AgentEvent{
 		{Kind: EventTextDelta, Text: "slow"},
 		{Kind: EventDone},
@@ -253,7 +253,10 @@ func TestSendIgnoredWhileRunning(t *testing.T) {
 	m.send()
 	m.input.SetValue("second")
 	if cmd := m.send(); cmd != nil {
-		t.Fatal("send while running should be ignored")
+		t.Fatal("send while running must queue, not start a run")
+	}
+	if len(m.blocks) != 2 || !m.blocks[1].queued {
+		t.Fatalf("second send must queue a dim user block: %+v", m.blocks)
 	}
 	pumpEvents(t, m)
 	users := 0
@@ -262,8 +265,8 @@ func TestSendIgnoredWhileRunning(t *testing.T) {
 			users++
 		}
 	}
-	if users != 1 {
-		t.Fatalf("got %d user blocks, want 1", users)
+	if users != 2 {
+		t.Fatalf("got %d user blocks, want 2", users)
 	}
 }
 

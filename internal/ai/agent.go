@@ -23,7 +23,9 @@ const (
 	historyBudgetRatio    = 0.50
 )
 
-func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations, contextWindow int) (*adk.ChatModelAgent, error) {
+// steer, when non-nil, adds the steer middleware first so queued user
+// messages join the turn before the other middlewares see the state.
+func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations, contextWindow int, steer *steerQueue) (*adk.ChatModelAgent, error) {
 	patchMw, err := patchtoolcalls.New(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create patchtoolcalls middleware: %w", err)
@@ -58,6 +60,10 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 	if maxIterations <= 0 {
 		maxIterations = defaultMaxIterations
 	}
+	handlers := []adk.ChatModelAgentMiddleware{patchMw, reduceMw, summaryMw}
+	if steer != nil {
+		handlers = append([]adk.ChatModelAgentMiddleware{newSteerMiddleware(steer)}, handlers...)
+	}
 	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "eterm-agent",
 		Instruction: instruction,
@@ -66,11 +72,7 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools},
 		},
 		MaxIterations: maxIterations,
-		Handlers: []adk.ChatModelAgentMiddleware{
-			patchMw,
-			reduceMw,
-			summaryMw,
-		},
+		Handlers:      handlers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create chat model agent: %w", err)

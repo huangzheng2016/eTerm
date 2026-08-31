@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
@@ -22,6 +23,9 @@ const (
 	EventToolResult
 	EventDone
 	EventError
+	// EventSteer reports a queued user message entering the turn (injected at
+	// a step boundary, or run as a chained turn when the queue outlived it).
+	EventSteer
 )
 
 type Event struct {
@@ -45,6 +49,7 @@ type Agent struct {
 	historyBudget int64
 	contextWindow int
 	tasks         *TaskManager
+	queue         *steerQueue
 }
 
 type Config struct {
@@ -70,14 +75,16 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	}
 	baseTools := append(tools, sleepTool)
 	// Sub-agents get the base tools only: no spawn_agent, so no recursion.
+	// Steer is main-agent only: queued input targets the user's turn.
+	queue := &steerQueue{}
 	tm := NewTaskManager(func(ctx context.Context) (*adk.ChatModelAgent, error) {
-		return buildADKAgent(ctx, chatModel, baseTools, systemPrompt, cfg.MaxIterations, cfg.MaxContextSize)
+		return buildADKAgent(ctx, chatModel, baseTools, systemPrompt, cfg.MaxIterations, cfg.MaxContextSize, nil)
 	})
 	taskTools, err := tm.Tools()
 	if err != nil {
 		return nil, err
 	}
-	adkAgent, err := buildADKAgent(ctx, chatModel, append(baseTools, taskTools...), systemPrompt, cfg.MaxIterations, cfg.MaxContextSize)
+	adkAgent, err := buildADKAgent(ctx, chatModel, append(baseTools, taskTools...), systemPrompt, cfg.MaxIterations, cfg.MaxContextSize, queue)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +97,7 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 		historyBudget: int64(float64(contextWindow) * historyBudgetRatio),
 		contextWindow: contextWindow,
 		tasks:         tm,
+		queue:         queue,
 	}, nil
 }
 
@@ -107,6 +115,22 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 	return ch
 }
 
+// Enqueue queues a user message submitted while a run is in flight. It is
+// injected into the turn at the next model call, or run as a chained turn
+// when the current one ends first.
+func (a *Agent) Enqueue(text string) {
+	if a.queue != nil {
+		a.queue.enqueue(text)
+	}
+}
+
+// ClearQueue drops all queued messages without injecting them.
+func (a *Agent) ClearQueue() {
+	if a.queue != nil {
+		a.queue.clear()
+	}
+}
+
 // Clear resets the conversation history.
 func (a *Agent) Clear() {
 	a.mu.Lock()
@@ -114,6 +138,7 @@ func (a *Agent) Clear() {
 	a.histMu.Lock()
 	defer a.histMu.Unlock()
 	a.history = nil
+	a.ClearQueue()
 }
 
 // ExportHistory serializes the conversation history as JSON for session
@@ -208,6 +233,43 @@ func (a *Agent) Close() {
 }
 
 func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
+	send := func(ev Event) {
+		select {
+		case ch <- ev:
+		case <-ctx.Done():
+		}
+	}
+
+	for {
+		ok := a.runTurn(ctx, input, send)
+		if a.queue != nil && ctx.Err() != nil {
+			// Cancelled run: drop everything still queued.
+			a.queue.clear()
+		}
+		if !ok || a.queue == nil {
+			if ok {
+				send(Event{Type: EventDone})
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		next, ok := a.queue.pop()
+		if !ok {
+			send(Event{Type: EventDone})
+			return
+		}
+		// The turn ended before this queued message could be injected; run it
+		// as a chained turn so the user does not have to resend.
+		send(Event{Type: EventSteer, Text: next})
+		input = steerPrefix + next
+	}
+}
+
+// runTurn executes one agent turn, streaming events via send. It returns
+// false when the turn failed (EventError already sent).
+func (a *Agent) runTurn(ctx context.Context, input string, send func(Event)) bool {
 	a.histMu.Lock()
 	a.history = append(a.history, schema.UserMessage(input))
 	// The runner keeps reading the slice while history grows below.
@@ -222,13 +284,6 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: a.agent, EnableStreaming: true})
 	iterator := runner.Run(ctx, msgs)
 
-	send := func(ev Event) {
-		select {
-		case ch <- ev:
-		case <-ctx.Done():
-		}
-	}
-
 	for {
 		event, ok := iterator.Next()
 		if !ok {
@@ -241,7 +296,7 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 				}
 			}
 			send(Event{Type: EventError, Err: event.Err})
-			return
+			return false
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
@@ -260,6 +315,13 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 		a.history = append(a.history, msg)
 		a.histMu.Unlock()
 		switch mo.Role {
+		case schema.User:
+			// Steer injection surfaced by the steer middleware via
+			// adk.SendEvent; the append above already recorded it in exact
+			// stream order.
+			if strings.HasPrefix(msg.Content, steerPrefix) {
+				send(Event{Type: EventSteer, Text: strings.TrimPrefix(msg.Content, steerPrefix)})
+			}
 		case schema.Assistant:
 			for _, tc := range msg.ToolCalls {
 				send(Event{Type: EventToolCall, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments})
@@ -269,7 +331,7 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 			send(Event{Type: EventToolResult, ToolName: mo.ToolName, Text: truncateRunes(msg.Content, 20000)})
 		}
 	}
-	send(Event{Type: EventDone})
+	return true
 }
 
 // consumeStream reads one streaming message, forwarding text and thinking

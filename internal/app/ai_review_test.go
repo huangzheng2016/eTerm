@@ -15,7 +15,10 @@ import (
 
 // fakeAgent mimics ai.Agent: Run streams until ctx ends (then closes, like
 // the real runner), and Clear blocks while a run holds the agent mutex.
-type fakeAgent struct{ clearRelease chan struct{} }
+type fakeAgent struct {
+	clearRelease chan struct{}
+	queued       []string
+}
 
 func (f *fakeAgent) Run(ctx context.Context, input string) <-chan ai.Event {
 	ch := make(chan ai.Event)
@@ -35,6 +38,8 @@ func (f *fakeAgent) Clear() {
 func (f *fakeAgent) ExportHistory(capBytes int) ([]byte, error) { return nil, nil }
 func (f *fakeAgent) ImportHistory(data []byte) error            { return nil }
 func (f *fakeAgent) UndoLastTurn()                              {}
+func (f *fakeAgent) Enqueue(text string)                        { f.queued = append(f.queued, text) }
+func (f *fakeAgent) ClearQueue()                                { f.queued = nil }
 
 func TestCtrlLReturnsPromptlyMidRun(t *testing.T) {
 	release := make(chan struct{})
@@ -83,6 +88,38 @@ func TestBridgeCancelRun(t *testing.T) {
 		t.Fatal("event pump did not stop after CancelRun")
 	}
 	bridge.CancelRun() // no panic when idle
+}
+
+func TestBridgeEnqueueRoutesToAgent(t *testing.T) {
+	store := &ai.Store{}
+	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
+	if err := store.SetActive("p", "m"); err != nil {
+		t.Fatal(err)
+	}
+	bridge := &aiBridge{store: store}
+	agent := &fakeAgent{}
+	bridge.agent = agent
+	bridge.agentKey = "p\x00m"
+
+	if err := bridge.Enqueue("too early"); err == nil {
+		t.Fatal("Enqueue without a run must fail")
+	}
+	if len(agent.queued) != 0 {
+		t.Fatalf("failed Enqueue must not queue: %v", agent.queued)
+	}
+	if _, err := bridge.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.Enqueue("steer this"); err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.queued) != 1 || agent.queued[0] != "steer this" {
+		t.Fatalf("queued: %v", agent.queued)
+	}
+	bridge.CancelRun()
+	if len(agent.queued) != 0 {
+		t.Fatalf("CancelRun must clear the queue, got %v", agent.queued)
+	}
 }
 
 type usageAgent struct{ fakeAgent }

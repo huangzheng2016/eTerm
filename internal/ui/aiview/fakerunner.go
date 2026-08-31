@@ -3,6 +3,7 @@ package aiview
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,12 @@ type FakeRunner struct {
 
 	providers []Provider
 	active    string
+
+	// Queued collects Enqueue calls; a run acks each one with EventSteer at
+	// the next event boundary, like the real agent's step-boundary injection.
+	mu         sync.Mutex
+	Queued     []string
+	EnqueueErr error
 
 	// In-memory SessionStore: History stands in for the agent's exported
 	// history; sessions is ordered most-recent-first like the SQL query.
@@ -49,6 +56,7 @@ func (f *FakeRunner) Run(ctx context.Context, prompt string) (<-chan AgentEvent,
 	ch := make(chan AgentEvent, 64)
 	go func() {
 		defer close(ch)
+		steered := 0
 		for _, ev := range events {
 			if f.Delay > 0 {
 				select {
@@ -62,9 +70,41 @@ func (f *FakeRunner) Run(ctx context.Context, prompt string) (<-chan AgentEvent,
 			case <-ctx.Done():
 				return
 			}
+			// Ack anything queued since the last event (step boundary).
+			for {
+				f.mu.Lock()
+				if steered >= len(f.Queued) {
+					f.mu.Unlock()
+					break
+				}
+				text := f.Queued[steered]
+				steered++
+				f.mu.Unlock()
+				select {
+				case ch <- AgentEvent{Kind: EventSteer, Text: text}:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
 	}()
 	return ch, nil
+}
+
+func (f *FakeRunner) Enqueue(text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.EnqueueErr != nil {
+		return f.EnqueueErr
+	}
+	f.Queued = append(f.Queued, text)
+	return nil
+}
+
+func (f *FakeRunner) ClearQueue() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Queued = nil
 }
 
 func demoEvents(prompt string) []AgentEvent {
