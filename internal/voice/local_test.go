@@ -1,7 +1,10 @@
 package voice
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -33,6 +36,7 @@ func fakeHelperMain() {
 	}
 	fmt.Printf(`{"type":"hello","version":"fake","protocol":%d}`+"\n", protocol)
 	crashFile := os.Getenv("GO_FAKE_CRASH_FILE")
+	crashAlways := os.Getenv("GO_FAKE_CRASH_ALWAYS") == "1"
 
 	sc := bufio.NewScanner(os.Stdin)
 	for sc.Scan() {
@@ -41,6 +45,9 @@ func fakeHelperMain() {
 		case strings.Contains(line, `"cmd":"set_vad_params"`):
 			fmt.Printf(`{"type":"echo","text":%s}`+"\n", strconv.Quote(line))
 		case strings.Contains(line, `"cmd":"start"`):
+			if crashAlways {
+				os.Exit(1)
+			}
 			if crashFile != "" {
 				data, _ := os.ReadFile(crashFile)
 				n, _ := strconv.Atoi(strings.TrimSpace(string(data)))
@@ -166,12 +173,60 @@ func TestLocalEngineRestartOnCrash(t *testing.T) {
 	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventFinal })
 }
 
+func TestLocalEngineStopAfterCrashGiveUp(t *testing.T) {
+	os.Setenv("GO_FAKE_CRASH_ALWAYS", "1")
+	defer os.Unsetenv("GO_FAKE_CRASH_ALWAYS")
+
+	eng := NewLocalEngine(LocalConfig{BinPath: fakeHelperWrapper(t)})
+	defer eng.Close()
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// every spawn crashes on start; engine exhausts its restart budget
+	waitEvent(t, eng, func(ev Event) bool {
+		return ev.Type == EventError && strings.Contains(ev.Msg, "giving up")
+	})
+	if err := eng.Stop(); err != nil {
+		t.Fatalf("Stop after crash give-up: %v", err)
+	}
+}
+
+func makeTarGz(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	for name, body := range files {
+		mode := int64(0o644)
+		if name == helperBinaryName() {
+			mode = 0o755
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: mode, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func TestEnsureHelperBinaryDownload(t *testing.T) {
-	content := []byte("#!/bin/sh\necho fake helper\n")
-	sum := sha256.Sum256(content)
+	tarball := makeTarGz(t, map[string]string{
+		helperBinaryName():     "#!/bin/sh\necho fake helper\n",
+		"libsherpa-fake.dylib": "dylib-bytes",
+	})
+	sum := sha256.Sum256(tarball)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
-		w.Write(content)
+		w.Header().Set("Content-Length", strconv.Itoa(len(tarball)))
+		w.Write(tarball)
 	}))
 	defer srv.Close()
 
@@ -186,12 +241,27 @@ func TestEnsureHelperBinaryDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if filepath.Base(path) != helperBinaryName() {
+		t.Fatalf("binary path: %s", path)
+	}
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != string(content) {
-		t.Fatalf("content mismatch: %q", got)
+	if !strings.Contains(string(got), "fake helper") {
+		t.Fatalf("binary content: %q", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Fatalf("binary not executable: %v", info.Mode())
+	}
+	// dylibs must land next to the binary (@executable_path)
+	dylib, err := os.ReadFile(filepath.Join(filepath.Dir(path), "libsherpa-fake.dylib"))
+	if err != nil || string(dylib) != "dylib-bytes" {
+		t.Fatalf("dylib: %v %q", err, dylib)
 	}
 	if len(pcts) == 0 || pcts[len(pcts)-1] != 100 {
 		t.Fatalf("progress callbacks: %v", pcts)
@@ -203,7 +273,7 @@ func TestEnsureHelperBinaryDownload(t *testing.T) {
 		t.Fatalf("cached lookup: %v %s", err, path2)
 	}
 
-	// wrong sha256 must fail and leave no binary
+	// wrong sha256 must fail and leave no binary behind
 	badDir := t.TempDir()
 	_, err = ensureHelperBinary(context.Background(), LocalConfig{
 		CacheDir:    badDir,
@@ -213,11 +283,19 @@ func TestEnsureHelperBinaryDownload(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sha256") {
 		t.Fatalf("expected sha256 error, got %v", err)
 	}
-	entries, _ := os.ReadDir(badDir)
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".tmp") {
-			t.Fatalf("unexpected file left behind: %s", e.Name())
-		}
+	if _, serr := os.Stat(helperDir(badDir)); serr == nil {
+		t.Fatal("helper dir should not exist after failed verify")
+	}
+}
+
+func TestUntarGzRejectsTraversal(t *testing.T) {
+	tarball := makeTarGz(t, map[string]string{"../escape.txt": "x"})
+	archive := filepath.Join(t.TempDir(), "evil.tar.gz")
+	if err := os.WriteFile(archive, tarball, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := untarGz(archive, t.TempDir()); err == nil {
+		t.Fatal("expected traversal error")
 	}
 }
 

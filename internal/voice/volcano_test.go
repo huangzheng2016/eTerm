@@ -240,3 +240,32 @@ func TestVolcanoEngineRequiresAuth(t *testing.T) {
 	}
 	eng.Close()
 }
+
+func TestVolcanoEngineConnDropEmitsError(t *testing.T) {
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		ctx := context.Background()
+		conn.Read(ctx)
+		conn.Write(ctx, websocket.MessageBinary, serverFrame(t, 1, []byte(`{"result":{"text":""}}`)))
+		time.Sleep(50 * time.Millisecond)
+		conn.CloseNow() // abrupt mid-session drop
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoEngine(VolcanoConfig{APIKey: "test-key", URL: wsURL})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	ev := waitVolcanoEvent(t, eng, func(ev Event) bool {
+		return ev.Type == EventError && strings.Contains(ev.Msg, "connection lost")
+	})
+	if ev.Msg == "" {
+		t.Fatal("expected connection lost error event")
+	}
+}

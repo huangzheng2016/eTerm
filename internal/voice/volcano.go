@@ -254,6 +254,12 @@ func (e *VolcanoEngine) readLoop(conn *websocket.Conn, finalCh chan struct{}) {
 	for {
 		_, data, err := conn.Read(context.Background())
 		if err != nil {
+			e.mu.Lock()
+			active := !e.closed && e.started
+			e.mu.Unlock()
+			if active {
+				e.emit(Event{Type: EventError, Msg: fmt.Sprintf("volcano connection lost: %v", err)})
+			}
 			return
 		}
 		ev, err := parseServerFrame(data)

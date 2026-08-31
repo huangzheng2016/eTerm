@@ -55,14 +55,15 @@ type helperEvent struct {
 type LocalEngine struct {
 	cfg LocalConfig
 
-	mu       sync.Mutex
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	out      *bufio.Reader
-	started  bool
-	closed   bool
-	restarts int
-	vad      VADParams
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	out       *bufio.Reader
+	started   bool
+	closed    bool
+	restarts  int
+	spawnedAt time.Time
+	vad       VADParams
 
 	wg     sync.WaitGroup
 	events chan Event
@@ -112,6 +113,10 @@ func (e *LocalEngine) Stop() error {
 	}
 	e.started = false
 	e.restarts = 0
+	if e.cmd == nil {
+		// helper already gone (crashed); nothing to stop
+		return nil
+	}
 	return e.sendLocked(helperCommand{Cmd: "stop"})
 }
 
@@ -173,6 +178,7 @@ func (e *LocalEngine) spawnLocked(ctx context.Context) error {
 	e.cmd = cmd
 	e.stdin = stdin
 	e.out = bufio.NewReader(stdout)
+	e.spawnedAt = time.Now()
 
 	if err := e.handshakeLocked(); err != nil {
 		cmd.Process.Kill()
@@ -285,8 +291,13 @@ func (e *LocalEngine) readLoop(cmd *exec.Cmd, out *bufio.Reader) {
 	}
 	e.cmd = nil
 	e.stdin = nil
+	// a helper that survived a while earns a fresh restart budget
+	if time.Since(e.spawnedAt) > time.Minute {
+		e.restarts = 0
+	}
 	if !e.started || e.restarts >= maxHelperRestarts {
 		restarts := e.restarts
+		e.started = false
 		e.mu.Unlock()
 		if restarts >= maxHelperRestarts {
 			e.emit(Event{Type: EventError, Msg: "voice helper crashed repeatedly; giving up"})

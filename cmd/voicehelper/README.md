@@ -79,3 +79,7 @@ shasum -a 256 voicehelper-darwin-arm64.tar.gz   # publish checksum with the rele
 Linux x86_64 equivalent: use `sherpa-onnx-go-linux@v1.13.3/lib/x86_64-unknown-linux-gnu`
 and patchelf instead of install_name_tool. Upload the tarball plus its
 sha256 as the release asset eTerm's internal/voice package downloads.
+The artifact contract: `voicehelper-<os>-<arch>.tar.gz` with the binary
+(named `voicehelper`) and its dylibs flat at the top level; eTerm verifies
+the sha256 and extracts it into a cache dir so the dylibs sit next to the
+binary for @executable_path.
