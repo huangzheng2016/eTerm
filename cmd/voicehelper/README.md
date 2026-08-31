@@ -23,9 +23,11 @@ Commands (stdin, one JSON object per line):
   the VAD model is downloaded
 - `{"cmd":"stop"}` - stop capture; pending speech is decoded and emitted as
   final (passthrough: pending speech emits utterance_end)
-- `{"cmd":"set_model","path":"/path/to/model-dir"}` - switch ASR model dir
-  (must contain tokens.txt and model.onnx or model.int8.onnx); empty path
-  resets to the auto-downloaded default
+- `{"cmd":"set_model","path":"/path/to/model-dir","kind":"sensevoice"}` - switch
+  ASR model dir (must contain tokens.txt and model.onnx or model.int8.onnx);
+  empty path resets to the auto-downloaded default. kind is optional:
+  "sensevoice" (default), "sensevoice-int8" (same package, lower memory) or
+  "paraformer" (zh-small int8)
 - `{"cmd":"set_vad_params","threshold":0.5,"min_silence":0.3,"min_speech":0.2,"trailing_silence":1.0,"max_segment":30,"no_speech_timeout":5}` -
   all fields optional, applied live
 
@@ -40,6 +42,8 @@ Events (stdout):
 - `{"type":"utterance_end"}` - passthrough mode only: VAD finalized an
   utterance (trailing silence, max segment, or stop with pending speech)
 - `{"type":"error","msg":"..."}`
+- `{"type":"info","msg":"..."}` - informational notices (e.g. model download
+  prompts; these were sent as error events before)
 - `{"type":"download_progress","pct":42.0}`
 
 VAD behavior: a trigger finalizes after trailing_silence (default 1.0s) of
