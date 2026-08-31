@@ -48,3 +48,20 @@ func TestOSCTitleManualRenamePrecedence(t *testing.T) {
 		t.Fatalf("renamed tab title = %q, want %q", a.tabs[0].Title, "mine")
 	}
 }
+
+func TestOSCTitleTmuxRenamePrecedence(t *testing.T) {
+	sv := sshview.New(nil, "[T]work", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	t.Cleanup(func() { _ = sv.Close() })
+	a := App{tabs: []Tab{{Type: LocalTab, Title: "[T]work", Model: sv, TmuxSession: "work"}}}
+
+	a.renameTmuxTabs("work", "ops")
+	if a.tabs[0].Title != "[T]ops" || !a.tabs[0].userRenamed {
+		t.Fatalf("after tmux rename: title = %q userRenamed = %v", a.tabs[0].Title, a.tabs[0].userRenamed)
+	}
+
+	updated, _ := a.Update(sshview.TitleMsg{StreamID: sv.StreamID(), Title: "user@host:~"})
+	a = updated.(App)
+	if a.tabs[0].Title != "[T]ops" {
+		t.Fatalf("tmux-renamed tab title = %q, want %q", a.tabs[0].Title, "[T]ops")
+	}
+}

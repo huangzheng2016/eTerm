@@ -346,9 +346,10 @@ func (a App) sshViewByAITabID(id string) *sshview.Model {
 
 // handleAIToolSendKeysDone answers a send_keys request once the command
 // finished (the OSC 133;D count passed the snapshot taken at send time), the
-// max wait expired, or the request context was cancelled. Shells that never
-// emit OSC 133 neither increment the count nor report a running command; they
-// get the time-based answer right after the minimum wait.
+// max wait expired, or the request context was cancelled. The wait only
+// extends past the minimum while a command is actually in flight (133;C seen,
+// 133;D pending); a stale count from an earlier 133-capable shell or a shell
+// that never emits OSC 133 answers right after the minimum wait.
 func (a App) handleAIToolSendKeysDone(msg aiToolSendKeysDoneMsg) (App, tea.Cmd) {
 	req := msg.req
 	m := a.sshViewByAITabID(req.id)
@@ -360,10 +361,8 @@ func (a App) handleAIToolSendKeysDone(msg aiToolSendKeysDoneMsg) (App, tea.Cmd) 
 		req.respond(aiToolResult{err: req.ctx.Err()})
 		return a, nil
 	}
-	if m.CommandCount() <= msg.before && time.Now().Before(msg.deadline) {
-		if msg.before > 0 || m.CommandRunning() {
-			return a, tea.Tick(aiSendKeysPollInterval, func(time.Time) tea.Msg { return msg })
-		}
+	if m.CommandCount() <= msg.before && m.CommandRunning() && time.Now().Before(msg.deadline) {
+		return a, tea.Tick(aiSendKeysPollInterval, func(time.Time) tea.Msg { return msg })
 	}
 	req.respond(aiToolResult{text: transcriptTail(m.PlainTranscript(sshview.MaxTranscriptBytes), aiSendKeysTailBytes)})
 	return a, nil

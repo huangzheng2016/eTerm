@@ -96,12 +96,11 @@ func TestSendKeysTimeoutFallback(t *testing.T) {
 	t.Cleanup(func() { aiSendKeysMaxWait, aiSendKeysPollInterval = oldMax, oldPoll })
 
 	a, sv := sendKeysTestApp(t)
-	// The shell emitted OSC 133 before, so the wait tracks command
-	// completion; this command never reports 133;D.
-	feedSSHChunk(sv, "\x1b]133;C\a\x1b]133;D;0\a")
-
 	req := sendKeysRequest(sv, context.Background())
 	_, cmd := a.handleAIToolRequest(req)
+
+	// The command starts but never reports 133;D: the wait runs to the cap.
+	feedSSHChunk(sv, "\x1b]133;C\a")
 
 	start := time.Now()
 	var resp aiToolResult
@@ -139,18 +138,51 @@ func TestSendKeysTimeoutFallback(t *testing.T) {
 	}
 }
 
+func TestSendKeysStaleOSC133AnswersPromptly(t *testing.T) {
+	oldMax, oldPoll := aiSendKeysMaxWait, aiSendKeysPollInterval
+	aiSendKeysMaxWait, aiSendKeysPollInterval = 80*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { aiSendKeysMaxWait, aiSendKeysPollInterval = oldMax, oldPoll })
+
+	a, sv := sendKeysTestApp(t)
+	// A 133-capable shell ran commands earlier, but nothing is in flight now
+	// (e.g. a dumb shell was exec'd): the stale count must not stall the wait.
+	feedSSHChunk(sv, "\x1b]133;C\a\x1b]133;D;0\a")
+
+	req := sendKeysRequest(sv, context.Background())
+	_, cmd := a.handleAIToolRequest(req)
+
+	feedSSHChunk(sv, "dumb shell output\r\n")
+	msg, ok := cmd().(aiToolSendKeysDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %T", msg)
+	}
+	_, cmd = a.handleAIToolSendKeysDone(msg)
+	if cmd != nil {
+		t.Fatal("kept polling on stale OSC 133 state")
+	}
+	select {
+	case r := <-req.resp:
+		if r.err != nil || !strings.Contains(r.text, "dumb shell output") {
+			t.Fatalf("resp = %+v", r)
+		}
+	default:
+		t.Fatal("no answer on stale OSC 133 state")
+	}
+}
+
 func TestSendKeysCtxCancel(t *testing.T) {
 	oldPoll := aiSendKeysPollInterval
 	aiSendKeysPollInterval = 5 * time.Millisecond
 	t.Cleanup(func() { aiSendKeysPollInterval = oldPoll })
 
 	a, sv := sendKeysTestApp(t)
-	feedSSHChunk(sv, "\x1b]133;C\a\x1b]133;D;0\a")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := sendKeysRequest(sv, ctx)
 	_, cmd := a.handleAIToolRequest(req)
 
+	// A command is in flight, so the wait extends; cancel aborts it.
+	feedSSHChunk(sv, "\x1b]133;C\a")
 	msg, ok := cmd().(aiToolSendKeysDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %T", msg)

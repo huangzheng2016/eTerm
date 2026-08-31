@@ -95,6 +95,9 @@ func TestRenameRemoteTmuxUpdatesOpenTabTitle(t *testing.T) {
 	if a.tabs[0].Title != "[T]peer-ops" {
 		t.Fatalf("title = %q", a.tabs[0].Title)
 	}
+	if !a.tabs[0].userRenamed {
+		t.Fatal("remote tmux rename did not set userRenamed")
+	}
 	spec := tab.RemoteReconnect()
 	if spec == nil || spec.SessionID != "ops" || spec.Target != relay.TargetTmuxAttach {
 		t.Fatalf("spec = %+v", spec)

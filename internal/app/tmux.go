@@ -117,6 +117,7 @@ func (a *App) renameTmuxTabs(oldName, newName string) {
 		if a.tabs[i].TmuxSession == oldName {
 			a.tabs[i].Title = tmuxTabTitle(newName)
 			a.tabs[i].TmuxSession = newName
+			a.tabs[i].userRenamed = true
 		}
 	}
 	a.syncTabBar()
