@@ -20,6 +20,7 @@ const (
 	defaultContextWindow  = 131072
 	clearThresholdRatio   = 0.75
 	compactThresholdRatio = 0.90
+	historyBudgetRatio    = 0.50
 )
 
 func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations, contextWindow int) (*adk.ChatModelAgent, error) {

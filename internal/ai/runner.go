@@ -33,6 +33,10 @@ type Agent struct {
 	agent   *adk.ChatModelAgent
 	mu      sync.Mutex
 	history []*schema.Message
+	// historyBudget bounds the estimated tokens kept in history across
+	// turns; oldest turns are evicted. Set below the middleware clear
+	// threshold so compaction is not re-paid every turn.
+	historyBudget int64
 }
 
 type Config struct {
@@ -56,7 +60,11 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Agent{agent: adkAgent}, nil
+	contextWindow := cfg.MaxContextSize
+	if contextWindow <= 0 {
+		contextWindow = defaultContextWindow
+	}
+	return &Agent{agent: adkAgent, historyBudget: int64(float64(contextWindow) * historyBudgetRatio)}, nil
 }
 
 // Run starts one agent turn with the given user input and returns a channel
@@ -82,6 +90,9 @@ func (a *Agent) Clear() {
 
 func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 	a.history = append(a.history, schema.UserMessage(input))
+	defer func() {
+		a.history = trimHistory(a.history, a.historyBudget)
+	}()
 
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: a.agent, EnableStreaming: true})
 	iterator := runner.Run(ctx, a.history)
@@ -113,7 +124,7 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 		mo := event.Output.MessageOutput
 		var msg *schema.Message
 		if mo.IsStreaming {
-			msg = a.consumeStream(mo, ch)
+			msg = a.consumeStream(mo, send)
 		} else {
 			msg = mo.Message
 		}
@@ -135,7 +146,7 @@ func (a *Agent) run(ctx context.Context, input string, ch chan<- Event) {
 
 // consumeStream reads one streaming message, forwarding text and thinking
 // deltas, and returns the concatenated full message.
-func (a *Agent) consumeStream(mo *adk.MessageVariant, ch chan<- Event) *schema.Message {
+func (a *Agent) consumeStream(mo *adk.MessageVariant, send func(Event)) *schema.Message {
 	defer mo.MessageStream.Close()
 	var frames []*schema.Message
 	for {
@@ -144,7 +155,7 @@ func (a *Agent) consumeStream(mo *adk.MessageVariant, ch chan<- Event) *schema.M
 			break
 		}
 		if err != nil {
-			ch <- Event{Type: EventError, Err: err}
+			send(Event{Type: EventError, Err: err})
 			return nil
 		}
 		if frame == nil {
@@ -152,10 +163,10 @@ func (a *Agent) consumeStream(mo *adk.MessageVariant, ch chan<- Event) *schema.M
 		}
 		frames = append(frames, frame)
 		if frame.Content != "" {
-			ch <- Event{Type: EventTextDelta, Text: frame.Content}
+			send(Event{Type: EventTextDelta, Text: frame.Content})
 		}
 		if frame.ReasoningContent != "" {
-			ch <- Event{Type: EventThinkingDelta, Text: frame.ReasoningContent}
+			send(Event{Type: EventThinkingDelta, Text: frame.ReasoningContent})
 		}
 	}
 	if len(frames) == 0 {
@@ -166,6 +177,27 @@ func (a *Agent) consumeStream(mo *adk.MessageVariant, ch chan<- Event) *schema.M
 		return nil
 	}
 	return msg
+}
+
+// trimHistory evicts oldest whole turns while the estimated token count
+// exceeds budget. A turn is a user message plus everything up to the next
+// user message, so eviction never splits a tool-call/result pair. The
+// newest turn is always kept, even if it alone exceeds the budget.
+func trimHistory(msgs []*schema.Message, budget int64) []*schema.Message {
+	if budget <= 0 {
+		return msgs
+	}
+	for countTokens(msgs, nil) > budget {
+		i := 1
+		for i < len(msgs) && msgs[i].Role != schema.User {
+			i++
+		}
+		if i == len(msgs) {
+			break
+		}
+		msgs = msgs[i:]
+	}
+	return msgs
 }
 
 func truncateRunes(s string, max int) string {
