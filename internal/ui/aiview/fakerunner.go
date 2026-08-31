@@ -31,6 +31,8 @@ type FakeRunner struct {
 	// the matching entry to cancelled like the real TaskManager.
 	TaskList       []TaskEntry
 	cancelledTasks []string
+
+	localTools bool
 }
 
 type fakeSession struct {
@@ -208,4 +210,9 @@ func (f *FakeRunner) CancelTask(id string) {
 			f.TaskList[i].Tail = append(f.TaskList[i].Tail, TaskActivity{Kind: "status", Text: "cancelled"})
 		}
 	}
+}
+
+func (f *FakeRunner) ToggleLocalTools() bool {
+	f.localTools = !f.localTools
+	return f.localTools
 }

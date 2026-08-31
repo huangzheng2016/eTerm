@@ -10,6 +10,7 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"gorm.io/gorm"
 )
 
 type localTerminalOpenedMsg struct {
@@ -17,21 +18,28 @@ type localTerminalOpenedMsg struct {
 	title string
 }
 
+func localShell(database *gorm.DB) string {
+	configured, _ := db.GetSetting(database, localterm.SettingShell)
+	return localterm.DefaultShell(configured)
+}
+
+func localShellTitle(database *gorm.DB) string {
+	title := filepath.Base(localShell(database))
+	if title == "." || title == "/" || title == "" {
+		title = "local"
+	}
+	return title
+}
+
 func (a App) openLocalTerminal() (App, tea.Cmd) {
 	database := a.db
 	cols, rows := ptyFromAppSizeForTab(a, LocalTab)
 	return a, func() tea.Msg {
-		configured, _ := db.GetSetting(database, localterm.SettingShell)
-		shell := localterm.DefaultShell(configured)
-		is, err := localterm.NewSession(shell, rows, cols)
+		is, err := localterm.NewSession(localShell(database), rows, cols)
 		if err != nil {
 			return types.ErrorMsg{Err: fmt.Errorf("local terminal: %w", err)}
 		}
-		title := filepath.Base(shell)
-		if title == "." || title == "/" || title == "" {
-			title = "local"
-		}
-		return localTerminalOpenedMsg{is: is, title: title}
+		return localTerminalOpenedMsg{is: is, title: localShellTitle(database)}
 	}
 }
 

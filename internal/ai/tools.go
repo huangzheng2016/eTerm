@@ -27,6 +27,12 @@ type SessionInfo struct {
 	Attached bool   `json:"attached,omitempty"`
 }
 
+type HostInfo struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Tags    string `json:"tags,omitempty"`
+}
+
 // Executor is implemented by the app layer. It performs the actual terminal
 // and daemon operations behind the agent's tools.
 type Executor interface {
@@ -46,6 +52,13 @@ type Executor interface {
 	CreateSession(ctx context.Context, daemon, name string) error
 	RenameSession(ctx context.Context, daemon, oldName, newName string) error
 	KillSession(ctx context.Context, daemon, name string) error
+	// The open_* methods open a new terminal tab and return its tab id (as
+	// reported by ListTabs) once it exists.
+	OpenLocalTerminal(ctx context.Context) (tabID string, err error)
+	ListHosts(ctx context.Context) ([]HostInfo, error)
+	OpenSSH(ctx context.Context, host string) (tabID string, err error)
+	ListTmuxSessions(ctx context.Context) ([]SessionInfo, error)
+	OpenTmux(ctx context.Context, session string) (tabID string, err error)
 }
 
 type ListTabsInput struct{}
@@ -136,6 +149,30 @@ type KillSessionOutput struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type OpenTabOutput struct {
+	Success bool   `json:"success"`
+	TabID   string `json:"tab_id,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type OpenSSHInput struct {
+	Host string `json:"host" jsonschema_description:"Host name from list_hosts"`
+}
+
+type ListHostsOutput struct {
+	Hosts []HostInfo `json:"hosts"`
+	Error string     `json:"error,omitempty"`
+}
+
+type ListTmuxSessionsOutput struct {
+	Sessions []SessionInfo `json:"sessions"`
+	Error    string        `json:"error,omitempty"`
+}
+
+type OpenTmuxInput struct {
+	Session string `json:"session" jsonschema_description:"Session name from list_tmux_sessions"`
+}
+
 // Tool handlers report executor failures in the output struct instead of
 // returning a Go error: eino aborts the whole agent run on any tool error,
 // and a failed operation (e.g. unknown session) is recoverable.
@@ -182,8 +219,28 @@ func BuildTools(exec Executor) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build kill_session: %w", err)
 	}
+	openLocal, err := utils.InferTool("open_local_terminal", "Open a new local shell tab on the user's machine and return the new tab id, ready for read_tab/send_keys", tb.openLocalTerminal)
+	if err != nil {
+		return nil, fmt.Errorf("build open_local_terminal: %w", err)
+	}
+	listHosts, err := utils.InferTool("list_hosts", "List the SSH hosts saved in the app with their name, address and tags", tb.listHosts)
+	if err != nil {
+		return nil, fmt.Errorf("build list_hosts: %w", err)
+	}
+	openSSH, err := utils.InferTool("open_ssh", "Open an SSH connection to a saved host (by name from list_hosts) in a new tab and return the new tab id. The connect runs asynchronously; the tool waits for the tab to appear, so a failure surfaces as a wait timeout", tb.openSSH)
+	if err != nil {
+		return nil, fmt.Errorf("build open_ssh: %w", err)
+	}
+	listTmux, err := utils.InferTool("list_tmux_sessions", "List the tmux sessions running on the user's local machine", tb.listTmuxSessions)
+	if err != nil {
+		return nil, fmt.Errorf("build list_tmux_sessions: %w", err)
+	}
+	openTmux, err := utils.InferTool("open_tmux", "Attach to a local tmux session (by name from list_tmux_sessions) in a new tab and return the new tab id", tb.openTmux)
+	if err != nil {
+		return nil, fmt.Errorf("build open_tmux: %w", err)
+	}
 
-	return []tool.BaseTool{listTabs, readTab, sendKeys, listDaemons, listDaemonSessions, enterDaemon, createSession, renameSession, killSession}, nil
+	return []tool.BaseTool{listTabs, readTab, sendKeys, listDaemons, listDaemonSessions, enterDaemon, createSession, renameSession, killSession, openLocal, listHosts, openSSH, listTmux, openTmux}, nil
 }
 
 func (tb *toolBuilder) listTabs(ctx context.Context, in *ListTabsInput) (*ListTabsOutput, error) {
@@ -264,4 +321,44 @@ func (tb *toolBuilder) killSession(ctx context.Context, in *KillSessionInput) (*
 		return &KillSessionOutput{Error: err.Error()}, nil
 	}
 	return &KillSessionOutput{Success: true}, nil
+}
+
+func (tb *toolBuilder) openLocalTerminal(ctx context.Context, in *ListTabsInput) (*OpenTabOutput, error) {
+	id, err := tb.exec.OpenLocalTerminal(ctx)
+	if err != nil {
+		return &OpenTabOutput{Error: err.Error()}, nil
+	}
+	return &OpenTabOutput{Success: true, TabID: id}, nil
+}
+
+func (tb *toolBuilder) listHosts(ctx context.Context, in *ListTabsInput) (*ListHostsOutput, error) {
+	hosts, err := tb.exec.ListHosts(ctx)
+	if err != nil {
+		return &ListHostsOutput{Error: err.Error()}, nil
+	}
+	return &ListHostsOutput{Hosts: hosts}, nil
+}
+
+func (tb *toolBuilder) openSSH(ctx context.Context, in *OpenSSHInput) (*OpenTabOutput, error) {
+	id, err := tb.exec.OpenSSH(ctx, in.Host)
+	if err != nil {
+		return &OpenTabOutput{Error: err.Error()}, nil
+	}
+	return &OpenTabOutput{Success: true, TabID: id}, nil
+}
+
+func (tb *toolBuilder) listTmuxSessions(ctx context.Context, in *ListTabsInput) (*ListTmuxSessionsOutput, error) {
+	sessions, err := tb.exec.ListTmuxSessions(ctx)
+	if err != nil {
+		return &ListTmuxSessionsOutput{Error: err.Error()}, nil
+	}
+	return &ListTmuxSessionsOutput{Sessions: sessions}, nil
+}
+
+func (tb *toolBuilder) openTmux(ctx context.Context, in *OpenTmuxInput) (*OpenTabOutput, error) {
+	id, err := tb.exec.OpenTmux(ctx, in.Session)
+	if err != nil {
+		return &OpenTabOutput{Error: err.Error()}, nil
+	}
+	return &OpenTabOutput{Success: true, TabID: id}, nil
 }

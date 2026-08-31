@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
 )
@@ -564,7 +565,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuild()
 				text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
 				if text != "" {
-					return m, tea.SetClipboard(text)
+					return m, tea.Batch(
+						tea.SetClipboard(text),
+						func() tea.Msg { return types.SuccessMsg{Message: fmt.Sprintf("Copied %d chars", len([]rune(text)))} },
+					)
 				}
 				return m, nil
 			}
@@ -687,12 +691,25 @@ func (m *Model) View() tea.View {
 	return tea.NewView(box)
 }
 
+// humanizeTokens abbreviates a token count for the title bar: 950 -> "950",
+// 104448 -> "104k", 1048576 -> "1M".
+func humanizeTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%dM", n/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%dk", n/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 func (m *Model) chatView() string {
 	cw := m.contentWidth()
 	ctx := ""
 	if cu, ok := m.runner.(interface{ ContextUsage() (int, int) }); ok {
 		if used, max := cu.ContextUsage(); max > 0 {
-			ctx = fmt.Sprintf(" · ctx %d%%", used*100/max)
+			ctx = fmt.Sprintf(" · context: %d%% (%s/%s)", used*100/max, humanizeTokens(used), humanizeTokens(max))
 		}
 	}
 	title := ui.TitleStyle.Render("AI Assistant")

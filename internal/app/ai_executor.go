@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,9 +12,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/ai"
+	"github.com/huangzheng2016/eTerm/internal/config"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	esync "github.com/huangzheng2016/eTerm/internal/sync"
+	"github.com/huangzheng2016/eTerm/internal/tmux"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"gorm.io/gorm"
@@ -25,6 +29,15 @@ const aiSendKeysTailBytes = 2048
 var (
 	aiSendKeysMaxWait      = 10 * time.Second
 	aiSendKeysPollInterval = 100 * time.Millisecond
+)
+
+// Bounds for the open_* tab wait: how often to re-list tabs and how long to
+// wait for the new tab to appear (SSH dials can be slow). Vars so tests can
+// shrink them.
+var (
+	aiOpenPollInterval = 250 * time.Millisecond
+	aiOpenTabTimeout   = 15 * time.Second
+	aiOpenSSHTimeout   = 60 * time.Second
 )
 
 // aiSharedState is read from the agent goroutine and written on the UI
@@ -70,6 +83,9 @@ const (
 	aiToolEnterDaemon
 	aiToolCreateSession
 	aiToolRenameSession
+	aiToolOpenLocal
+	aiToolOpenSSH
+	aiToolOpenTmux
 )
 
 // aiToolRequest is posted by the executor (agent goroutine) and answered on
@@ -179,6 +195,99 @@ func (e *aiExecutor) CreateSession(ctx context.Context, daemon, name string) err
 func (e *aiExecutor) RenameSession(ctx context.Context, daemon, oldName, newName string) error {
 	_, err := e.roundTrip(ctx, aiToolRequest{op: aiToolRenameSession, id: daemon, arg: oldName, arg2: newName})
 	return err
+}
+
+// openAndWaitTab issues an open request and polls ListTabs until a tab with
+// the expected title and a fresh id (not in the before-set captured atomically
+// by the UI handler) appears. A failed open (unknown session, dial error)
+// never lands a tab, so it surfaces as a wait timeout.
+func (e *aiExecutor) openAndWaitTab(ctx context.Context, req aiToolRequest, timeout time.Duration) (string, error) {
+	r, err := e.roundTrip(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	before := make(map[string]bool, len(r.tabs))
+	for _, t := range r.tabs {
+		before[t.ID] = true
+	}
+	title := r.text
+	deadline := time.Now().Add(timeout)
+	for {
+		tabs, err := e.ListTabs(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, t := range tabs {
+			if !before[t.ID] && (title == "" || t.Title == title) {
+				return t.ID, nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timed out waiting for the new tab; the open may have failed")
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(aiOpenPollInterval):
+		}
+	}
+}
+
+func (e *aiExecutor) OpenLocalTerminal(ctx context.Context) (string, error) {
+	return e.openAndWaitTab(ctx, aiToolRequest{op: aiToolOpenLocal}, aiOpenTabTimeout)
+}
+
+func (e *aiExecutor) OpenSSH(ctx context.Context, host string) (string, error) {
+	return e.openAndWaitTab(ctx, aiToolRequest{op: aiToolOpenSSH, id: host}, aiOpenSSHTimeout)
+}
+
+func (e *aiExecutor) OpenTmux(ctx context.Context, session string) (string, error) {
+	sessions, err := e.ListTmuxSessions(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range sessions {
+		if s.Name == session {
+			return e.openAndWaitTab(ctx, aiToolRequest{op: aiToolOpenTmux, arg: session}, aiOpenTabTimeout)
+		}
+	}
+	return "", fmt.Errorf("unknown tmux session: %s", session)
+}
+
+func (e *aiExecutor) ListHosts(ctx context.Context) ([]ai.HostInfo, error) {
+	var hosts []db.Host
+	if err := e.db.WithContext(ctx).Order("alias, hostname").Find(&hosts).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ai.HostInfo, 0, len(hosts))
+	for _, h := range hosts {
+		out = append(out, ai.HostInfo{
+			Name:    hostDisplayName(h),
+			Address: fmt.Sprintf("%s:%d", h.Hostname, h.Port),
+			Tags:    h.Tags,
+		})
+	}
+	return out, nil
+}
+
+func (e *aiExecutor) ListTmuxSessions(ctx context.Context) ([]ai.SessionInfo, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	configFile, err := tmux.ResolveConfig(e.db, config.ConfigDir(), home)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := tmux.ListSessions(ctx, configFile)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ai.SessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, ai.SessionInfo{Name: s.Name, Attached: s.Attached})
+	}
+	return out, nil
 }
 
 func (e *aiExecutor) ListDaemons(ctx context.Context) ([]ai.DaemonInfo, error) {
@@ -309,8 +418,46 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 			}
 			return aiToolRenameDoneMsg{req: req, peer: peer, err: err}
 		}
+	case aiToolOpenLocal:
+		// Respond before the tab exists: the answer carries the tab snapshot
+		// and the expected title; the executor polls for the fresh tab id.
+		before := a.aiTabInfos()
+		var cmd tea.Cmd
+		a, cmd = a.openLocalTerminal()
+		req.respond(aiToolResult{text: localShellTitle(a.db), tabs: before})
+		return a, cmd
+	case aiToolOpenTmux:
+		before := a.aiTabInfos()
+		var cmd tea.Cmd
+		a, cmd = a.openTmux(types.TmuxOpenMsg{Name: req.arg})
+		req.respond(aiToolResult{text: tmuxTabTitle(req.arg), tabs: before})
+		return a, cmd
+	case aiToolOpenSSH:
+		host, ok := findHostByName(a.db, req.id)
+		if !ok {
+			req.respond(aiToolResult{err: fmt.Errorf("unknown host: %s (see list_hosts)", req.id)})
+			break
+		}
+		before := a.aiTabInfos()
+		req.respond(aiToolResult{text: hostDisplayName(host), tabs: before})
+		return a, func() tea.Msg { return types.SSHConnectMsg{HostID: host.ID} }
 	}
 	return a, nil
+}
+
+// findHostByName resolves a list_hosts name (alias, user@host, or hostname -
+// the same display name the command palette shows) to the DB row.
+func findHostByName(database *gorm.DB, name string) (db.Host, bool) {
+	var hosts []db.Host
+	if err := database.Order("alias, hostname").Find(&hosts).Error; err != nil {
+		return db.Host{}, false
+	}
+	for _, h := range hosts {
+		if hostDisplayName(h) == name {
+			return h, true
+		}
+	}
+	return db.Host{}, false
 }
 
 func (a App) aiTabInfos() []ai.TabInfo {

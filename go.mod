@@ -17,6 +17,7 @@ require (
 	github.com/cloudwego/eino v0.9.18
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.25
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
+	github.com/cloudwego/eino-ext/components/tool/commandline v0.0.0-20260829100111-16ddf563ec68
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/glebarez/sqlite v1.11.0
@@ -102,11 +103,12 @@ require (
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	go.opencensus.io v0.24.0 // indirect
+	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.49.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
-	go.opentelemetry.io/otel v1.24.0 // indirect
-	go.opentelemetry.io/otel/metric v1.24.0 // indirect
-	go.opentelemetry.io/otel/trace v1.24.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0 // indirect
+	go.opentelemetry.io/otel v1.35.0 // indirect
+	go.opentelemetry.io/otel/metric v1.35.0 // indirect
+	go.opentelemetry.io/otel/trace v1.35.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.design/x/x11 v0.2.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
@@ -115,7 +117,7 @@ require (
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/mobile v0.0.0-20260821190718-4776eadac327 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/time v0.5.0 // indirect
+	golang.org/x/time v0.11.0 // indirect
 	google.golang.org/api v0.189.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240722135656-d784300faade // indirect
 	google.golang.org/grpc v1.64.1 // indirect
