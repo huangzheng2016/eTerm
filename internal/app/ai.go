@@ -44,6 +44,8 @@ type aiAgent interface {
 	ExportHistory(capBytes int) ([]byte, error)
 	ImportHistory(data []byte) error
 	UndoLastTurn()
+	Enqueue(text string)
+	ClearQueue()
 }
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
@@ -198,6 +200,30 @@ func (b *aiBridge) Clear() {
 	}
 }
 
+// Enqueue implements aiview.AgentRunner: input submitted mid-run is queued on
+// the agent, which injects it at the next step boundary.
+func (b *aiBridge) Enqueue(text string) {
+	p, model, maxCtx, err := b.store.Resolve()
+	if err != nil {
+		return
+	}
+	agent, err := b.agentFor(p, model, maxCtx)
+	if err != nil {
+		return
+	}
+	agent.Enqueue(text)
+}
+
+// ClearQueue implements aiview.AgentRunner.
+func (b *aiBridge) ClearQueue() {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent != nil {
+		agent.ClearQueue()
+	}
+}
+
 // CancelRun aborts the in-flight run, if any (used on lock).
 func (b *aiBridge) CancelRun() {
 	b.mu.Lock()
@@ -205,6 +231,9 @@ func (b *aiBridge) CancelRun() {
 	if b.cancel != nil {
 		b.cancel()
 		b.cancel = nil
+	}
+	if b.agent != nil {
+		b.agent.ClearQueue()
 	}
 }
 
@@ -233,6 +262,8 @@ func aiEventToView(ev ai.Event) (aiview.AgentEvent, bool) {
 		return aiview.AgentEvent{Kind: aiview.EventToolCallEnd, Text: ev.Text}, true
 	case ai.EventDone:
 		return aiview.AgentEvent{Kind: aiview.EventDone}, true
+	case ai.EventSteer:
+		return aiview.AgentEvent{Kind: aiview.EventSteer, Text: ev.Text}, true
 	case ai.EventError:
 		text := ""
 		if ev.Err != nil {

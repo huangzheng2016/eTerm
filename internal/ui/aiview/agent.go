@@ -14,6 +14,9 @@ const (
 	EventToolCallEnd
 	EventDone
 	EventError
+	// EventSteer acks a queued message: it entered the agent's turn, so the
+	// panel converts its dim queued block into a normal user block.
+	EventSteer
 )
 
 type AgentEvent struct {
@@ -23,6 +26,11 @@ type AgentEvent struct {
 
 type AgentRunner interface {
 	Run(ctx context.Context, prompt string) (<-chan AgentEvent, error)
+	// Enqueue queues input submitted while a run is active; the agent
+	// injects it at the next step boundary (acked with EventSteer).
+	Enqueue(text string)
+	// ClearQueue drops queued messages not yet injected (ctrl+c, ctrl+l).
+	ClearQueue()
 }
 
 type Provider struct {

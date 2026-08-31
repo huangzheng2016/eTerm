@@ -44,7 +44,7 @@ func testFactory(m model.ChatModel) agentFactory {
 		if err != nil {
 			return nil, err
 		}
-		return buildADKAgent(ctx, m, tools, "test instruction", 4, 100000)
+		return buildADKAgent(ctx, m, tools, "test instruction", 4, 100000, nil)
 	}
 }
 

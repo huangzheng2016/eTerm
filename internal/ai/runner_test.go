@@ -51,7 +51,7 @@ func TestAgentRunEmitsEventsAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &fakeModel{}, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, &fakeModel{}, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestExportImportHistoryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestExportHistoryCapDropsOldestTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestUndoLastTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestUsageReflectsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestUsageDuringRunDoesNotBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, m, tools, "test instruction", 4, 100000)
+	adkAgent, err := buildADKAgent(ctx, m, tools, "test instruction", 4, 100000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
