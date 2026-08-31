@@ -25,6 +25,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 	"github.com/huangzheng2016/eTerm/internal/version"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -211,6 +212,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, func() tea.Msg { return selected }
 			}
 			return a, a.commandPalette.Update(msg)
+		}
+
+		if a.voiceSettingsView != nil {
+			closed, cmd := a.voiceSettingsView.Update(msg)
+			if closed {
+				a.voiceSettingsView = nil
+			}
+			return a, cmd
+		}
+
+		// Voice toggle works in every tab and inside the AI overlay.
+		if a.viewState == MainView && key.Matches(msg, a.keyMap.VoiceInput) {
+			return a.toggleVoice()
 		}
 
 		// AI overlay intercepts all keys when visible; esc emits aiview.CloseMsg.
@@ -486,6 +500,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.commandPalette != nil {
 			a.commandPalette.paste(msg)
+			return a, nil
+		}
+		if a.voiceSettingsView != nil {
+			a.voiceSettingsView.paste(msg)
 			return a, nil
 		}
 		if a.aiVisible && a.aiView != nil {
@@ -996,7 +1014,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.aiBridge != nil {
 			a.aiBridge.CancelRun()
 		}
-		return a, nil
+		return a.stopVoice()
 
 	case types.ErrorMsg:
 		appDebugf("ErrorMsg (toast): %v", msg.Err)
@@ -1073,6 +1091,64 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		msg.req.respond(aiToolResult{err: msg.err})
 		return a, nil
+
+	case voiceEventMsg:
+		return a.handleVoiceEvent(msg)
+
+	case voiceEngineClosedMsg:
+		return a, nil
+
+	case voiceProgressMsg:
+		var tc tea.Cmd
+		a.toast, tc = a.toast.Show(fmt.Sprintf("Downloading voice helper %.0f%%", msg.pct), components.ToastInfo, 30*time.Second)
+		return a, tea.Batch(tc, waitVoiceProgress(a.voiceProgressCh))
+
+	case voiceStartedMsg:
+		var tc tea.Cmd
+		a.toast, tc = a.toast.Show("Voice recording", components.ToastSuccess, 2*time.Second)
+		return a, tc
+
+	case voiceStartFailedMsg:
+		a.voiceRec = false
+		a.voicePartial = ""
+		if a.aiView != nil {
+			a.aiView.SetVoiceActive(false)
+		}
+		var tc tea.Cmd
+		a.toast, tc = a.toast.Show("Voice: "+msg.err.Error(), components.ToastError, 6*time.Second)
+		return a, tc
+
+	case voiceTickMsg:
+		if a.voiceRec && msg.seq == a.voiceTickSeq {
+			return a, voiceTick(msg.seq)
+		}
+		return a, nil
+
+	case openVoiceSettingsMsg:
+		a = a.ensureVoiceCfg()
+		a.voiceSettingsView = newVoiceSettingsModel(a.db, a.masterKey, a.voiceCfg)
+		return a, nil
+
+	case voiceSettingsChangedMsg:
+		a.voiceCfg = msg.cfg
+		if a.voiceEngine == nil {
+			return a, nil
+		}
+		if msg.keepEngine {
+			_ = a.voiceEngine.SetVAD(voice.VADParams{Threshold: msg.cfg.VADThreshold})
+			return a, nil
+		}
+		eng := a.voiceEngine
+		a.voiceEngine = nil
+		a.voiceRec = false
+		a.voicePartial = ""
+		if a.aiView != nil {
+			a.aiView.SetVoiceActive(false)
+		}
+		return a, func() tea.Msg {
+			_ = eng.Close()
+			return nil
+		}
 
 	case types.OpenImportSourceMenuMsg:
 		a.importSourceMenu = newImportSourceMenu()

@@ -105,6 +105,8 @@ type Model struct {
 	tasksSeq     int
 	taskDetailID string
 	dOffset      int
+
+	voiceActive bool // recording indicator in the title (voice input)
 }
 
 func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model {
@@ -173,6 +175,26 @@ func (m *Model) contentWidth() int {
 }
 
 func (m *Model) Running() bool { return m.status == statusRunning }
+
+// SetVoiceActive toggles the recording indicator in the title bar.
+func (m *Model) SetVoiceActive(v bool) { m.voiceActive = v }
+
+// InsertText appends dictated text to the chat input (voice delivery).
+func (m *Model) InsertText(text string) {
+	if m.mode != modeChat {
+		return
+	}
+	m.input.SetValue(m.input.Value() + text)
+}
+
+// SubmitInput sends the current input as if enter was pressed (voice
+// sentence-end "enter" with the panel open).
+func (m *Model) SubmitInput() tea.Cmd {
+	if m.mode != modeChat {
+		return nil
+	}
+	return m.send()
+}
 
 func waitEvent(ch <-chan AgentEvent) tea.Cmd {
 	return func() tea.Msg {
@@ -681,6 +703,9 @@ func (m *Model) chatView() string {
 	}
 	if m.status == statusRunning {
 		title += " " + m.spinner.View()
+	}
+	if m.voiceActive {
+		title += " " + ui.ErrorStyle.Render("REC")
 	}
 	title += ui.DimStyle.Render(ctx)
 

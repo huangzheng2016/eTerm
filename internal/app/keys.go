@@ -28,6 +28,7 @@ type KeyMap struct {
 	SnippetsTab    key.Binding
 	CommandPalette key.Binding
 	AIOverlay      key.Binding
+	VoiceInput     key.Binding
 	LocalTerminal  key.Binding
 	RenameTab      key.Binding
 	PasteImageURL  key.Binding

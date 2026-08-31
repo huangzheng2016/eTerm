@@ -4,6 +4,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/sftp"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 )
 
 type openSSHUITabMsg struct {
@@ -45,4 +46,19 @@ type remoteTmuxRenameAppliedMsg struct {
 type tmuxRenameAppliedMsg struct {
 	OldName string
 	NewName string
+}
+
+type voiceEventMsg struct{ ev voice.Event }
+type voiceProgressMsg struct{ pct float64 }
+type voiceStartedMsg struct{}
+type voiceStartFailedMsg struct{ err error }
+type voiceTickMsg struct{ seq int }
+type voiceEngineClosedMsg struct{}
+type openVoiceSettingsMsg struct{}
+
+// voiceSettingsChangedMsg carries a saved voice config; keepEngine avoids an
+// engine rebuild when only delivery-time or VAD settings changed.
+type voiceSettingsChangedMsg struct {
+	cfg        voiceSettings
+	keepEngine bool
 }
