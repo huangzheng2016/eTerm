@@ -25,6 +25,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 	"github.com/huangzheng2016/eTerm/internal/version"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -217,6 +218,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			closed, cmd := a.voiceSettingsView.Update(msg)
 			if closed {
 				a.voiceSettingsView = nil
+				var tc tea.Cmd
+				a, tc = a.endVoiceTest()
+				return a, tea.Batch(cmd, tc)
 			}
 			return a, cmd
 		}
@@ -1110,10 +1114,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case voiceStartedMsg:
 		a.voiceBusy = false
-		if !a.voiceRec {
+		if !a.voiceRec && !a.voiceTest {
 			// Toggled off while the (downloading) start was in flight.
 			a.voiceBusy = true
 			return a, voiceStopCmd(a.voiceEngine)
+		}
+		if a.voiceTest {
+			return a, nil
 		}
 		var tc tea.Cmd
 		a.toast, tc = a.toast.Show("Voice recording", components.ToastSuccess, 2*time.Second)
@@ -1137,6 +1144,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.aiView != nil {
 			a.aiView.SetVoiceActive(false)
 		}
+		if a.voiceTest {
+			a.voiceTest = false
+			a.voiceTestSeq++
+			a.voiceSwallowFinal = false
+			if a.voiceSettingsView != nil {
+				a.voiceSettingsView.testError(msg.err.Error())
+			}
+			return a, nil
+		}
 		var tc tea.Cmd
 		a.toast, tc = a.toast.Show("Voice: "+msg.err.Error(), components.ToastError, 6*time.Second)
 		return a, tc
@@ -1146,6 +1162,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, voiceTick(msg.seq)
 		}
 		return a, nil
+
+	case voiceDownloadRequestMsg:
+		return a.handleVoiceDownloadRequest(msg)
+
+	case voiceDownloadMsg:
+		return a.handleVoiceDownload(msg)
+
+	case voiceTestRequestMsg:
+		return a.handleVoiceTestRequest(msg)
+
+	case voiceTestTimeoutMsg:
+		if !a.voiceTest || msg.seq != a.voiceTestSeq {
+			return a, nil
+		}
+		return a.endVoiceTest()
 
 	case openVoiceSettingsMsg:
 		a = a.ensureVoiceCfg()
@@ -1159,6 +1190,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.keepEngine {
 			_ = a.voiceEngine.SetVAD(msg.cfg.vadParams())
+			if msg.cfg.Engine == voiceEngineLocal {
+				spec := voice.ModelByID(msg.cfg.ModelID)
+				_ = a.voiceEngine.SetModel(spec.ModelDir(voice.ModelsRoot()), spec.Kind)
+			}
 			return a, nil
 		}
 		eng := a.voiceEngine

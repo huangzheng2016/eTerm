@@ -13,6 +13,34 @@ import (
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 )
 
+func TestSetModelValidatesKind(t *testing.T) {
+	var buf bytes.Buffer
+	ev := newEventWriter(&buf)
+	eng := newASREngine(ev, t.TempDir())
+
+	eng.setModel("/nonexistent", "whisper")
+	if !strings.Contains(buf.String(), "unknown model kind") {
+		t.Fatalf("unknown kind not rejected: %s", buf.String())
+	}
+
+	buf.Reset()
+	eng.setModel("/nonexistent", "")
+	if !strings.Contains(buf.String(), "tokens.txt not found") {
+		t.Fatalf("missing dir not reported: %s", buf.String())
+	}
+
+	eng.asrDir = "x"
+	eng.asrKind = "paraformer"
+	buf.Reset()
+	eng.setModel("", "")
+	if eng.asrDir != "" || eng.asrKind != "" {
+		t.Fatalf("empty path must reset model: %q %q", eng.asrDir, eng.asrKind)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("reset emitted events: %s", buf.String())
+	}
+}
+
 // Integration test for the VAD state machine with the real silero model and
 // SenseVoice ASR. Skipped unless VOICEHELPER_TEST_MODELS points at a model
 // dir containing silero_vad.onnx and the SenseVoice model dir.
@@ -26,7 +54,7 @@ func TestVADStateMachine(t *testing.T) {
 	if !fileExists(vadPath) {
 		t.Skip("no silero_vad.onnx")
 	}
-	if _, _, err := asrModelPaths(asrDir); err != nil {
+	if _, _, err := asrModelPaths(asrDir, "sensevoice"); err != nil {
 		t.Skipf("no ASR model: %v", err)
 	}
 	wavPath := os.Getenv("VOICEHELPER_TEST_WAV")

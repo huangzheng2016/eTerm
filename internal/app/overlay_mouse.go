@@ -53,15 +53,17 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.upgradePrompt = nil
 		a.connError = nil
 		a.voiceSettingsView = nil
+		// cancel an in-flight mic test the same way esc-close does
+		a, voiceCmd := a.endVoiceTest()
 		if a.confirm.IsActive() {
 			a.confirm, _ = a.confirm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 			cmd := a.processConfirmResult()
-			return a, cmd
+			return a, tea.Batch(cmd, voiceCmd)
 		}
 		if hadUpgradePrompt {
 			a.promptDeferredTmuxRestore()
 		}
-		return a, nil
+		return a, voiceCmd
 	}
 	if onClick != nil {
 		return onClick(lx, ly)
@@ -107,7 +109,7 @@ func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 }
 
 // voiceSettingsMouse handles a click inside the voice settings overlay.
-// Layout: border(1) + padding(1) + title(1) + blank(1) + rows at ly=4..10.
+// Layout: border(1) + padding(1) + title(1) + blank(1) + rows at ly=4..15.
 func (a App) voiceSettingsMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.voiceSettingsView == nil {
 		return a, nil

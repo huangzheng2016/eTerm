@@ -10,6 +10,7 @@ const (
 	EventFinal            = "final"
 	EventState            = "state"
 	EventError            = "error"
+	EventInfo             = "info"
 	EventDownloadProgress = "download_progress"
 )
 
@@ -48,6 +49,10 @@ type Engine interface {
 	Stop() error
 	// SetVAD updates endpoint detection parameters.
 	SetVAD(p VADParams) error
+	// SetModel selects the offline model directory and recognizer kind
+	// ("sensevoice", "sensevoice-int8", "paraformer"). Engines without local
+	// ASR ignore it.
+	SetModel(dir, kind string) error
 	// Events streams engine events; closed after Close.
 	Events() <-chan Event
 	// Close releases all resources.

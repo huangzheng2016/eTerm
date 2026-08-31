@@ -57,6 +57,24 @@ type voiceTickMsg struct{ seq int }
 type voiceEngineClosedMsg struct{}
 type openVoiceSettingsMsg struct{}
 
+// voiceDownloadRequestMsg asks the app to download a setup artifact: the
+// helper binary ("helper") or a catalog model (target = model ID).
+type voiceDownloadRequestMsg struct{ target string }
+
+// voiceDownloadMsg is one progress update for a download; the last one per
+// download has done set (err non-nil on failure).
+type voiceDownloadMsg struct {
+	target string
+	pct    float64
+	err    error
+	done   bool
+}
+
+// voiceTestRequestMsg starts (or with stop, cancels) a settings-panel test
+// recording.
+type voiceTestRequestMsg struct{ stop bool }
+type voiceTestTimeoutMsg struct{ seq int }
+
 // voiceSettingsChangedMsg carries a saved voice config; keepEngine avoids an
 // engine rebuild when only delivery-time or VAD settings changed.
 type voiceSettingsChangedMsg struct {

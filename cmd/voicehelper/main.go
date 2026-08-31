@@ -87,7 +87,7 @@ func main() {
 			case "stop":
 				eng.stop()
 			case "set_model":
-				eng.setModel(cmd.Path)
+				eng.setModel(cmd.Path, cmd.Kind)
 			case "set_vad_params":
 				eng.setVADParams(cmd)
 			default:

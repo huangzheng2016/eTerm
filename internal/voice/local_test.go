@@ -46,6 +46,8 @@ func fakeHelperMain() {
 		switch {
 		case strings.Contains(line, `"cmd":"set_vad_params"`):
 			fmt.Printf(`{"type":"echo","text":%s}`+"\n", strconv.Quote(line))
+		case strings.Contains(line, `"cmd":"set_model"`):
+			fmt.Printf(`{"type":"echo","text":%s}`+"\n", strconv.Quote(line))
 		case strings.Contains(line, `"cmd":"start_passthrough"`):
 			passthrough = true
 			fmt.Println(`{"type":"state","state":"listening"}`)
@@ -307,7 +309,7 @@ func TestUntarGzRejectsTraversal(t *testing.T) {
 	if err := os.WriteFile(archive, tarball, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := untarGz(archive, t.TempDir()); err == nil {
+	if err := untar(archive, t.TempDir()); err == nil {
 		t.Fatal("expected traversal error")
 	}
 }
@@ -316,5 +318,35 @@ func TestEnsureHelperBinaryMissingExplicitPath(t *testing.T) {
 	_, err := ensureHelperBinary(context.Background(), LocalConfig{BinPath: "/nonexistent/voicehelper"})
 	if err == nil {
 		t.Fatal("expected error for missing BinPath")
+	}
+}
+
+// set_model goes out on start (stored beforehand) and live (after start).
+func TestLocalEngineSetModel(t *testing.T) {
+	eng := NewLocalEngine(LocalConfig{BinPath: fakeHelperWrapper(t)})
+	defer eng.Close()
+	if err := eng.SetModel("/models/sv", "sensevoice-int8"); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	echo := waitEvent(t, eng, func(ev Event) bool {
+		return ev.Type == "echo" && strings.Contains(ev.Text, "set_model")
+	})
+	for _, want := range []string{`"cmd":"set_model"`, `"path":"/models/sv"`, `"kind":"sensevoice-int8"`} {
+		if !strings.Contains(echo.Text, want) {
+			t.Fatalf("set_model echo missing %s: %s", want, echo.Text)
+		}
+	}
+
+	if err := eng.SetModel("/models/pf", "paraformer"); err != nil {
+		t.Fatal(err)
+	}
+	echo = waitEvent(t, eng, func(ev Event) bool {
+		return ev.Type == "echo" && strings.Contains(ev.Text, `/models/pf`)
+	})
+	if !strings.Contains(echo.Text, `"kind":"paraformer"`) {
+		t.Fatalf("live set_model echo: %s", echo.Text)
 	}
 }
