@@ -599,6 +599,44 @@ func TestVoiceSettingsOverlayMouse(t *testing.T) {
 	}
 }
 
+// With the ctrl+r routing notice visible the panel grows by two lines; row
+// clicks must still land on the right row.
+func TestVoiceSettingsMouseWithNotice(t *testing.T) {
+	stubHelperInstalled(t, false)
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+
+	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
+	a.db = database
+	a.masterKey = mk
+	a.width = 80
+	a.height = 24
+	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
+	a.voiceReady = func(voiceSettings) bool { return false }
+
+	upd, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	a = upd.(App)
+	if a.voiceSettingsView == nil || a.voiceSettingsView.noticeText() == "" {
+		t.Fatal("routing notice missing")
+	}
+
+	thresholdRow := findVoiceRow(a.voiceSettingsView, vrowThreshold)
+	ox, oy, _, _ := a.overlayBounds(a.voiceSettingsView.View())
+	click := tea.MouseClickMsg(tea.Mouse{X: ox + 3, Y: oy + 6 + thresholdRow, Button: tea.MouseLeft})
+	upd, _ = a.Update(click)
+	a = upd.(App)
+	if a.voiceSettingsView == nil || a.voiceSettingsView.cursor != thresholdRow {
+		t.Fatal("click did not reach the row below the notice")
+	}
+	if a.voiceSettingsView.cfg.VADThreshold != 0.05 {
+		t.Fatalf("threshold = %v", a.voiceSettingsView.cfg.VADThreshold)
+	}
+}
+
 func TestVoiceDeliveryDroppedWhenLocked(t *testing.T) {
 	sink := &syncWriteCloser{}
 	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
@@ -867,8 +905,30 @@ func TestVoiceHotkeyOpensSettingsWhenNotReady(t *testing.T) {
 	if a.voiceSettingsView == nil {
 		t.Fatal("settings panel did not open")
 	}
-	if view := a.voiceSettingsView.View(); !strings.Contains(view, "setup incomplete") {
+	view := a.voiceSettingsView.View()
+	if !strings.Contains(view, "setup incomplete") {
 		t.Fatalf("no guidance in panel: %s", view)
+	}
+	if !strings.Contains(view, "not set up yet") || !strings.Contains(view, "helper binary") {
+		t.Fatalf("no routing reason in panel: %s", view)
+	}
+}
+
+// The routing notice names the engine-specific missing piece.
+func TestVoiceHotkeyNoticeNamesMissingKeys(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.voiceReady = func(voiceSettings) bool { return false }
+	a.voiceCfg.Engine = voiceEngineVolcano
+
+	upd, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	a = upd.(App)
+	if a.voiceSettingsView == nil {
+		t.Fatal("settings panel did not open")
+	}
+	view := a.voiceSettingsView.View()
+	if !strings.Contains(view, "not set up yet") || !strings.Contains(view, "Volcano API key") {
+		t.Fatalf("no key guidance in panel: %s", view)
 	}
 }
 

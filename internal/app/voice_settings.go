@@ -75,6 +75,8 @@ type voiceSettingsModel struct {
 
 	customErr string // invalid custom model path, shown on the row
 
+	fromHotkey bool // opened by ctrl+r with an incomplete setup: show the reason
+
 	testing  bool
 	testText string // partial while recording, final when done
 	testErr  string
@@ -502,6 +504,19 @@ func (m *voiceSettingsModel) statusLine() string {
 	return "ready - ctrl+r starts recording"
 }
 
+// noticeText is the top-of-panel hint shown when ctrl+r routed here because
+// the setup is incomplete; it names the missing piece and clears itself once
+// the setup becomes ready while the panel is open.
+func (m *voiceSettingsModel) noticeText() string {
+	if !m.fromHotkey {
+		return ""
+	}
+	if issue := voiceSetupIssue(m.cfg, m.modelsRoot); issue != "" {
+		return "voice input is not set up yet: " + issue + " below"
+	}
+	return ""
+}
+
 func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value string) {
 	switch r.kind {
 	case vrowEngine:
@@ -570,6 +585,9 @@ func (m *voiceSettingsModel) View() string {
 	}
 	var lines []string
 	lines = append(lines, ui.TitleStyle.Render(title), "")
+	if notice := m.noticeText(); notice != "" {
+		lines = append(lines, ui.DimStyle.Render(notice), "")
+	}
 	for i, r := range rows {
 		cursor := "  "
 		style := ui.DimStyle

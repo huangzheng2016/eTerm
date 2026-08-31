@@ -482,6 +482,7 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 		a = a.ensureVoiceCfg()
 		if !a.voiceReadyFn()(a.voiceCfg) {
 			a.voiceSettingsView = newVoiceSettingsModel(a.db, a.masterKey, a.voiceCfg)
+			a.voiceSettingsView.fromHotkey = true
 			return a, nil
 		}
 		if a.voiceTest {
