@@ -262,6 +262,7 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	cfg := voiceSettings{
 		Engine:           voiceEngineVolcano,
 		VADThreshold:     0.35,
+		VADSilenceMs:     1250,
 		SentenceEnd:      voice.SentenceEndEnter,
 		VolcanoAPIKey:    "api-key",
 		VolcanoAppKey:    "app-key",
@@ -270,13 +271,8 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	if err := persistVoiceSettings(database, mk, cfg); err != nil {
 		t.Fatal(err)
 	}
-	got := loadVoiceSettings(database, mk)
-	// Volcano is gated (no audio passthrough yet): the engine coerces to
-	// local while the rest round-trips.
-	want := cfg
-	want.Engine = voiceEngineLocal
-	if got != want {
-		t.Fatalf("round trip = %+v, want %+v", got, want)
+	if got := loadVoiceSettings(database, mk); got != cfg {
+		t.Fatalf("round trip = %+v, want %+v", got, cfg)
 	}
 }
 
@@ -289,25 +285,33 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
-	// Engine row is gated while Volcano has no audio passthrough: no change,
-	// no persist, and the note is visible.
+	// Engine row: right cycles local -> volcano and rebuilds the engine.
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
-	if cmd != nil {
-		t.Fatal("gated engine row produced a command")
+	msg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.Engine != voiceEngineVolcano || msg.keepEngine {
+		t.Fatalf("engine change msg = %#v", msg)
 	}
-	if m.cfg.Engine != voiceEngineLocal {
-		t.Fatalf("engine changed to %q", m.cfg.Engine)
-	}
-	if !strings.Contains(m.View(), "volcano engine: coming soon") {
-		t.Fatal("gated note missing from the view")
+	if strings.Contains(m.View(), "coming soon") {
+		t.Fatal("gated note still in the view")
 	}
 
-	// Threshold row: right steps 0 -> 0.05 and keeps the engine alive.
+	// Sensitivity row: right steps 0 -> 0.05 and keeps the engine alive.
 	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
-	msg, ok := cmd().(voiceSettingsChangedMsg)
+	msg, ok = cmd().(voiceSettingsChangedMsg)
 	if !ok || msg.cfg.VADThreshold != 0.05 || !msg.keepEngine {
 		t.Fatalf("threshold change msg = %#v", msg)
+	}
+
+	// Silence row: right steps 1000 -> 1050 and keeps the engine alive.
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	msg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.VADSilenceMs != 1050 || !msg.keepEngine {
+		t.Fatalf("silence change msg = %#v", msg)
+	}
+	if got := loadVoiceSettings(database, mk); got.VADSilenceMs != 1050 {
+		t.Fatalf("persisted silence = %d", got.VADSilenceMs)
 	}
 
 	// API key row: enter edits, enter commits, stored encrypted.
@@ -329,6 +333,49 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	closed, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	if !closed {
 		t.Fatal("esc did not close the overlay")
+	}
+}
+
+// defaultVoiceEngine picks the local engine or the volcano feed composition
+// from the configured engine.
+func TestDefaultVoiceEngineSelection(t *testing.T) {
+	local, err := defaultVoiceEngine(defaultVoiceSettings(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := local.(*voice.LocalEngine); !ok {
+		t.Fatalf("local engine = %T", local)
+	}
+	local.Close()
+
+	cfg := defaultVoiceSettings()
+	cfg.Engine = voiceEngineVolcano
+	volc, err := defaultVoiceEngine(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := volc.(*voice.VolcanoFeedEngine); !ok {
+		t.Fatalf("volcano engine = %T", volc)
+	}
+	volc.Close()
+}
+
+// A keepEngine settings change applies VAD params live via SetVAD.
+func TestVoiceSettingsLiveApplySendsVADParams(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.voiceEngine = fe
+
+	cfg := defaultVoiceSettings()
+	cfg.VADThreshold = 0.4
+	cfg.VADSilenceMs = 1500
+	upd, _ := a.Update(voiceSettingsChangedMsg{cfg: cfg, keepEngine: true})
+	a = upd.(App)
+	if fe.vad.Threshold != 0.4 || fe.vad.TrailingSilence != 1.5 {
+		t.Fatalf("vad = %+v", fe.vad)
+	}
+	if a.voiceEngine == nil {
+		t.Fatal("engine was rebuilt on a keepEngine change")
 	}
 }
 

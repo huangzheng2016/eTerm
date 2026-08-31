@@ -47,19 +47,27 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// ensureModels downloads the default ASR model and VAD model into root on
-// first use, reporting progress through ev. Returns (asrDir, vadModel).
-func ensureModels(ctx context.Context, root string, ev *eventWriter) (string, string, error) {
+// ensureVADModel downloads the silero VAD model into root on first use.
+func ensureVADModel(ctx context.Context, root string, ev *eventWriter) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return "", "", err
+		return "", err
 	}
-
 	vadPath := filepath.Join(root, "silero_vad.onnx")
 	if !fileExists(vadPath) {
 		ev.errorf("downloading silero_vad.onnx")
 		if err := downloadTo(ctx, sileroVadURL, vadPath, ev); err != nil {
-			return "", "", fmt.Errorf("download VAD model: %w", err)
+			return "", fmt.Errorf("download VAD model: %w", err)
 		}
+	}
+	return vadPath, nil
+}
+
+// ensureModels downloads the default ASR model and VAD model into root on
+// first use, reporting progress through ev. Returns (asrDir, vadModel).
+func ensureModels(ctx context.Context, root string, ev *eventWriter) (string, string, error) {
+	vadPath, err := ensureVADModel(ctx, root, ev)
+	if err != nil {
+		return "", "", err
 	}
 
 	asrDir := filepath.Join(root, senseVoiceDir)

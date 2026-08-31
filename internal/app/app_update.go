@@ -25,7 +25,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 	"github.com/huangzheng2016/eTerm/internal/version"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
-	"github.com/huangzheng2016/eTerm/internal/voice"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -1159,7 +1158,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if msg.keepEngine {
-			_ = a.voiceEngine.SetVAD(voice.VADParams{Threshold: msg.cfg.VADThreshold})
+			_ = a.voiceEngine.SetVAD(msg.cfg.vadParams())
 			return a, nil
 		}
 		eng := a.voiceEngine

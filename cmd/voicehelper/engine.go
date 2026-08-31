@@ -105,6 +105,16 @@ func (c *capture) stop() {
 	c.ctx = nil
 }
 
+// pcmBytes converts float32 samples back to 16kHz mono S16LE for streaming.
+func pcmBytes(samples []float32) []byte {
+	b := make([]byte, 2*len(samples))
+	for i, s := range samples {
+		v := int16(s * 32767)
+		binary.LittleEndian.PutUint16(b[2*i:], uint16(v))
+	}
+	return b
+}
+
 type asrEngine struct {
 	ev     *eventWriter
 	params vadParams
@@ -117,6 +127,8 @@ type asrEngine struct {
 	vad *sherpa.VoiceActivityDetector
 
 	cap *capture
+
+	passthrough bool // capture+VAD only: stream PCM, no local ASR
 
 	state       string
 	accumText   string
@@ -194,31 +206,50 @@ func (e *asrEngine) setState(s string) {
 }
 
 // start begins a listening session, downloading models on first use.
-func (e *asrEngine) start(ctx context.Context) {
+func (e *asrEngine) start(ctx context.Context) { e.startMode(ctx, false) }
+
+// startPassthrough begins a capture+VAD session without local ASR: raw PCM
+// chunks stream out as audio events and VAD finalizes emit utterance_end.
+// Only the VAD model is needed.
+func (e *asrEngine) startPassthrough(ctx context.Context) { e.startMode(ctx, true) }
+
+func (e *asrEngine) startMode(ctx context.Context, passthrough bool) {
 	if e.state != "idle" {
 		return
 	}
-	if e.asrDir == "" || !fileExists(e.vadPath) {
-		asrDir, vadPath, err := ensureModels(ctx, e.modelRoot, e.ev)
-		if err != nil {
-			e.ev.errorf("model setup: %v", err)
-			return
+	if passthrough {
+		if !fileExists(e.vadPath) {
+			vadPath, err := ensureVADModel(ctx, e.modelRoot, e.ev)
+			if err != nil {
+				e.ev.errorf("model setup: %v", err)
+				return
+			}
+			e.vadPath = vadPath
 		}
-		if e.asrDir == "" {
-			e.asrDir = asrDir
+	} else {
+		if e.asrDir == "" || !fileExists(e.vadPath) {
+			asrDir, vadPath, err := ensureModels(ctx, e.modelRoot, e.ev)
+			if err != nil {
+				e.ev.errorf("model setup: %v", err)
+				return
+			}
+			if e.asrDir == "" {
+				e.asrDir = asrDir
+			}
+			e.vadPath = vadPath
 		}
-		e.vadPath = vadPath
-	}
-	if e.rec == nil {
-		if err := e.loadRecognizer(); err != nil {
-			e.ev.errorf("%v", err)
-			return
+		if e.rec == nil {
+			if err := e.loadRecognizer(); err != nil {
+				e.ev.errorf("%v", err)
+				return
+			}
 		}
 	}
 	if err := e.loadVAD(); err != nil {
 		e.ev.errorf("%v", err)
 		return
 	}
+	e.passthrough = passthrough
 	e.resetAccum()
 	// drop stale chunks from a previous session
 	for {
@@ -253,7 +284,11 @@ func (e *asrEngine) stop() {
 	}
 	e.drainSegments()
 	e.cap.stop()
-	if e.accumText != "" {
+	if e.passthrough {
+		if e.speechSeen {
+			e.ev.utteranceEnd()
+		}
+	} else if e.accumText != "" {
 		e.ev.final(e.accumText)
 	}
 	e.resetAccum()
@@ -276,6 +311,8 @@ func (e *asrEngine) decode(samples []float32) string {
 }
 
 // drainSegments decodes all finished VAD segments and appends their text.
+// Passthrough mode only tracks segment duration (for max_segment); the PCM
+// already streamed out as audio events.
 func (e *asrEngine) drainSegments() {
 	if e.vad == nil {
 		return
@@ -284,6 +321,9 @@ func (e *asrEngine) drainSegments() {
 		seg := e.vad.Front()
 		e.vad.Pop()
 		e.accumSpeech += time.Duration(len(seg.Samples)) * time.Second / sampleRate
+		if e.passthrough {
+			continue
+		}
 		if text := e.decode(seg.Samples); text != "" {
 			e.accumText += text
 			e.ev.partial(e.accumText)
@@ -293,7 +333,9 @@ func (e *asrEngine) drainSegments() {
 
 func (e *asrEngine) finalize() {
 	e.drainSegments()
-	if e.accumText != "" {
+	if e.passthrough {
+		e.ev.utteranceEnd()
+	} else if e.accumText != "" {
 		e.ev.final(e.accumText)
 	}
 	e.resetAccum()
@@ -310,6 +352,9 @@ func (e *asrEngine) onChunk(samples []float32, now time.Time) {
 
 	speech := false
 	if len(samples) > 0 {
+		if e.passthrough {
+			e.ev.audio(pcmBytes(samples))
+		}
 		e.vad.AcceptWaveform(samples)
 		speech = e.vad.IsSpeech()
 		if speech {

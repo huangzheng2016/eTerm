@@ -12,13 +12,17 @@ stdout. Commands arrive as NDJSON on stdin.
 First line on stdout is the handshake:
 
 ```json
-{"type":"hello","version":"0.1.0","protocol":1}
+{"type":"hello","version":"0.1.0","protocol":2}
 ```
 
 Commands (stdin, one JSON object per line):
 
 - `{"cmd":"start"}` - start capture; downloads models on first use
-- `{"cmd":"stop"}` - stop capture; pending speech is decoded and emitted as final
+- `{"cmd":"start_passthrough"}` - start capture+VAD without local ASR: raw
+  PCM streams out as audio events, VAD finalizes emit utterance_end; only
+  the VAD model is downloaded
+- `{"cmd":"stop"}` - stop capture; pending speech is decoded and emitted as
+  final (passthrough: pending speech emits utterance_end)
 - `{"cmd":"set_model","path":"/path/to/model-dir"}` - switch ASR model dir
   (must contain tokens.txt and model.onnx or model.int8.onnx); empty path
   resets to the auto-downloaded default
@@ -31,6 +35,10 @@ Events (stdout):
 - `{"type":"partial","text":"..."}` - accumulated text so far
 - `{"type":"final","text":"..."}` - sentence finalized (after ~1s trailing
   silence, max segment length, or stop)
+- `{"type":"audio","data":"<base64>"}` - passthrough mode only: one 20ms
+  PCM chunk, 16kHz mono S16LE
+- `{"type":"utterance_end"}` - passthrough mode only: VAD finalized an
+  utterance (trailing silence, max segment, or stop with pending speech)
 - `{"type":"error","msg":"..."}`
 - `{"type":"download_progress","pct":42.0}`
 

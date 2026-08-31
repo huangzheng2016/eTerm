@@ -3,6 +3,7 @@ package voice
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,9 +13,10 @@ import (
 )
 
 const (
-	minHelperProtocol = 1
-	maxHelperRestarts = 3
-	handshakeTimeout  = 10 * time.Second
+	minHelperProtocol         = 1
+	passthroughHelperProtocol = 2
+	maxHelperRestarts         = 3
+	handshakeTimeout          = 10 * time.Second
 )
 
 // LocalConfig configures the local (voicehelper subprocess) engine.
@@ -25,6 +27,13 @@ type LocalConfig struct {
 	DownloadURL string
 	SHA256Hex   string // expected sha256 of the downloaded binary; empty skips verify
 	VAD         VADParams
+
+	// Passthrough runs the helper as capture+VAD only (no local ASR): audio
+	// chunks (16kHz mono S16LE) go to OnAudio and VAD finalizes to
+	// OnUtteranceEnd instead of the event channel.
+	Passthrough    bool
+	OnAudio        func(pcm []byte)
+	OnUtteranceEnd func()
 
 	OnDownloadProgress func(pct float64)
 }
@@ -48,6 +57,7 @@ type helperEvent struct {
 	Text     string  `json:"text"`
 	State    string  `json:"state"`
 	Msg      string  `json:"msg"`
+	Data     string  `json:"data"`
 	Pct      float64 `json:"pct"`
 }
 
@@ -98,7 +108,11 @@ func (e *LocalEngine) Start(ctx context.Context) error {
 	if err := e.sendVADLocked(); err != nil {
 		return err
 	}
-	if err := e.sendLocked(helperCommand{Cmd: "start"}); err != nil {
+	startCmd := "start"
+	if e.cfg.Passthrough {
+		startCmd = "start_passthrough"
+	}
+	if err := e.sendLocked(helperCommand{Cmd: startCmd}); err != nil {
 		return err
 	}
 	e.started = true
@@ -220,8 +234,12 @@ func (e *LocalEngine) handshakeLocked() error {
 		if r.ev.Type != "hello" {
 			return fmt.Errorf("voice helper handshake: expected hello, got %q", r.ev.Type)
 		}
-		if r.ev.Protocol < minHelperProtocol {
-			return fmt.Errorf("voice helper protocol %d too old (need >= %d)", r.ev.Protocol, minHelperProtocol)
+		min := minHelperProtocol
+		if e.cfg.Passthrough {
+			min = passthroughHelperProtocol
+		}
+		if r.ev.Protocol < min {
+			return fmt.Errorf("voice helper protocol %d too old (need >= %d)", r.ev.Protocol, min)
 		}
 		return nil
 	case <-time.After(handshakeTimeout):
@@ -278,6 +296,20 @@ func (e *LocalEngine) readLoop(cmd *exec.Cmd, out *bufio.Reader) {
 	for sc.Scan() {
 		var hev helperEvent
 		if err := json.Unmarshal(sc.Bytes(), &hev); err != nil {
+			continue
+		}
+		switch hev.Type {
+		case "audio":
+			if e.cfg.OnAudio != nil {
+				if data, err := base64.StdEncoding.DecodeString(hev.Data); err == nil {
+					e.cfg.OnAudio(data)
+				}
+			}
+			continue
+		case "utterance_end":
+			if e.cfg.OnUtteranceEnd != nil {
+				e.cfg.OnUtteranceEnd()
+			}
 			continue
 		}
 		e.emit(Event{Type: hev.Type, Text: hev.Text, State: hev.State, Msg: hev.Msg, Pct: hev.Pct})

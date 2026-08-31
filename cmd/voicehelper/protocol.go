@@ -2,13 +2,15 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
 )
 
-const protocolVersion = 1
+// protocol 2 adds start_passthrough plus the audio/utterance_end events.
+const protocolVersion = 2
 
 type Command struct {
 	Cmd  string `json:"cmd"`
@@ -29,6 +31,7 @@ type Event struct {
 	Text     string  `json:"text,omitempty"`
 	State    string  `json:"state,omitempty"`
 	Msg      string  `json:"msg,omitempty"`
+	Data     string  `json:"data,omitempty"`
 	Pct      float64 `json:"pct,omitempty"`
 }
 
@@ -63,3 +66,9 @@ func (e *eventWriter) errorf(format string, args ...any) {
 func (e *eventWriter) progress(pct float64) {
 	e.emit(Event{Type: "download_progress", Pct: pct})
 }
+
+// audio emits one passthrough PCM chunk (16kHz mono S16LE, base64).
+func (e *eventWriter) audio(pcm []byte) {
+	e.emit(Event{Type: "audio", Data: base64.StdEncoding.EncodeToString(pcm)})
+}
+func (e *eventWriter) utteranceEnd() { e.emit(Event{Type: "utterance_end"}) }
