@@ -371,7 +371,7 @@ func TestVoiceSettingsLiveApplySendsVADParams(t *testing.T) {
 	cfg.VADSilenceMs = 1500
 	upd, _ := a.Update(voiceSettingsChangedMsg{cfg: cfg, keepEngine: true})
 	a = upd.(App)
-	if fe.vad.Threshold != 0.4 || fe.vad.MinSilence != 1.5 {
+	if fe.vad.Threshold != 0.4 || fe.vad.TrailingSilence != 1.5 {
 		t.Fatalf("vad = %+v", fe.vad)
 	}
 	if a.voiceEngine == nil {

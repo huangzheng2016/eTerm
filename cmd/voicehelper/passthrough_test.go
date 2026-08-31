@@ -123,3 +123,14 @@ func TestASRStopStillEmitsFinal(t *testing.T) {
 		t.Fatalf("events = %+v", evs)
 	}
 }
+
+// set_vad_params plumbs trailing_silence (the end-of-sentence setting).
+func TestSetVADParamsAppliesTrailingSilence(t *testing.T) {
+	var buf bytes.Buffer
+	eng := newASREngine(newEventWriter(&buf), t.TempDir())
+	v := 0.05
+	eng.setVADParams(Command{TrailingSilence: &v})
+	if eng.params.trailingSilence != 0.05 {
+		t.Fatalf("trailingSilence = %v", eng.params.trailingSilence)
+	}
+}

@@ -30,15 +30,20 @@ type VolcanoFeedEngine struct {
 	idleCh  chan struct{} // helper state-idle signal, ends the stop flush
 	pumped  bool          // helper pump goroutine is running
 
+	ctx    context.Context // engine lifetime; Close cancels in-flight redials
+	cancel context.CancelFunc
 	events chan Event
 	done   chan struct{}
 	wg     sync.WaitGroup
 }
 
 func NewVolcanoFeedEngine(cfg VolcanoFeedConfig) *VolcanoFeedEngine {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &VolcanoFeedEngine{
 		vcfg:   cfg.Volcano,
 		hcfg:   cfg.Helper,
+		ctx:    ctx,
+		cancel: cancel,
 		events: make(chan Event, 256),
 		done:   make(chan struct{}),
 	}
@@ -68,14 +73,19 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 		hcfg.OnUtteranceEnd = e.onUtteranceEnd
 		e.helper = NewLocalEngine(hcfg)
 	}
+
+	// expose the session before the helper starts streaming so the first
+	// audio chunks are not dropped
+	e.vol = vol
+	e.idleCh = make(chan struct{}, 1)
+	e.started = true
 	if err := e.helper.Start(ctx); err != nil {
+		e.started = false
+		e.vol = nil
 		vol.Close()
 		return err
 	}
 
-	e.vol = vol
-	e.idleCh = make(chan struct{}, 1)
-	e.started = true
 	if !e.pumped {
 		// the helper persists across sessions, so pump it once
 		e.pumped = true
@@ -150,6 +160,7 @@ func (e *VolcanoFeedEngine) Close() error {
 	e.mu.Unlock()
 
 	close(e.done)
+	e.cancel() // abort an in-flight redial on the helper read loop
 	if helper != nil {
 		helper.Close()
 	}
@@ -179,42 +190,55 @@ func (e *VolcanoFeedEngine) onAudio(pcm []byte) {
 }
 
 // onUtteranceEnd finalizes the current volcano session and dials the next.
+// The redial overlaps the final wait so a slow server does not widen the
+// inter-utterance gap; it is cancelled by Close.
 func (e *VolcanoFeedEngine) onUtteranceEnd() {
 	e.mu.Lock()
 	if !e.started || e.closed {
 		e.mu.Unlock()
 		return
 	}
-	old := e.vol
-	e.vol = nil
+	old := e.vol // stays assigned so Stop/Close can abort its final wait
 	e.mu.Unlock()
+
+	type redial struct {
+		vol *VolcanoEngine
+		err error
+	}
+	dialed := make(chan redial, 1)
+	go func() {
+		vol := NewVolcanoEngine(e.vcfg)
+		ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
+		err := vol.Start(ctx)
+		cancel()
+		dialed <- redial{vol, err}
+	}()
 
 	if old != nil {
 		old.Stop() // negative-seq final; transcript drains through its pump
 		old.Close()
 	}
 
-	vol := NewVolcanoEngine(e.vcfg)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err := vol.Start(ctx)
-	cancel()
-
+	res := <-dialed
 	e.mu.Lock()
+	if e.vol == old {
+		e.vol = nil
+	}
 	if !e.started || e.closed {
 		e.mu.Unlock()
-		vol.Close()
+		res.vol.Close()
 		return
 	}
-	if err != nil {
+	if res.err != nil {
 		e.mu.Unlock()
-		e.emit(Event{Type: EventError, Msg: fmt.Sprintf("volcano reconnect: %v", err)})
+		e.emit(Event{Type: EventError, Msg: fmt.Sprintf("volcano reconnect: %v", res.err)})
 		return
 	}
-	e.vol = vol
+	e.vol = res.vol
 	e.wg.Add(1)
 	e.mu.Unlock()
 
-	go e.pump(vol.Events())
+	go e.pump(res.vol.Events())
 }
 
 func (e *VolcanoFeedEngine) emit(ev Event) {

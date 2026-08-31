@@ -19,11 +19,13 @@ import (
 // until the client closes; a negative-seq final frame gets a final
 // transcript. conn2 signals that a redialed session arrived.
 type feedServer struct {
-	t     *testing.T
-	connN int32 // atomic
-	audio chan []byte
-	final chan int32
-	conn2 chan struct{}
+	t          *testing.T
+	connN      int32 // atomic
+	audio      chan []byte
+	final      chan int32
+	conn2      chan struct{}
+	finalDelay time.Duration // hold the final transcript this long
+	hangSecond bool          // connection 2 never answers (blackhole)
 }
 
 func newFeedServer(t *testing.T) *feedServer {
@@ -45,6 +47,12 @@ func (s *feedServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close(websocket.StatusNormalClosure, "done")
 	ctx := context.Background()
 
+	if n == 2 && s.hangSecond {
+		close(s.conn2)
+		conn.Read(ctx) // blackhole: hold until the client gives up
+		return
+	}
+
 	// full client request, then initial response
 	if _, _, err := conn.Read(ctx); err != nil {
 		return
@@ -64,6 +72,9 @@ func (s *feedServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if data[1]&0x0f == flagNegWithSequence {
 			seq := int32(binary.BigEndian.Uint32(data[4:]))
 			s.final <- seq
+			if s.finalDelay > 0 {
+				time.Sleep(s.finalDelay)
+			}
 			conn.Write(ctx, websocket.MessageBinary, serverFrame(s.t, -abs32(seq), []byte(`{"result":{"text":"hello"}}`)))
 			continue
 		}
@@ -176,6 +187,123 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 			t.Fatal("events channel not closed after Close")
 		}
 	}
+}
+
+// The session is exposed before the helper starts streaming, so audio fed
+// the moment Start returns is not dropped.
+func TestVolcanoFeedFirstChunkLands(t *testing.T) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+
+	srv := newFeedServer(t)
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
+		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
+	})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	want := []byte{9, 9, 9, 9}
+	eng.onAudio(want)
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-srv.audio:
+			if bytes.Equal(got, want) {
+				return
+			}
+		case <-deadline:
+			t.Fatal("first chunk after Start was dropped")
+		}
+	}
+}
+
+// Close must abort a redial blocked on an unresponsive server; the helper
+// read loop (and with it LocalEngine.Close) cannot stall on the dial.
+func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+
+	srv := newFeedServer(t)
+	srv.hangSecond = true
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
+		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
+	})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for the utterance_end redial to block on the hanging session
+	select {
+	case <-srv.conn2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no redialed session")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		eng.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close stalled on the hanging redial")
+	}
+}
+
+// The redial for the next utterance overlaps the current session's final
+// wait, so a slow server does not widen the inter-utterance gap.
+func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+
+	srv := newFeedServer(t)
+	srv.finalDelay = 2 * time.Second
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
+		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
+	})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// the negative final frame arrived; the server holds the transcript 2s
+	select {
+	case <-srv.final:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not receive final frame")
+	}
+	// the next session must dial well before the slow final arrives
+	select {
+	case <-srv.conn2:
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("redial did not overlap the final wait")
+	}
+
+	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	if final.Text != "hello" {
+		t.Fatalf("final transcript = %q", final.Text)
+	}
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	eng.Close()
 }
 
 // A helper too old for passthrough (protocol < 2) fails the handshake.

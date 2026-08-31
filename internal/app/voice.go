@@ -34,7 +34,7 @@ const (
 type voiceSettings struct {
 	Engine           string
 	VADThreshold     float64
-	VADSilenceMs     int // min silence to end an utterance, milliseconds
+	VADSilenceMs     int // trailing silence that ends an utterance, milliseconds
 	SentenceEnd      voice.SentenceEnd
 	VolcanoAPIKey    string
 	VolcanoAppKey    string
@@ -47,8 +47,8 @@ func defaultVoiceSettings() voiceSettings {
 
 func (cfg voiceSettings) vadParams() voice.VADParams {
 	return voice.VADParams{
-		Threshold:  cfg.VADThreshold,
-		MinSilence: float64(cfg.VADSilenceMs) / 1000,
+		Threshold:       cfg.VADThreshold,
+		TrailingSilence: float64(cfg.VADSilenceMs) / 1000,
 	}
 }
 
