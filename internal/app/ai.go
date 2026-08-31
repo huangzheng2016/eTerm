@@ -218,41 +218,45 @@ func toolCallLabel(name, args string) string {
 	return name + " " + args
 }
 
-// Providers implements aiview.ProviderStore.
-func (b *aiBridge) Providers() []aiview.Provider {
-	out := make([]aiview.Provider, 0, len(b.store.Providers))
+// Models implements aiview.ProviderStore: one entry per model alias, plus one
+// per provider not covered by any alias (user-added).
+func (b *aiBridge) Models() []aiview.ModelEntry {
+	aliased := map[string]bool{}
+	out := make([]aiview.ModelEntry, 0, len(b.store.Models)+len(b.store.Providers))
+	for _, m := range b.store.Models {
+		aliased[m.Provider] = true
+		typ := ""
+		if p := b.store.Get(m.Provider); p != nil {
+			typ = p.Type
+		}
+		out = append(out, aiview.ModelEntry{Label: m.Alias, Provider: m.Provider, Model: m.Alias, Type: typ})
+	}
 	for _, p := range b.store.Providers {
-		out = append(out, aiview.Provider{
-			Name:    p.Name,
-			Type:    p.Type,
-			BaseURL: p.BaseURL,
-			APIKey:  p.APIKey,
-			Model:   p.DefaultModel,
-		})
+		if aliased[p.Name] {
+			continue
+		}
+		out = append(out, aiview.ModelEntry{Label: p.Name, Provider: p.Name, Model: p.DefaultModel, Type: p.Type})
 	}
 	return out
 }
 
-// Active implements aiview.ProviderStore.
-func (b *aiBridge) Active() string { return b.store.ActiveProvider }
-
-// Switch implements aiview.ProviderStore.
-func (b *aiBridge) Switch(name string) {
-	p := b.store.Get(name)
-	if p == nil || b.store.ActiveProvider == name {
-		return
-	}
-	model := p.DefaultModel
-	if model == "" {
-		// Fall back to a model alias pointing at this provider (kimi import).
-		for _, m := range b.store.Models {
-			if m.Provider == name {
-				model = m.Alias
-				break
-			}
+// Active implements aiview.ProviderStore: the active alias when ActiveModel
+// names one, else the active provider name.
+func (b *aiBridge) Active() string {
+	for _, m := range b.store.Models {
+		if m.Alias == b.store.ActiveModel && m.Alias != "" {
+			return m.Alias
 		}
 	}
-	if err := b.store.SetActive(name, model); err != nil {
+	return b.store.ActiveProvider
+}
+
+// Switch implements aiview.ProviderStore.
+func (b *aiBridge) Switch(provider, model string) {
+	if b.store.ActiveProvider == provider && b.store.ActiveModel == model {
+		return
+	}
+	if err := b.store.SetActive(provider, model); err != nil {
 		return
 	}
 	b.persistActive()

@@ -168,10 +168,11 @@ func TestAIStorePersistenceRoundTrip(t *testing.T) {
 	}
 }
 
-func TestBridgeSwitchFallsBackToModelAlias(t *testing.T) {
+func TestBridgeModelsAndSwitch(t *testing.T) {
 	store := &ai.Store{}
 	store.Upsert(ai.Provider{Name: "free-tokens_kimi", Type: ai.ProviderOpenAI, APIKey: "k"})
-	store.Models = append(store.Models, ai.ModelAlias{Alias: "kimi-k3-highspeed", Provider: "free-tokens_kimi", Model: "kimi-k3"})
+	store.Upsert(ai.Provider{Name: "mine", Type: ai.ProviderOpenAI, APIKey: "k2", DefaultModel: "gpt-5"})
+	store.Models = append(store.Models, ai.ModelAlias{Alias: "free-tokens_kimi/kimi-k3-highspeed", Provider: "free-tokens_kimi", Model: "kimi-k3-highspeed"})
 	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -180,13 +181,34 @@ func TestBridgeSwitchFallsBackToModelAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	bridge := &aiBridge{store: store, db: database, mk: security.NewMasterKeyManager(nil, nil, 0)}
-	bridge.Switch("free-tokens_kimi")
-	if store.ActiveModel != "kimi-k3-highspeed" {
+
+	// The aliased provider appears only as its alias; the unaliased one as itself.
+	models := bridge.Models()
+	if len(models) != 2 {
+		t.Fatalf("Models() = %v", models)
+	}
+	if models[0].Label != "free-tokens_kimi/kimi-k3-highspeed" || models[0].Provider != "free-tokens_kimi" {
+		t.Fatalf("alias entry = %+v", models[0])
+	}
+	if models[1].Label != "mine" || models[1].Model != "gpt-5" {
+		t.Fatalf("provider entry = %+v", models[1])
+	}
+
+	bridge.Switch("free-tokens_kimi", "free-tokens_kimi/kimi-k3-highspeed")
+	if store.ActiveModel != "free-tokens_kimi/kimi-k3-highspeed" {
 		t.Fatalf("ActiveModel = %q", store.ActiveModel)
 	}
+	if bridge.Active() != "free-tokens_kimi/kimi-k3-highspeed" {
+		t.Fatalf("Active() = %q", bridge.Active())
+	}
 	p, model, _, err := store.Resolve()
-	if err != nil || p.Name != "free-tokens_kimi" || model != "kimi-k3" {
+	if err != nil || p.Name != "free-tokens_kimi" || model != "kimi-k3-highspeed" {
 		t.Fatalf("Resolve = %v %q %v", p, model, err)
+	}
+
+	bridge.Switch("mine", "gpt-5")
+	if bridge.Active() != "mine" {
+		t.Fatalf("Active() after raw switch = %q", bridge.Active())
 	}
 }
 

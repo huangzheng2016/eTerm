@@ -81,11 +81,11 @@ func (f *providerForm) view() string {
 }
 
 func (m *Model) providersView() string {
-	rows := []string{ui.TitleStyle.Render("Providers"), ""}
-	if len(m.providers) == 0 {
-		rows = append(rows, ui.DimStyle.Render("No providers configured"))
+	rows := []string{ui.TitleStyle.Render("Models"), ""}
+	if len(m.models) == 0 {
+		rows = append(rows, ui.DimStyle.Render("No models configured"))
 	}
-	for i, p := range m.providers {
+	for i, e := range m.models {
 		cursor := "  "
 		style := ui.DimStyle
 		if i == m.pCursor {
@@ -93,18 +93,18 @@ func (m *Model) providersView() string {
 			style = ui.SelectedStyle
 		}
 		active := ""
-		if p.Name == m.store.Active() {
+		if e.Label == m.store.Active() {
 			active = ui.SuccessStyle.Render(" [active]")
 		}
-		detail := p.Type
-		if p.Model != "" {
-			detail += " · " + p.Model
+		detail := e.Type
+		if e.Provider != e.Label {
+			detail += " · " + e.Provider
 		}
 		rows = append(rows, fmt.Sprintf("%s%s %s%s",
-			cursor, style.Render(p.Name), ui.DimStyle.Render("["+detail+"]"), active))
+			cursor, style.Render(e.Label), ui.DimStyle.Render("["+detail+"]"), active))
 	}
 	rows = append(rows, "",
-		ui.DimStyle.Render("enter switch | a add | esc back"))
+		ui.DimStyle.Render("enter select | a add | esc back"))
 	return strings.Join(rows, "\n")
 }
 
@@ -117,12 +117,13 @@ func (m *Model) updateProviders(msg tea.KeyPressMsg) tea.Cmd {
 			m.pCursor--
 		}
 	case "down", "j":
-		if m.pCursor < len(m.providers)-1 {
+		if m.pCursor < len(m.models)-1 {
 			m.pCursor++
 		}
 	case "enter":
-		if m.pCursor < len(m.providers) {
-			m.store.Switch(m.providers[m.pCursor].Name)
+		if m.pCursor < len(m.models) {
+			e := m.models[m.pCursor]
+			m.store.Switch(e.Provider, e.Model)
 		}
 	case "a":
 		m.mode = modeProviderForm
@@ -141,7 +142,7 @@ func (m *Model) updateProviderForm(msg tea.KeyPressMsg) tea.Cmd {
 		p := m.form.provider()
 		if p.Name != "" {
 			m.store.Add(p)
-			m.providers = m.store.Providers()
+			m.models = m.store.Models()
 			m.mode = modeProviders
 		}
 		return nil

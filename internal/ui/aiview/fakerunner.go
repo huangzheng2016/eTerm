@@ -64,16 +64,20 @@ func demoEvents(prompt string) []AgentEvent {
 	}
 }
 
-func (f *FakeRunner) Providers() []Provider {
-	return append([]Provider(nil), f.providers...)
+func (f *FakeRunner) Models() []ModelEntry {
+	out := make([]ModelEntry, 0, len(f.providers))
+	for _, p := range f.providers {
+		out = append(out, ModelEntry{Label: p.Name, Provider: p.Name, Model: p.Model, Type: p.Type})
+	}
+	return out
 }
 
 func (f *FakeRunner) Active() string { return f.active }
 
-func (f *FakeRunner) Switch(name string) {
+func (f *FakeRunner) Switch(provider, model string) {
 	for _, p := range f.providers {
-		if p.Name == name {
-			f.active = name
+		if p.Name == provider {
+			f.active = provider
 			return
 		}
 	}

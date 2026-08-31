@@ -78,9 +78,9 @@ type Model struct {
 
 	md *markdown
 
-	providers []Provider
-	pCursor   int
-	form      providerForm
+	models  []ModelEntry
+	pCursor int
+	form    providerForm
 }
 
 func New(runner AgentRunner, store ProviderStore) *Model {
@@ -415,10 +415,10 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.store == nil {
 			return m, nil
 		}
-		m.providers = m.store.Providers()
+		m.models = m.store.Models()
 		m.pCursor = 0
-		for i, p := range m.providers {
-			if p.Name == m.store.Active() {
+		for i, e := range m.models {
+			if e.Label == m.store.Active() {
 				m.pCursor = i
 			}
 		}
@@ -471,7 +471,7 @@ func (m *Model) chatView() string {
 		title += " " + m.spinner.View()
 	}
 
-	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+l clear · ctrl+p providers · esc close")
+	hint := ui.DimStyle.Render("enter send · pgup/pgdn scroll · ctrl+l clear · ctrl+p models · esc close")
 	if m.status == statusError {
 		hint = ui.ErrorStyle.Render("error: "+m.errMsg) + "\n" + hint
 	}

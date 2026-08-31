@@ -30,9 +30,18 @@ type Provider struct {
 	Model   string
 }
 
+// ModelEntry is one selectable final model: a model alias (kimi import) or a
+// user-added provider with its raw model.
+type ModelEntry struct {
+	Label    string // unique display name: alias or provider name
+	Provider string
+	Model    string // alias or raw model id to activate
+	Type     string
+}
+
 type ProviderStore interface {
-	Providers() []Provider
-	Active() string
-	Switch(name string)
+	Models() []ModelEntry
+	Active() string // Label of the active entry
+	Switch(provider, model string)
 	Add(p Provider)
 }

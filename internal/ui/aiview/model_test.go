@@ -259,8 +259,8 @@ func TestProviderPickerSwitchAndAdd(t *testing.T) {
 		t.Fatal("submit did not return to list")
 	}
 	found := false
-	for _, p := range fake.Providers() {
-		if p.Name == "kimi" && p.Model == "kimi-k2" {
+	for _, e := range fake.Models() {
+		if e.Label == "kimi" && e.Model == "kimi-k2" {
 			found = true
 		}
 	}
