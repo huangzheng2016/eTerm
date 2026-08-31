@@ -65,6 +65,11 @@ func (b *aiBridge) DeleteCronJob(id string) error {
 	return b.db.Where("id = ?", id).Delete(&aiCronJob{}).Error
 }
 
+// MoveCronJobs implements ai.CronStore.
+func (b *aiBridge) MoveCronJobs(from, to string) error {
+	return b.db.Model(&aiCronJob{}).Where("session_id = ?", from).Update("session_id", to).Error
+}
+
 // SaveSession implements aiview.SessionStore: export the agent history and
 // upsert the session row. Empty history never creates a row, but an existing
 // row is updated (e.g. emptied by /undo).

@@ -108,6 +108,10 @@ type Model struct {
 	dOffset      int
 
 	voiceActive bool // recording indicator in the title (voice input)
+
+	// injected holds programmatic user messages (cron wakes) buffered while a
+	// picker mode is open; flushed on return to chat.
+	injected []string
 }
 
 func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model {
@@ -215,24 +219,32 @@ func (m *Model) send() tea.Cmd {
 	if strings.HasPrefix(prompt, "/") {
 		return m.runSlashCommand(prompt)
 	}
+	cmd, ok := m.queueOrRun(prompt)
+	if ok {
+		m.input.Reset()
+	}
+	return cmd
+}
+
+// queueOrRun delivers prompt as a user message: queued onto the active run
+// (dim Queued marker, acked by EventSteer) or starting a new run when idle.
+// ok is false only when the enqueue failed, so the caller can keep its draft.
+func (m *Model) queueOrRun(prompt string) (cmd tea.Cmd, ok bool) {
 	if m.status == statusRunning {
 		// Queue instead of blocking: the agent injects it at the next step
 		// boundary and acks with EventSteer, which undims the block.
 		if err := m.runner.Enqueue(prompt); err != nil {
-			// Keep the input so the message is not lost.
 			m.errMsg = "queue failed: " + err.Error()
-			return nil
+			return nil, false
 		}
-		m.input.Reset()
 		m.blocks = append(m.blocks, block{kind: blockUser, text: prompt, queued: true})
 		m.renderBlock(len(m.blocks) - 1)
 		m.rebuild()
-		return nil
+		return nil, true
 	}
 	if m.cancel != nil {
 		m.cancel()
 	}
-	m.input.Reset()
 	m.status = statusRunning
 	m.errMsg = ""
 	m.blocks = append(m.blocks, block{kind: blockUser, text: prompt})
@@ -246,10 +258,51 @@ func (m *Model) send() tea.Cmd {
 		m.status = statusError
 		m.errMsg = err.Error()
 		cancel()
-		return nil
+		return nil, true
 	}
 	m.events = ch
-	return tea.Batch(waitEvent(ch), m.spinner.Tick)
+	return tea.Batch(waitEvent(ch), m.spinner.Tick), true
+}
+
+// maxInjectedBuffer bounds programmatic messages buffered while a picker
+// mode is open; oldest are dropped beyond it (latest state wins).
+const maxInjectedBuffer = 10
+
+// InjectUserMessage delivers a programmatic user message (e.g. a cron wake)
+// without touching the draft input and without slash-command interception:
+// queued onto the active run or starting a new one, same as send(). While a
+// picker mode is open the message is buffered and flushed on return to chat.
+func (m *Model) InjectUserMessage(text string) tea.Cmd {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if m.mode != modeChat {
+		if len(m.injected) >= maxInjectedBuffer {
+			m.injected = m.injected[1:]
+		}
+		m.injected = append(m.injected, text)
+		return nil
+	}
+	cmd, _ := m.queueOrRun(text)
+	return cmd
+}
+
+// flushInjected delivers buffered programmatic messages once the panel is
+// back in chat mode.
+func (m *Model) flushInjected() tea.Cmd {
+	if m.mode != modeChat || len(m.injected) == 0 {
+		return nil
+	}
+	msgs := m.injected
+	m.injected = nil
+	var cmds []tea.Cmd
+	for _, text := range msgs {
+		if cmd, _ := m.queueOrRun(text); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) clearSession() {
@@ -260,6 +313,7 @@ func (m *Model) clearSession() {
 	m.runner.ClearQueue()
 	m.blocks = nil
 	m.events = nil
+	m.injected = nil
 	m.dirty = false
 	m.status = statusIdle
 	m.errMsg = ""
@@ -493,6 +547,13 @@ func (m *Model) contentPoint(x, y int) (line, col int) {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	// Mode transitions land in update; flush buffered cron wakes when a
+	// picker closed back into chat.
+	return model, tea.Batch(cmd, m.flushInjected())
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height)

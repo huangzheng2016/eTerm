@@ -46,6 +46,18 @@ func (s *cronTestStore) DeleteCronJob(id string) error {
 	return nil
 }
 
+func (s *cronTestStore) MoveCronJobs(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, j := range s.jobs {
+		if j.SessionID == from {
+			j.SessionID = to
+			s.jobs[id] = j
+		}
+	}
+	return nil
+}
+
 func (s *cronTestStore) count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,6 +204,34 @@ func TestCronPersistenceRoundTrip(t *testing.T) {
 	s2.SetSession("other")
 	if n := len(s2.List()); n != 0 {
 		t.Fatalf("wrong session jobs loaded: %d", n)
+	}
+}
+
+// Jobs created before the first save (session "") are re-homed to the first
+// real session id, in store and in memory.
+func TestCronSetSessionAdoptsUnsavedJobs(t *testing.T) {
+	store := newCronTestStore()
+	var fires []string
+	s := cronTestScheduler(store, time.Now(), &fires)
+	if _, err := s.Create("check back", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSession("s1")
+	jobs := s.List()
+	if len(jobs) != 1 || jobs[0].SessionID != "s1" {
+		t.Fatalf("job not adopted: %+v", jobs)
+	}
+	stored, _ := store.LoadCronJobs("s1")
+	if len(stored) != 1 {
+		t.Fatalf("adoption not persisted: %+v", stored)
+	}
+	// A later switch does not re-adopt.
+	s.SetSession("s2")
+	if n := len(s.List()); n != 0 {
+		t.Fatalf("s2 must be empty: %d", n)
+	}
+	if stored, _ := store.LoadCronJobs("s1"); len(stored) != 1 {
+		t.Fatal("s1 jobs moved again")
 	}
 }
 

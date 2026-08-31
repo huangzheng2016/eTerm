@@ -476,3 +476,104 @@ func TestTitleFitsWithVoiceActive(t *testing.T) {
 		t.Fatal("REC missing from title")
 	}
 }
+
+func TestInjectUserMessageIdleStartsRunKeepsDraft(t *testing.T) {
+	m, _ := newSteerTestModel()
+	m.input.SetValue("draft")
+	if cmd := m.InjectUserMessage("[cron] wake"); cmd == nil {
+		t.Fatal("idle inject must start a run")
+	}
+	if m.status != statusRunning {
+		t.Fatal("inject did not start a run")
+	}
+	if m.input.Value() != "draft" {
+		t.Fatalf("draft clobbered: %q", m.input.Value())
+	}
+	last := m.blocks[len(m.blocks)-1]
+	if last.kind != blockUser || last.queued || last.text != "[cron] wake" {
+		t.Fatalf("block: %+v", last)
+	}
+}
+
+func TestInjectUserMessageRunningQueuesKeepsDraft(t *testing.T) {
+	m, fake := newSteerTestModel()
+	m.input.SetValue("first")
+	m.send()
+	m.input.SetValue("draft")
+	if cmd := m.InjectUserMessage("wake"); cmd != nil {
+		t.Fatal("inject into a run must not start a second run")
+	}
+	if m.input.Value() != "draft" {
+		t.Fatalf("draft clobbered: %q", m.input.Value())
+	}
+	fake.mu.Lock()
+	queued := append([]string(nil), fake.Queued...)
+	fake.mu.Unlock()
+	if len(queued) != 1 || queued[0] != "wake" {
+		t.Fatalf("runner queue: %v", queued)
+	}
+	last := m.blocks[len(m.blocks)-1]
+	if last.kind != blockUser || !last.queued {
+		t.Fatalf("injected block must be the dim queued marker: %+v", last)
+	}
+	if out := plain(last.cache); !strings.Contains(out, "Queued: wake") {
+		t.Fatalf("queued marker render: %q", out)
+	}
+}
+
+func TestInjectUserMessageBuffersInPickerMode(t *testing.T) {
+	m, _ := newSteerTestModel()
+	m.mode = modeProviders
+	if cmd := m.InjectUserMessage("wake one"); cmd != nil {
+		t.Fatal("picker-mode inject must buffer, not deliver")
+	}
+	m.InjectUserMessage("wake two")
+	if len(m.blocks) != 0 {
+		t.Fatalf("buffered inject added a block: %+v", m.blocks)
+	}
+
+	m.mode = modeChat
+	if _, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 32}); cmd == nil {
+		t.Fatal("returning to chat must flush buffered messages")
+	}
+	if len(m.injected) != 0 {
+		t.Fatalf("buffer not drained: %v", m.injected)
+	}
+	var texts []string
+	for _, b := range m.blocks {
+		if b.kind == blockUser {
+			texts = append(texts, b.text)
+		}
+	}
+	if len(texts) != 2 || texts[0] != "wake one" || texts[1] != "wake two" {
+		t.Fatalf("flushed blocks: %v", texts)
+	}
+	if m.status != statusRunning {
+		t.Fatal("first flushed message must start a run")
+	}
+}
+
+func TestInjectUserMessageBufferCapDropsOldest(t *testing.T) {
+	m, _ := newSteerTestModel()
+	m.mode = modeTasks
+	for i := 0; i < maxInjectedBuffer+2; i++ {
+		m.InjectUserMessage(string(rune('a' + i)))
+	}
+	if len(m.injected) != maxInjectedBuffer {
+		t.Fatalf("buffer: %d, want %d", len(m.injected), maxInjectedBuffer)
+	}
+	if m.injected[0] != "c" {
+		t.Fatalf("oldest not dropped first: %v", m.injected)
+	}
+}
+
+func TestClearSessionDropsInjectedBuffer(t *testing.T) {
+	m, _ := newSteerTestModel()
+	m.mode = modeTasks
+	m.InjectUserMessage("wake")
+	m.mode = modeChat
+	m.clearSession()
+	if len(m.injected) != 0 {
+		t.Fatalf("buffer survived clearSession: %v", m.injected)
+	}
+}

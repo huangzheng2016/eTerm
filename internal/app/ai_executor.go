@@ -481,12 +481,11 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 	case aiToolPollTab:
 		req.respond(aiToolResult{text: a.findFreshAITab(req.id, req.arg, req.beforeIDs)})
 	case aiToolCronFire:
-		// One-way (no respond): route the wake through the panel's normal
-		// send path - a running turn queues it (dim Queued marker, acked by
-		// EventSteer), an idle panel starts a new run with it.
+		// One-way (no respond): the panel's injection channel delivers the
+		// wake without touching the user's draft (running turn: dim Queued
+		// marker; idle: new run; picker mode: buffered until chat returns).
 		if a.aiView != nil {
-			a.aiView.InsertText(req.arg)
-			return a, a.aiView.SubmitInput()
+			return a, a.aiView.InjectUserMessage(req.arg)
 		}
 	}
 	return a, nil

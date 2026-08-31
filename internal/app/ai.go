@@ -85,24 +85,19 @@ func (b *aiBridge) deliverCron(text string) {
 	b.fireCh <- aiToolRequest{op: aiToolCronFire, arg: text}
 }
 
-// setCronSession points the scheduler at the panel's session. Jobs created
-// before the first save (session "") are adopted by the first real id.
+// setCronSession points the scheduler at the panel's session; the scheduler
+// re-homes pre-save ("") jobs to the first real id atomically.
 func (b *aiBridge) setCronSession(id string) {
 	if b.cron == nil {
 		return
 	}
 	b.mu.Lock()
-	old := b.cronSession
-	if old == id {
-		b.mu.Unlock()
-		return
-	}
+	changed := b.cronSession != id
 	b.cronSession = id
 	b.mu.Unlock()
-	if old == "" && id != "" {
-		_ = b.db.Model(&aiCronJob{}).Where("session_id = ?", "").Update("session_id", id).Error
+	if changed {
+		b.cron.SetSession(id)
 	}
-	b.cron.SetSession(id)
 }
 
 func loadAILocalTools(database *gorm.DB) bool {

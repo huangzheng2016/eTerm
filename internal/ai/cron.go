@@ -38,12 +38,17 @@ type CronStore interface {
 	LoadCronJobs(sessionID string) ([]CronJob, error)
 	UpsertCronJob(job CronJob) error
 	DeleteCronJob(id string) error
+	// MoveCronJobs re-homes jobs from one session to another (first save of
+	// a previously unsaved conversation).
+	MoveCronJobs(fromSession, toSession string) error
 }
 
 // CronScheduler fires due jobs of the active session, delivering each fire as
 // composed wake text. Every change is persisted, so jobs survive restarts;
 // jobs due while their session was inactive fire once (missed fires
-// coalesced) after the session loads again.
+// coalesced) after the session loads again. now is fixed at construction
+// (tests build the struct directly); the ticker goroutine lives for the
+// process (the bridge is created once).
 type CronScheduler struct {
 	mu      sync.Mutex
 	jobs    map[string]*CronJob
@@ -51,7 +56,6 @@ type CronScheduler struct {
 	deliver func(text string)
 	session string
 	now     func() time.Time
-	stop    chan struct{}
 }
 
 func NewCronScheduler(store CronStore, deliver func(text string)) *CronScheduler {
@@ -60,33 +64,30 @@ func NewCronScheduler(store CronStore, deliver func(text string)) *CronScheduler
 		store:   store,
 		deliver: deliver,
 		now:     time.Now,
-		stop:    make(chan struct{}),
 	}
 	go s.loop()
 	return s
 }
 
-func (s *CronScheduler) Close() { close(s.stop) }
-
 func (s *CronScheduler) loop() {
 	tick := time.NewTicker(cronTickInterval)
 	defer tick.Stop()
-	for {
-		select {
-		case <-s.stop:
-			return
-		case <-tick.C:
-			s.fireDue()
-		}
+	for range tick.C {
+		s.fireDue()
 	}
 }
 
 // SetSession switches the active session: the previous session's jobs stay
 // persisted but stop firing; the new session's jobs load from the store and
-// overdue ones fire on the next tick.
+// overdue ones fire on the next tick. Jobs of the unnamed pre-save session
+// ("") are re-homed to the first real id; the move and the reload happen
+// under the same lock so a concurrent Create lands in the right session.
 func (s *CronScheduler) SetSession(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.session == "" && id != "" && s.store != nil {
+		_ = s.store.MoveCronJobs("", id)
+	}
 	s.session = id
 	s.jobs = map[string]*CronJob{}
 	if s.store == nil || id == "" {
