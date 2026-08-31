@@ -24,6 +24,7 @@ const (
 
 	voiceEngineSettingKey      = "voice_engine"
 	voiceVADSettingKey         = "voice_vad_threshold"
+	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
 	voiceVolcanoSettingKey     = "voice_volcano" // encrypted JSON {api_key, app_key, access_key}
 )
@@ -33,6 +34,7 @@ const (
 type voiceSettings struct {
 	Engine           string
 	VADThreshold     float64
+	VADSilenceMs     int // min silence to end an utterance, milliseconds
 	SentenceEnd      voice.SentenceEnd
 	VolcanoAPIKey    string
 	VolcanoAppKey    string
@@ -40,7 +42,14 @@ type voiceSettings struct {
 }
 
 func defaultVoiceSettings() voiceSettings {
-	return voiceSettings{Engine: voiceEngineLocal, SentenceEnd: voice.SentenceEndSpace}
+	return voiceSettings{Engine: voiceEngineLocal, VADSilenceMs: 1000, SentenceEnd: voice.SentenceEndSpace}
+}
+
+func (cfg voiceSettings) vadParams() voice.VADParams {
+	return voice.VADParams{
+		Threshold:  cfg.VADThreshold,
+		MinSilence: float64(cfg.VADSilenceMs) / 1000,
+	}
 }
 
 func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSettings {
@@ -48,15 +57,20 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 	if database == nil {
 		return cfg
 	}
-	// Volcano stays gated until the helper audio passthrough lands (M17):
-	// without an audio feed the cloud engine can never transcribe, so only
-	// "local" is honored for now.
-	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil && v == voiceEngineLocal {
-		cfg.Engine = v
+	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil {
+		switch v {
+		case voiceEngineLocal, voiceEngineVolcano:
+			cfg.Engine = v
+		}
 	}
 	if v, err := db.GetSetting(database, voiceVADSettingKey); err == nil && v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
 			cfg.VADThreshold = f
+		}
+	}
+	if v, err := db.GetSetting(database, voiceSilenceSettingKey); err == nil && v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 50 && n <= 5000 {
+			cfg.VADSilenceMs = n
 		}
 	}
 	if v, err := db.GetSetting(database, voiceSentenceEndSettingKey); err == nil {
@@ -93,6 +107,9 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	if err := db.SetSetting(database, voiceVADSettingKey, strconv.FormatFloat(cfg.VADThreshold, 'f', -1, 64)); err != nil {
 		return err
 	}
+	if err := db.SetSetting(database, voiceSilenceSettingKey, strconv.Itoa(cfg.VADSilenceMs)); err != nil {
+		return err
+	}
 	if err := db.SetSetting(database, voiceSentenceEndSettingKey, string(cfg.SentenceEnd)); err != nil {
 		return err
 	}
@@ -121,16 +138,23 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 
 // defaultVoiceEngine builds the configured engine; onProgress reports the
 // helper binary download (the model download arrives as engine events).
+// Volcano composes a passthrough helper (capture+VAD) with the cloud client.
 func defaultVoiceEngine(cfg voiceSettings, onProgress func(float64)) (voice.Engine, error) {
 	if cfg.Engine == voiceEngineVolcano {
-		return voice.NewVolcanoEngine(voice.VolcanoConfig{
-			APIKey:    cfg.VolcanoAPIKey,
-			AppKey:    cfg.VolcanoAppKey,
-			AccessKey: cfg.VolcanoAccessKey,
+		return voice.NewVolcanoFeedEngine(voice.VolcanoFeedConfig{
+			Volcano: voice.VolcanoConfig{
+				APIKey:    cfg.VolcanoAPIKey,
+				AppKey:    cfg.VolcanoAppKey,
+				AccessKey: cfg.VolcanoAccessKey,
+			},
+			Helper: voice.LocalConfig{
+				VAD:                cfg.vadParams(),
+				OnDownloadProgress: onProgress,
+			},
 		}), nil
 	}
 	return voice.NewLocalEngine(voice.LocalConfig{
-		VAD:                voice.VADParams{Threshold: cfg.VADThreshold},
+		VAD:                cfg.vadParams(),
 		OnDownloadProgress: onProgress,
 	}), nil
 }

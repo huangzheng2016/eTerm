@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -20,6 +21,7 @@ import (
 const (
 	voiceRowEngine = iota
 	voiceRowThreshold
+	voiceRowSilence
 	voiceRowSentenceEnd
 	voiceRowAPIKey
 	voiceRowAppKey
@@ -68,11 +70,18 @@ func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 	}
 }
 
-// adjust cycles the enum rows and steps the threshold; returns the persist
-// command when the row changed. The engine row is inert while Volcano is
-// gated (no audio passthrough yet).
+// adjust cycles the enum rows and steps the numeric rows; returns the
+// persist command when the row changed. Engine changes rebuild the engine,
+// VAD changes apply live via SetVAD.
 func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 	switch m.cursor {
+	case voiceRowEngine:
+		if m.cfg.Engine == voiceEngineLocal {
+			m.cfg.Engine = voiceEngineVolcano
+		} else {
+			m.cfg.Engine = voiceEngineLocal
+		}
+		return m.persist(false)
 	case voiceRowThreshold:
 		m.cfg.VADThreshold = math.Round((m.cfg.VADThreshold+float64(dir)*0.05)*100) / 100
 		if m.cfg.VADThreshold < 0 {
@@ -80,6 +89,15 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		}
 		if m.cfg.VADThreshold > 1 {
 			m.cfg.VADThreshold = 1
+		}
+		return m.persist(true)
+	case voiceRowSilence:
+		m.cfg.VADSilenceMs += dir * 50
+		if m.cfg.VADSilenceMs < 50 {
+			m.cfg.VADSilenceMs = 50
+		}
+		if m.cfg.VADSilenceMs > 5000 {
+			m.cfg.VADSilenceMs = 5000
 		}
 		return m.persist(true)
 	case voiceRowSentenceEnd:
@@ -167,7 +185,8 @@ func (m *voiceSettingsModel) View() string {
 		value string
 	}{
 		{"Engine", m.cfg.Engine},
-		{"VAD threshold", threshold},
+		{"speech sensitivity (0-1)", threshold},
+		{"end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)},
 		{"Sentence end", string(m.cfg.SentenceEnd)},
 		{"Volcano API key", maskVoiceKey(m.cfg.VolcanoAPIKey)},
 		{"Volcano App key", maskVoiceKey(m.cfg.VolcanoAppKey)},
@@ -186,10 +205,9 @@ func (m *voiceSettingsModel) View() string {
 		if m.edit == i {
 			value = m.input.View()
 		}
-		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-18s", r.label)), ui.DimStyle.Render(value)))
+		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-28s", r.label)), ui.DimStyle.Render(value)))
 	}
 	lines = append(lines,
-		ui.DimStyle.Render("volcano engine: coming soon (audio passthrough not wired)"),
 		"",
 		ui.DimStyle.Render("up/down move · left/right change · enter edit · esc close"))
 	return lipgloss.NewStyle().

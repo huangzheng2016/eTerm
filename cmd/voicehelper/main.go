@@ -82,6 +82,8 @@ func main() {
 			switch cmd.Cmd {
 			case "start":
 				eng.start(ctx)
+			case "start_passthrough":
+				eng.startPassthrough(ctx)
 			case "stop":
 				eng.stop()
 			case "set_model":

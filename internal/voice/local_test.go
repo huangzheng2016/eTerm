@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -39,11 +40,18 @@ func fakeHelperMain() {
 	crashAlways := os.Getenv("GO_FAKE_CRASH_ALWAYS") == "1"
 
 	sc := bufio.NewScanner(os.Stdin)
+	passthrough := false
 	for sc.Scan() {
 		line := sc.Text()
 		switch {
 		case strings.Contains(line, `"cmd":"set_vad_params"`):
 			fmt.Printf(`{"type":"echo","text":%s}`+"\n", strconv.Quote(line))
+		case strings.Contains(line, `"cmd":"start_passthrough"`):
+			passthrough = true
+			fmt.Println(`{"type":"state","state":"listening"}`)
+			fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})))
+			fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString([]byte{5, 6, 7, 8})))
+			fmt.Println(`{"type":"utterance_end"}`)
 		case strings.Contains(line, `"cmd":"start"`):
 			if crashAlways {
 				os.Exit(1)
@@ -58,8 +66,13 @@ func fakeHelperMain() {
 			}
 			fmt.Println(`{"type":"state","state":"listening"}`)
 		case strings.Contains(line, `"cmd":"stop"`):
-			fmt.Println(`{"type":"final","text":"hello world"}`)
-			fmt.Println(`{"type":"state","state":"idle"}`)
+			if passthrough {
+				fmt.Println(`{"type":"utterance_end"}`)
+				fmt.Println(`{"type":"state","state":"idle"}`)
+			} else {
+				fmt.Println(`{"type":"final","text":"hello world"}`)
+				fmt.Println(`{"type":"state","state":"idle"}`)
+			}
 		}
 	}
 }
