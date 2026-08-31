@@ -9,7 +9,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/ai"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
@@ -154,5 +156,54 @@ func TestAIExecutorRoundTripCancel(t *testing.T) {
 	cancel()
 	if _, err := exec.ListTabs(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// cronFireAgent records Run inputs on top of fakeAgent.
+type cronFireAgent struct {
+	fakeAgent
+	runs []string
+}
+
+func (a *cronFireAgent) Run(ctx context.Context, input string) <-chan ai.Event {
+	a.runs = append(a.runs, input)
+	return a.fakeAgent.Run(ctx, input)
+}
+
+// A cron fire routed through the panel's send path starts a new run when the
+// panel is idle and queues onto the active run when one is in flight.
+func TestAICronFireDelivery(t *testing.T) {
+	store := &ai.Store{}
+	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
+	if err := store.SetActive("p", "m"); err != nil {
+		t.Fatal(err)
+	}
+	bridge := &aiBridge{store: store}
+	agent := &cronFireAgent{}
+	bridge.agent = agent
+	bridge.agentKey = "p\x00m\x00false"
+	a := App{aiView: aiview.New(bridge, bridge, bridge)}
+	defer bridge.CancelRun()
+
+	_, cmd := a.handleAIToolRequest(aiToolRequest{op: aiToolCronFire, arg: "wake one"})
+	if cmd == nil {
+		t.Fatal("idle fire did not start a run")
+	}
+	if !bridge.running {
+		t.Fatal("bridge not running after idle fire")
+	}
+	if len(agent.runs) != 1 || agent.runs[0] != "wake one" {
+		t.Fatalf("runs: %v", agent.runs)
+	}
+
+	_, cmd = a.handleAIToolRequest(aiToolRequest{op: aiToolCronFire, arg: "wake two"})
+	if cmd != nil {
+		t.Fatal("queued fire returned a command")
+	}
+	if len(agent.runs) != 1 {
+		t.Fatalf("queued fire started a second run: %v", agent.runs)
+	}
+	if len(agent.queued) != 1 || agent.queued[0] != "wake two" {
+		t.Fatalf("queued: %v", agent.queued)
 	}
 }

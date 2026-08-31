@@ -48,7 +48,7 @@ func (m *steerToolModel) Stream(ctx context.Context, input []*schema.Message, op
 
 func newSteerAgent(t *testing.T, m model.ChatModel, queue *steerQueue) *Agent {
 	t.Helper()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

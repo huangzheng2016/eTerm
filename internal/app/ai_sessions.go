@@ -23,10 +23,58 @@ type aiSession struct {
 
 func (aiSession) TableName() string { return "ai_sessions" }
 
+// aiCronJob is the persisted form of ai.CronJob; jobs belong to the session
+// that created them and fire only while that session is active in the panel.
+type aiCronJob struct {
+	ID              string `gorm:"primaryKey;size:32"`
+	SessionID       string `gorm:"index;size:32;not null;default:''"`
+	Prompt          string `gorm:"not null;default:''"`
+	IntervalMinutes int    `gorm:"not null;default:0"` // 0 = one-shot
+	NextFireAt      time.Time
+	CreatedAt       time.Time
+}
+
+func (aiCronJob) TableName() string { return "ai_cron" }
+
+// LoadCronJobs implements ai.CronStore.
+func (b *aiBridge) LoadCronJobs(sessionID string) ([]ai.CronJob, error) {
+	var rows []aiCronJob
+	if err := b.db.Where("session_id = ?", sessionID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ai.CronJob, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ai.CronJob{
+			ID: r.ID, SessionID: r.SessionID, Prompt: r.Prompt,
+			IntervalMinutes: r.IntervalMinutes, NextFireAt: r.NextFireAt, CreatedAt: r.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+// UpsertCronJob implements ai.CronStore.
+func (b *aiBridge) UpsertCronJob(job ai.CronJob) error {
+	return b.db.Save(&aiCronJob{
+		ID: job.ID, SessionID: job.SessionID, Prompt: job.Prompt,
+		IntervalMinutes: job.IntervalMinutes, NextFireAt: job.NextFireAt, CreatedAt: job.CreatedAt,
+	}).Error
+}
+
+// DeleteCronJob implements ai.CronStore.
+func (b *aiBridge) DeleteCronJob(id string) error {
+	return b.db.Where("id = ?", id).Delete(&aiCronJob{}).Error
+}
+
+// MoveCronJobs implements ai.CronStore.
+func (b *aiBridge) MoveCronJobs(from, to string) error {
+	return b.db.Model(&aiCronJob{}).Where("session_id = ?", from).Update("session_id", to).Error
+}
+
 // SaveSession implements aiview.SessionStore: export the agent history and
 // upsert the session row. Empty history never creates a row, but an existing
 // row is updated (e.g. emptied by /undo).
 func (b *aiBridge) SaveSession(id, title, forkOf string) {
+	b.setCronSession(id)
 	b.mu.Lock()
 	agent := b.agent
 	history := b.pendingHistory
@@ -77,6 +125,7 @@ func (b *aiBridge) LoadSession(id string) ([]byte, bool) {
 	if err := b.db.Select("history").Where("id = ?", id).First(&row).Error; err != nil {
 		return nil, false
 	}
+	b.setCronSession(id)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.agent != nil {
@@ -105,6 +154,7 @@ func (b *aiBridge) UndoLastTurn() {
 // ResetHistory implements aiview.SessionStore. Synchronous: slash commands
 // are rejected while a run is active, so the agent mutex is free.
 func (b *aiBridge) ResetHistory() {
+	b.setCronSession("")
 	b.mu.Lock()
 	agent := b.agent
 	b.pendingHistory = nil

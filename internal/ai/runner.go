@@ -61,6 +61,9 @@ type Config struct {
 	// LocalTools binds the opt-in local-machine tools (bash, file editor)
 	// and mentions them in the system prompt.
 	LocalTools bool
+	// Cron schedules wake-ups for this session; owned by the app bridge so
+	// jobs survive agent rebuilds. Nil disables the cron tools.
+	Cron *CronScheduler
 }
 
 func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
@@ -68,7 +71,7 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	tools, err := BuildTools(cfg.Executor)
+	tools, err := BuildTools(cfg.Executor, cfg.Cron)
 	if err != nil {
 		return nil, err
 	}
