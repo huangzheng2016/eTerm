@@ -232,18 +232,6 @@ func voiceTestTick(seq int) tea.Cmd {
 	return tea.Tick(10*time.Second, func(time.Time) tea.Msg { return voiceTestTimeoutMsg{seq: seq} })
 }
 
-func persistVoiceVerified(database *gorm.DB) tea.Cmd {
-	return func() tea.Msg {
-		if database == nil {
-			return nil
-		}
-		if err := db.SetSetting(database, voiceVerifiedSettingKey, "1"); err != nil {
-			return types.ErrorMsg{Err: err}
-		}
-		return nil
-	}
-}
-
 func (a App) ensureVoiceCfg() App {
 	if a.voiceCfgLoaded {
 		return a
@@ -430,7 +418,12 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 				a.voiceSettingsView.testDone(msg.ev.Text)
 			}
 			var cmds []tea.Cmd
-			cmds = append(cmds, persistVoiceVerified(a.db))
+			if a.db != nil {
+				if err := db.SetSetting(a.db, voiceVerifiedSettingKey, "1"); err != nil {
+					e := err
+					cmds = append(cmds, func() tea.Msg { return types.ErrorMsg{Err: e} })
+				}
+			}
 			if !a.voiceBusy && a.voiceEngine != nil {
 				a.voiceBusy = true
 				cmds = append(cmds, voiceStopCmd(a.voiceEngine))
