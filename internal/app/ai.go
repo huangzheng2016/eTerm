@@ -45,6 +45,12 @@ type aiBridge struct {
 	// pendingHistory holds a resumed session's history until the first agent
 	// exists (no runs yet in this process).
 	pendingHistory []byte
+	// cron schedules wake-ups for the panel's session; it outlives agent
+	// rebuilds. cronSession tracks the panel session id ("" before the first
+	// save), fireCh carries fires into the UI loop.
+	cron        *ai.CronScheduler
+	cronSession string
+	fireCh      chan<- aiToolRequest
 }
 
 // aiAgent is the part of ai.Agent the bridge uses; a seam for tests.
@@ -61,8 +67,42 @@ type aiAgent interface {
 }
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
-	_ = database.AutoMigrate(&aiSession{})
-	return &aiBridge{store: loadAIStore(database, mk), db: database, mk: mk, exec: exec, localTools: loadAILocalTools(database)}
+	_ = database.AutoMigrate(&aiSession{}, &aiCronJob{})
+	b := &aiBridge{store: loadAIStore(database, mk), db: database, mk: mk, exec: exec, localTools: loadAILocalTools(database)}
+	if e, ok := exec.(*aiExecutor); ok {
+		b.fireCh = e.reqCh
+	}
+	b.cron = ai.NewCronScheduler(b, b.deliverCron)
+	return b
+}
+
+// deliverCron posts a cron fire into the UI loop via the tool-request pump:
+// the aiToolCronFire handler routes it through the panel's normal send path.
+func (b *aiBridge) deliverCron(text string) {
+	if b.fireCh == nil {
+		return
+	}
+	b.fireCh <- aiToolRequest{op: aiToolCronFire, arg: text}
+}
+
+// setCronSession points the scheduler at the panel's session. Jobs created
+// before the first save (session "") are adopted by the first real id.
+func (b *aiBridge) setCronSession(id string) {
+	if b.cron == nil {
+		return
+	}
+	b.mu.Lock()
+	old := b.cronSession
+	if old == id {
+		b.mu.Unlock()
+		return
+	}
+	b.cronSession = id
+	b.mu.Unlock()
+	if old == "" && id != "" {
+		_ = b.db.Model(&aiCronJob{}).Where("session_id = ?", "").Update("session_id", id).Error
+	}
+	b.cron.SetSession(id)
 }
 
 func loadAILocalTools(database *gorm.DB) bool {
@@ -201,6 +241,7 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 		MaxContextSize: maxCtx,
 		Executor:       b.exec,
 		LocalTools:     b.localTools,
+		Cron:           b.cron,
 	})
 	if err != nil {
 		return nil, err

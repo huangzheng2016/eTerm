@@ -183,7 +183,9 @@ type toolBuilder struct {
 	exec Executor
 }
 
-func BuildTools(exec Executor) ([]tool.BaseTool, error) {
+// BuildTools builds the terminal/daemon tools; cron (when non-nil) adds the
+// cron_create/cron_list/cron_delete scheduled-wake tools.
+func BuildTools(exec Executor, cron *CronScheduler) ([]tool.BaseTool, error) {
 	tb := &toolBuilder{exec: exec}
 
 	listTabs, err := utils.InferTool("list_tabs", "List all open terminal tabs with their id, title, type and which one is active", tb.listTabs)
@@ -243,7 +245,15 @@ func BuildTools(exec Executor) ([]tool.BaseTool, error) {
 		return nil, fmt.Errorf("build open_tmux: %w", err)
 	}
 
-	return []tool.BaseTool{listTabs, readTab, sendKeys, listDaemons, listDaemonSessions, enterDaemon, createSession, renameSession, killSession, openLocal, listHosts, openSSH, listTmux, openTmux}, nil
+	tools := []tool.BaseTool{listTabs, readTab, sendKeys, listDaemons, listDaemonSessions, enterDaemon, createSession, renameSession, killSession, openLocal, listHosts, openSSH, listTmux, openTmux}
+	if cron != nil {
+		cronTools, err := buildCronTools(cron)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, cronTools...)
+	}
+	return tools, nil
 }
 
 func (tb *toolBuilder) listTabs(ctx context.Context, in *ListTabsInput) (*ListTabsOutput, error) {

@@ -87,6 +87,9 @@ const (
 	aiToolOpenSSH
 	aiToolOpenTmux
 	aiToolPollTab
+	// aiToolCronFire is not a tool call: the cron scheduler posts a scheduled
+	// wake through the same pump (app.go/app_update.go carry no cron case).
+	aiToolCronFire
 )
 
 // aiToolRequest is posted by the executor (agent goroutine) and answered on
@@ -477,6 +480,14 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 		return a, func() tea.Msg { return types.SSHConnectMsg{HostID: host.ID} }
 	case aiToolPollTab:
 		req.respond(aiToolResult{text: a.findFreshAITab(req.id, req.arg, req.beforeIDs)})
+	case aiToolCronFire:
+		// One-way (no respond): route the wake through the panel's normal
+		// send path - a running turn queues it (dim Queued marker, acked by
+		// EventSteer), an idle panel starts a new run with it.
+		if a.aiView != nil {
+			a.aiView.InsertText(req.arg)
+			return a, a.aiView.SubmitInput()
+		}
 	}
 	return a, nil
 }

@@ -142,7 +142,7 @@ func TestAgentInstructionGatesLocalTools(t *testing.T) {
 }
 
 func TestBuildToolsIncludesSessionOpenTools(t *testing.T) {
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

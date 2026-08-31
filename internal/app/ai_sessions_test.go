@@ -1,7 +1,9 @@
 package app
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/ai"
@@ -197,5 +199,87 @@ func TestNewAIBridgeMigratesSessions(t *testing.T) {
 	bridge.SaveSession("s1", "hi", "")
 	if n := len(bridge.Sessions()); n != 1 {
 		t.Fatalf("got %d sessions, want 1 (auto-migrated table)", n)
+	}
+}
+
+func testCronBridge(t *testing.T) *aiBridge {
+	t.Helper()
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newAIBridge(database, security.NewMasterKeyManager(nil, nil, 0), nil)
+}
+
+func TestBridgeCronPersistenceRoundTrip(t *testing.T) {
+	bridge := testCronBridge(t)
+	bridge.setCronSession("s1")
+	job, err := bridge.cron.Create("watch the build", 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.SessionID != "s1" {
+		t.Fatalf("job session = %q", job.SessionID)
+	}
+
+	// Restart: a fresh bridge on the same db reloads the session's jobs.
+	bridge2 := testCronBridge(t)
+	bridge2.db = bridge.db
+	bridge2.setCronSession("s1")
+	jobs := bridge2.cron.List()
+	if len(jobs) != 1 || jobs[0].ID != job.ID || jobs[0].Prompt != "watch the build" || jobs[0].IntervalMinutes != 5 {
+		t.Fatalf("reloaded jobs: %+v", jobs)
+	}
+	// Other sessions see nothing.
+	bridge2.setCronSession("s2")
+	if n := len(bridge2.cron.List()); n != 0 {
+		t.Fatalf("jobs leaked into s2: %d", n)
+	}
+}
+
+func TestBridgeCronAdoptsUnsavedJobs(t *testing.T) {
+	bridge := testCronBridge(t)
+	// Job created during a conversation that has no session id yet.
+	if _, err := bridge.cron.Create("check back", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
+	bridge.SaveSession("s1", "hi", "")
+	jobs, err := bridge.LoadCronJobs("s1")
+	if err != nil || len(jobs) != 1 || jobs[0].Prompt != "check back" {
+		t.Fatalf("jobs not adopted by first save: %+v %v", jobs, err)
+	}
+	if n := len(bridge.cron.List()); n != 1 {
+		t.Fatalf("adopted job not loaded into the scheduler: %d", n)
+	}
+}
+
+func TestBridgeCronOverdueFiresOnLoad(t *testing.T) {
+	bridge := testCronBridge(t)
+	fireCh := make(chan aiToolRequest, 1)
+	bridge.fireCh = fireCh
+	past := time.Now().Add(-time.Hour)
+	if err := bridge.db.Create(&aiCronJob{
+		ID: "job1", SessionID: "s1", Prompt: "report the tab state",
+		IntervalMinutes: 5, NextFireAt: past, CreatedAt: past,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	bridge.setCronSession("s1")
+	select {
+	case req := <-fireCh:
+		if req.op != aiToolCronFire {
+			t.Fatalf("op = %v", req.op)
+		}
+		if !strings.Contains(req.arg, "report the tab state") || !strings.Contains(req.arg, "job1") || !strings.Contains(req.arg, "coalesced") {
+			t.Fatalf("wake text: %q", req.arg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("overdue job did not fire after session load")
+	}
+	// The recurring job was rescheduled, not deleted.
+	jobs := bridge.cron.List()
+	if len(jobs) != 1 || !jobs[0].NextFireAt.After(time.Now()) {
+		t.Fatalf("job not rescheduled: %+v", jobs)
 	}
 }

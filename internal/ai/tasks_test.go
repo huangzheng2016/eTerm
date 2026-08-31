@@ -41,7 +41,7 @@ func (m *gatedModel) Stream(ctx context.Context, input []*schema.Message, opts .
 
 func testFactory(m model.ChatModel) agentFactory {
 	return func(ctx context.Context) (*adk.ChatModelAgent, error) {
-		tools, err := BuildTools(fakeExecutor{})
+		tools, err := BuildTools(fakeExecutor{}, nil)
 		if err != nil {
 			return nil, err
 		}

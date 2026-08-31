@@ -47,7 +47,7 @@ func (fakeExecutor) ListTabs(ctx context.Context) ([]TabInfo, error) {
 
 func TestAgentRunEmitsEventsAndHistory(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func (m *echoModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 // whole turns (never splitting a tool-call/result pair).
 func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 
 func TestExportImportHistoryRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestExportImportHistoryRoundTrip(t *testing.T) {
 
 func TestExportHistoryCapDropsOldestTurns(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestExportHistoryCapDropsOldestTurns(t *testing.T) {
 
 func TestUndoLastTurn(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestTrimHistoryKeepsNewestTurnOverBudget(t *testing.T) {
 
 func TestUsageReflectsHistory(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +358,7 @@ func TestUsageReflectsHistory(t *testing.T) {
 func TestUsageDuringRunDoesNotBlock(t *testing.T) {
 	ctx := context.Background()
 	m := &gatedModel{release: make(chan struct{}), entered: make(chan struct{})}
-	tools, err := BuildTools(fakeExecutor{})
+	tools, err := BuildTools(fakeExecutor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
