@@ -26,6 +26,11 @@ type FakeRunner struct {
 	sessions  []fakeSession
 	undoCalls int
 	resets    int
+
+	// TaskList stands in for the agent's background tasks; CancelTask flips
+	// the matching entry to cancelled like the real TaskManager.
+	TaskList       []TaskEntry
+	cancelledTasks []string
 }
 
 type fakeSession struct {
@@ -192,3 +197,15 @@ func (f *FakeRunner) LoadSession(id string) ([]byte, bool) {
 func (f *FakeRunner) UndoLastTurn() { f.undoCalls++ }
 
 func (f *FakeRunner) ResetHistory() { f.resets++; f.History = nil }
+
+func (f *FakeRunner) Tasks() []TaskEntry { return f.TaskList }
+
+func (f *FakeRunner) CancelTask(id string) {
+	f.cancelledTasks = append(f.cancelledTasks, id)
+	for i := range f.TaskList {
+		if f.TaskList[i].ID == id {
+			f.TaskList[i].Status = "cancelled"
+			f.TaskList[i].Tail = append(f.TaskList[i].Tail, TaskActivity{Kind: "status", Text: "cancelled"})
+		}
+	}
+}

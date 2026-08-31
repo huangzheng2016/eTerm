@@ -16,7 +16,7 @@ import (
 
 const saveDebounce = 2 * time.Second
 
-const slashHelpText = "Commands: /model pick model · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /help this help" +
+const slashHelpText = "Commands: /model pick model · /tasks background agents · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /help this help" +
 	"\nKeys: enter send · ctrl+c stop · ctrl+o tools · ctrl+p models · ctrl+l clear · pgup/pgdn scroll · drag copy · esc close"
 
 // historyMessage is the panel's read view of exported agent history JSON
@@ -31,11 +31,12 @@ type historyMessage struct {
 func (m *Model) runSlashCommand(input string) tea.Cmd {
 	cmd := strings.Fields(input)[0]
 	switch cmd {
-	case "/model", "/new", "/resume", "/fork", "/undo", "/help":
+	case "/model", "/new", "/resume", "/fork", "/undo", "/help", "/tasks":
 	default:
 		return m.slashError("unknown command " + cmd + " - try /help")
 	}
-	if m.status == statusRunning && cmd != "/help" && cmd != "/model" {
+	// /tasks stays available mid-run: that is when background agents run.
+	if m.status == statusRunning && cmd != "/help" && cmd != "/model" && cmd != "/tasks" {
 		return m.slashError("run in progress - ctrl+c to stop")
 	}
 	m.input.Reset()
@@ -58,6 +59,8 @@ func (m *Model) runSlashCommand(input string) tea.Cmd {
 		m.forkSession()
 	case "/undo":
 		m.undoTurn()
+	case "/tasks":
+		return m.openTasks()
 	}
 	return nil
 }

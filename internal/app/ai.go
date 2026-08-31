@@ -51,6 +51,8 @@ type aiAgent interface {
 	UndoLastTurn()
 	Enqueue(text string)
 	ClearQueue()
+	TaskSnapshots() []ai.TaskSnapshot
+	CancelTask(id string) bool
 }
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
@@ -244,6 +246,44 @@ func (b *aiBridge) ClearQueue() {
 	b.mu.Unlock()
 	if agent != nil {
 		agent.ClearQueue()
+	}
+}
+
+// Tasks exposes the active agent's background tasks to the panel's /tasks
+// view. Nil without an agent (no runs yet).
+func (b *aiBridge) Tasks() []aiview.TaskEntry {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent == nil {
+		return nil
+	}
+	snaps := agent.TaskSnapshots()
+	out := make([]aiview.TaskEntry, 0, len(snaps))
+	for _, s := range snaps {
+		tail := make([]aiview.TaskActivity, 0, len(s.Tail))
+		for _, a := range s.Tail {
+			tail = append(tail, aiview.TaskActivity{Kind: a.Kind, Text: a.Text})
+		}
+		out = append(out, aiview.TaskEntry{
+			ID:            s.ID,
+			Task:          s.Task,
+			Status:        string(s.Status),
+			StartedSecAgo: s.StartedSecAgo,
+			Tail:          tail,
+		})
+	}
+	return out
+}
+
+// CancelTask cancels one running background task of the active agent (wired
+// to the /tasks view's x key).
+func (b *aiBridge) CancelTask(id string) {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent != nil {
+		agent.CancelTask(id)
 	}
 }
 

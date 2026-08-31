@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -157,5 +158,102 @@ func TestTaskManagerCancelAllOnClose(t *testing.T) {
 	listOut, _ := tm.list(context.Background(), &ListAgentsInput{})
 	if len(listOut.Agents) != 1 || listOut.Agents[0].Status != string(TaskCancelled) {
 		t.Fatalf("list after Close: got %+v", listOut.Agents)
+	}
+}
+
+func TestTaskManagerActivityTail(t *testing.T) {
+	tm := NewTaskManager(testFactory(&fakeModel{}))
+
+	spawnOut, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "check tabs"})
+	if err != nil || spawnOut.ID == "" {
+		t.Fatalf("spawn: %+v, %v", spawnOut, err)
+	}
+	waitOut, err := tm.wait(context.Background(), &WaitAgentInput{ID: spawnOut.ID, TimeoutSeconds: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waitOut.Status != string(TaskDone) {
+		t.Fatalf("wait: %+v", waitOut)
+	}
+
+	snaps := tm.Snapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("snapshots: got %d, want 1", len(snaps))
+	}
+	s := snaps[0]
+	if s.ID != "task-1" || s.Task != "check tabs" || s.Status != TaskDone {
+		t.Fatalf("snapshot: %+v", s)
+	}
+	var kinds []string
+	var toolText, textText string
+	for _, a := range s.Tail {
+		kinds = append(kinds, a.Kind)
+		switch a.Kind {
+		case "tool":
+			toolText = a.Text
+		case "text":
+			textText = a.Text
+		}
+	}
+	want := []string{"status", "tool", "text", "status"}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("tail kinds: got %v, want %v", kinds, want)
+	}
+	if !strings.Contains(toolText, "list_tabs") {
+		t.Fatalf("tool entry missing tool name: %q", toolText)
+	}
+	if textText != "I see one tab." {
+		t.Fatalf("text entry: %q", textText)
+	}
+	if s.Tail[0].Text != string(TaskRunning) || s.Tail[len(s.Tail)-1].Text != string(TaskDone) {
+		t.Fatalf("status transitions: %+v", s.Tail)
+	}
+}
+
+func TestTaskActivityTailCapped(t *testing.T) {
+	tm := NewTaskManager(nil)
+	task := &agentTask{id: "task-1"}
+	for i := 0; i < taskTailMax+10; i++ {
+		tm.recordActivity(task, "text", "entry")
+	}
+	if len(task.tail) != taskTailMax {
+		t.Fatalf("tail: got %d entries, want capped at %d", len(task.tail), taskTailMax)
+	}
+}
+
+func TestTaskManagerCancelTask(t *testing.T) {
+	m := &gatedModel{release: make(chan struct{})} // never released
+	tm := NewTaskManager(testFactory(m))
+
+	out1, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "one"})
+	if err != nil || out1.ID == "" {
+		t.Fatalf("spawn 1: %+v, %v", out1, err)
+	}
+	out2, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "two"})
+	if err != nil || out2.ID == "" {
+		t.Fatalf("spawn 2: %+v, %v", out2, err)
+	}
+
+	if tm.CancelTask("task-99") {
+		t.Fatal("unknown id must not cancel")
+	}
+	if !tm.CancelTask(out1.ID) {
+		t.Fatal("running task not cancelled")
+	}
+
+	waitOut, err := tm.wait(context.Background(), &WaitAgentInput{ID: out1.ID, TimeoutSeconds: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waitOut.Status != string(TaskCancelled) {
+		t.Fatalf("wait after CancelTask: got %+v, want cancelled", waitOut)
+	}
+	if tm.CancelTask(out1.ID) {
+		t.Fatal("cancelling a finished task must report false")
+	}
+
+	listOut, _ := tm.list(context.Background(), &ListAgentsInput{})
+	if listOut.Agents[1].ID != out2.ID || listOut.Agents[1].Status != string(TaskRunning) {
+		t.Fatalf("other task must keep running: %+v", listOut.Agents[1])
 	}
 }
