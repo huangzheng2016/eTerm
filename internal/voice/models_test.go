@@ -271,3 +271,36 @@ func TestDownloadModelHTTPError(t *testing.T) {
 		t.Fatal("model installed after failed download")
 	}
 }
+
+// The first-install guard keeps an existing helper install; the update path
+// (DownloadHelper) must replace it.
+func TestDownloadAndExtractReplaceSemantics(t *testing.T) {
+	tarball := makeTarGz(t, map[string]string{helperBinaryName(): "new-binary"})
+	srv := serveBytes(t, tarball)
+
+	cacheDir := t.TempDir()
+	dest := helperDir(cacheDir)
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dest, helperBinaryName())
+	if err := os.WriteFile(bin, []byte("old-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// first-install path (ensureHelperBinary): existing install wins
+	if err := downloadAndExtract(context.Background(), srv.URL, cacheDir, "", false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(bin); string(got) != "old-binary" {
+		t.Fatalf("first-install guard clobbered the binary: %q", got)
+	}
+
+	// update path (DownloadHelper): the new binary replaces the old
+	if err := downloadAndExtract(context.Background(), srv.URL, cacheDir, "", true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(bin); string(got) != "new-binary" {
+		t.Fatalf("update did not replace binary: %q", got)
+	}
+}

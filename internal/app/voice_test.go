@@ -876,6 +876,9 @@ func TestVoiceSetupReady(t *testing.T) {
 	if voiceSetupReady(ccfg, root) {
 		t.Fatal("ready with an invalid custom dir")
 	}
+	if issue := voiceSetupIssue(ccfg, root); !strings.Contains(issue, "custom model path invalid") {
+		t.Fatalf("invalid custom dir issue = %q", issue)
+	}
 	os.WriteFile(filepath.Join(custom, "tokens.txt"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(custom, "model.int8.onnx"), []byte("x"), 0o644)
 	if !voiceSetupReady(ccfg, root) {

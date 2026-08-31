@@ -343,6 +343,9 @@ func voiceSetupIssue(cfg voiceSettings, modelsRoot string) string {
 		if !helperInstalledFn() {
 			return "download the helper binary first"
 		}
+		if cfg.CustomModelDir != "" && !voice.ValidCustomModelDir(cfg.CustomModelDir) {
+			return "custom model path invalid (missing files)"
+		}
 		if !localModelReady(cfg, modelsRoot) {
 			return "download a model first"
 		}

@@ -83,6 +83,7 @@ func LatestHelperVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "eterm-voice-helper-update-check")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
@@ -103,8 +104,9 @@ func LatestHelperVersion(ctx context.Context) (string, error) {
 	return rel.TagName, nil
 }
 
-// DownloadHelper installs the helper binary from url (DefaultHelperURL when
-// empty), reporting download progress.
+// DownloadHelper installs or updates the helper binary from url
+// (DefaultHelperURL when empty), replacing any existing installation.
+// Reports download progress.
 func DownloadHelper(ctx context.Context, url string, onProgress func(pct float64)) error {
 	if url == "" {
 		url = DefaultHelperURL
@@ -113,7 +115,7 @@ func DownloadHelper(ctx context.Context, url string, onProgress func(pct float64
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return err
 	}
-	if err := downloadAndExtract(ctx, url, cacheDir, "", onProgress); err != nil {
+	if err := downloadAndExtract(ctx, url, cacheDir, "", true, onProgress); err != nil {
 		return fmt.Errorf("download voice helper: %w", err)
 	}
 	binPath := HelperInstallPath()
@@ -148,7 +150,7 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := downloadAndExtract(ctx, url, cacheDir, cfg.SHA256Hex, cfg.OnDownloadProgress); err != nil {
+	if err := downloadAndExtract(ctx, url, cacheDir, cfg.SHA256Hex, false, cfg.OnDownloadProgress); err != nil {
 		return "", fmt.Errorf("download voice helper: %w", err)
 	}
 	if _, err := os.Stat(binPath); err != nil {
@@ -160,7 +162,9 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 
 // downloadAndExtract downloads the helper tarball, verifies sha256Hex when
 // non-empty, and extracts it into helperDir(cacheDir) via an atomic rename.
-func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, onProgress func(pct float64)) error {
+// replace=false keeps an existing install (concurrent first-install guard);
+// replace=true removes it first (user-initiated update).
+func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, replace bool, onProgress func(pct float64)) error {
 	tmp := filepath.Join(cacheDir, ".voicehelper.tar.gz.tmp")
 	defer os.Remove(tmp)
 	if err := downloadFile(ctx, url, tmp, sha256Hex, onProgress); err != nil {
@@ -176,8 +180,13 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, on
 
 	dest := helperDir(cacheDir)
 	if _, err := os.Stat(dest); err == nil {
-		// another process installed it meanwhile
-		return nil
+		if !replace {
+			// another process installed it meanwhile
+			return nil
+		}
+		if err := os.RemoveAll(dest); err != nil {
+			return err
+		}
 	}
 	return os.Rename(staging, dest)
 }
