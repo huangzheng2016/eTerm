@@ -9,6 +9,8 @@
 - **导入** -- 支持导入 `~/.ssh/config` 与 Termius 主机数据
 - **SFTP 与端口转发** -- 双栏文件管理，本地/远程/动态端口转发
 - **同步与远程 Shell** -- 通过 syncd 在多台设备间同步配置，并打开同租户设备上的远程 Shell
+- **AI 助手** -- `C-k` 打开全屏面板，直接操作终端标签页与远程 daemon，支持后台子代理与可选的本地工具
+- **语音输入** -- `C-r` 语音转文字，本地 sherpa-onnx 离线识别或火山引擎云端识别
 - **效率工具** -- 命令片段、会话记录、剪贴板链接粘贴、命令面板、可配置快捷键
 - **安全存储** -- 主密码加密敏感字段；同步数据传输前加密，服务端只保存密文
 
@@ -102,7 +104,9 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 | `Esc`           | 打开菜单（退出 / 设置 / 同步） |
 | `C-S-i`         | 上传剪贴板文件/图片并粘贴链接   |
 | `C-Tab`         | 下一标签页              |
-| `C-k`           | 命令面板               |
+| `C-k`           | AI 助手               |
+| `C-p`           | 命令面板               |
+| `C-r`           | 语音输入               |
 | `?`             | 所有快捷键              |
 
 
@@ -110,7 +114,53 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 
 快捷键显示使用短写：`C` = Ctrl，`S` = Shift，`A` = Alt，例如 `C-S-i` 表示 `Ctrl+Shift+I`。
 
+从旧版本升级时键位自动迁移：AI 助手占用 `C-k` 后，原来在 `C-k` 的命令面板移到 `C-p`；若 `C-p` 已被其他功能占用，该功能恢复默认键。
+
 Windows 默认使用 `A-S-字母` 代替 `C-S-字母`，因为 Windows 的终端输入可能丢失 Ctrl 与字母组合中的 Shift 状态。
+
+## AI 助手
+
+`C-k` 打开全屏 AI 助手面板，`Esc` 收起；收起后当前 run 在后台继续，状态栏显示 `ai running`。
+
+Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类型的 provider（OAuth 类型跳过），也可在面板中手动添加。`/model`（或面板内 `C-p`）选择模型。会话保存在 SQLite `ai_sessions` 表，`/resume` 恢复。
+
+斜杠命令：
+
+| 命令       | 功能                                  |
+| -------- | ----------------------------------- |
+| `/model`   | 选择 provider / 模型                    |
+| `/new`     | 新会话                                 |
+| `/resume`  | 恢复历史会话                              |
+| `/fork`    | 分叉当前会话                              |
+| `/undo`    | 撤销上一轮                               |
+| `/tasks`   | 后台子代理列表（j/k 移动、enter 查看、x 取消）      |
+| `/tools`   | 开关本地工具（见下）                          |
+| `/help`    | 帮助                                  |
+
+面板按键：enter 发送；运行中继续输入会排队（Queued），在下一步边界注入当前 run；`C-c` 中断当前 run；`C-o` 展开/折叠工具输出；`C-l` 清屏；标题栏显示 context 用量（已用/上限）。
+
+终端控制工具：
+
+- 标签页：`list_tabs` / `read_tab`（`skip_from_end` 向前翻历史）/ `send_keys`（解码 `\n` `\r` `\t` `\xHH` 转义，等 OSC 133;D 或超时后返回屏幕尾部）
+- 远程 daemon：`list_daemons` / `list_daemon_sessions` / `enter_daemon` / `create_session` / `rename_session` / `kill_session`
+- 打开会话：`open_local_terminal` / `open_ssh`（按 `list_hosts` 的主机名，重名报歧义）/ `open_tmux`（按 `list_tmux_sessions` 的会话名）
+- 其他：`sleep`（最长 10 分钟）；`spawn_agent` / `wait_agent` / `list_agents` 后台子代理（最多 4 个并发）
+
+本地工具（默认关闭）：`/tools` 开启后追加 `bash` 与 `str_replace_editor`（读/写/改/undo），对下一轮 run 生效。无沙箱，以当前用户完整权限执行，仅在信任当前任务时开启。
+
+## 语音输入
+
+`C-r` 切换录音（终端无法感知按键抬起，因此是开关而非按住说话）。识别文本送入当前终端（等同粘贴）或 AI 面板输入框；句尾动作为 enter 时识别完一句直接提交。
+
+helper 或模型未就绪时按 `C-r` 会打开设置面板引导下载。设置面板也可从命令面板或 `Esc` 菜单（`v`）进入：
+
+- helper：一键下载 CI 构建的 voicehelper（release 产物 `voicehelper-<os>-<arch>.tar.gz`，darwin-arm64 / linux-amd64，约 45 MB，含 sherpa-onnx 动态库）
+- 模型：SenseVoice 2024-07-17 fp32（约 1 GB，默认）/ SenseVoice int8（同包内，更省内存）/ Paraformer zh-small int8（约 74 MB）
+- Engine：local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，需 API key / App key / Access key，加密存储）
+- speech sensitivity (0-1)：VAD 触发灵敏度
+- end-of-sentence silence (ms)：句尾静音判停时长
+- Sentence end：句尾动作 enter / space
+- 测试录音：验证当前配置
 
 ## 多设备同步
 
@@ -179,7 +229,7 @@ daemon 与 syncd 的 relay 协议版本不匹配时，daemon 会报错并以退�
 
 - 普通粘贴：本地 Shell 和本地 tmux 中，剪贴板里的本地文件会粘贴为 `[filename](file:///path)`；SSH 和远程 Shell 会上传到 syncd 后粘贴链接
 - `C-S-i`：强制读取系统剪贴板文件/图片，上传到 syncd，向当前 Shell 粘贴 `[filename](url)`
-- `C-k` -> `Paste URL`：同样强制上传，适合作为兜底入口
+- `C-p` -> `Paste URL`：同样强制上传，适合作为兜底入口
 
 短链格式为 `https://sync.example.com/b/<token>`（SSH 模式下为 `http://127.0.0.1:<remote port>/b/<token>`，在远端主机上访问），有效期 30 分钟。文件/图片最大 10 MiB。
 
@@ -194,6 +244,13 @@ daemon 与 syncd 的 relay 协议版本不匹配时，daemon 会报错并以退�
 - 设置项 `share_max_hours`（1-168，默认 4）仅作为弹窗中有效期的默认值，可按需修改
 
 安全提示：链接中的 token 即访问凭证，任何拿到链接的人都能读写该 Shell，请像对待密码一样分发和保管。
+
+## 终端 OSC 支持
+
+- OSC 8：超链接透传到外层终端，可点击
+- OSC 9：通知透传到外层终端
+- OSC 0/2：动态标签页标题；手动改名后不再跟随远端设置
+- OSC 133：shell 集成命令跟踪。本地 Shell 与本地 tmux 自动为 zsh/bash/fish 注入集成（设 `ETERM_NO_SHELL_INTEGRATION` 关闭）；AI 的 send_keys 依此判断命令执行结束
 
 ## 推荐 tmux 配置
 
