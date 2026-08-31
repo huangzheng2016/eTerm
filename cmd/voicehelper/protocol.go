@@ -1,0 +1,65 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"sync"
+)
+
+const protocolVersion = 1
+
+type Command struct {
+	Cmd  string `json:"cmd"`
+	Path string `json:"path,omitempty"`
+
+	Threshold       *float64 `json:"threshold,omitempty"`
+	MinSilence      *float64 `json:"min_silence,omitempty"`
+	MinSpeech       *float64 `json:"min_speech,omitempty"`
+	TrailingSilence *float64 `json:"trailing_silence,omitempty"`
+	MaxSegment      *float64 `json:"max_segment,omitempty"`
+	NoSpeechTimeout *float64 `json:"no_speech_timeout,omitempty"`
+}
+
+type Event struct {
+	Type     string  `json:"type"`
+	Version  string  `json:"version,omitempty"`
+	Protocol int     `json:"protocol,omitempty"`
+	Text     string  `json:"text,omitempty"`
+	State    string  `json:"state,omitempty"`
+	Msg      string  `json:"msg,omitempty"`
+	Pct      float64 `json:"pct,omitempty"`
+}
+
+type eventWriter struct {
+	mu  sync.Mutex
+	w   *bufio.Writer
+	out io.Writer
+}
+
+func newEventWriter(out io.Writer) *eventWriter {
+	return &eventWriter{w: bufio.NewWriter(out), out: out}
+}
+
+func (e *eventWriter) emit(ev Event) {
+	line, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.w.Write(line)
+	e.w.WriteByte('\n')
+	e.w.Flush()
+}
+
+func (e *eventWriter) state(s string)   { e.emit(Event{Type: "state", State: s}) }
+func (e *eventWriter) partial(t string) { e.emit(Event{Type: "partial", Text: t}) }
+func (e *eventWriter) final(t string)   { e.emit(Event{Type: "final", Text: t}) }
+func (e *eventWriter) errorf(format string, args ...any) {
+	e.emit(Event{Type: "error", Msg: fmt.Sprintf(format, args...)})
+}
+func (e *eventWriter) progress(pct float64) {
+	e.emit(Event{Type: "download_progress", Pct: pct})
+}
