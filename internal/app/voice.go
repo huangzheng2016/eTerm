@@ -485,6 +485,13 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	if a.voiceTest || msg.stop {
 		return a.endVoiceTest()
 	}
+	if a.voiceRec {
+		// a test would hijack the live dictation event stream
+		if a.voiceSettingsView != nil {
+			a.voiceSettingsView.testError("stop dictation (ctrl+r) before running the test")
+		}
+		return a, nil
+	}
 	a = a.ensureVoiceCfg()
 	if !a.voiceReadyFn()(a.voiceCfg) {
 		if a.voiceSettingsView != nil {

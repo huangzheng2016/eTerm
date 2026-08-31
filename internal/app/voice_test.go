@@ -1118,3 +1118,95 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// Clicking outside the panel cancels an active test recording (same as esc):
+// the engine stops and the flushed final neither delivers nor verifies.
+func TestVoiceSettingsOutsideClickStopsTest(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.width = 80
+	a.height = 24
+	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
+	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
+
+	upd, _ := a.Update(openVoiceSettingsMsg{})
+	a = upd.(App)
+	upd, cmd := a.Update(voiceTestRequestMsg{})
+	a = upd.(App)
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStartedMsg)
+		return ok
+	}) {
+		upd, _ = a.Update(m)
+		a = upd.(App)
+	}
+	if !a.voiceTest {
+		t.Fatal("test not running")
+	}
+
+	upd, cmd = a.Update(tea.MouseClickMsg(tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft}))
+	a = upd.(App)
+	if a.voiceSettingsView != nil {
+		t.Fatal("outside click did not dismiss the panel")
+	}
+	if a.voiceTest {
+		t.Fatal("test still active after outside click")
+	}
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStoppedMsg)
+		return ok
+	}) {
+		upd, _ = a.Update(m)
+		a = upd.(App)
+	}
+	if !fe.stopped {
+		t.Fatal("engine not stopped after outside click")
+	}
+
+	// the flushed final is swallowed: no delivery, no verified mark
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	upd, _ = a.Update(voiceFinalMsg("abandoned test speech"))
+	a = upd.(App)
+	if sink.String() != "" {
+		t.Fatalf("flushed final delivered: %q", sink.String())
+	}
+	if a.voiceCfg.Verified {
+		t.Fatal("abandoned test marked the setup verified")
+	}
+}
+
+// Starting a panel test while dictation is active is refused; the dictation
+// event stream is not hijacked.
+func TestVoiceTestRejectedWhileDictating(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.voiceEngine = fe
+	a.voiceRec = true
+
+	upd, _ := a.Update(openVoiceSettingsMsg{})
+	a = upd.(App)
+	upd, cmd := a.Update(voiceTestRequestMsg{})
+	a = upd.(App)
+	if a.voiceTest {
+		t.Fatal("test started during dictation")
+	}
+	if cmd != nil {
+		t.Fatal("unexpected command")
+	}
+	if !strings.Contains(a.voiceSettingsView.View(), "stop dictation") {
+		t.Fatalf("no refusal shown:\n%s", a.voiceSettingsView.View())
+	}
+
+	// dictation partials still go to the recording indicator, not the panel
+	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "dictating"}})
+	a = upd.(App)
+	if a.voicePartial != "dictating" {
+		t.Fatalf("dictation partial hijacked: %q", a.voicePartial)
+	}
+	if a.voiceSettingsView.testText != "" {
+		t.Fatal("partial leaked into the panel")
+	}
+}
