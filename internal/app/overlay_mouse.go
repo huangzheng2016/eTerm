@@ -232,3 +232,22 @@ func adjustMouse(msg tea.MouseClickMsg, lx, ly int) tea.MouseClickMsg {
 	m.Y = ly
 	return tea.MouseClickMsg(m)
 }
+
+// aiOverlayMouse shifts a mouse message into the AI overlay's local
+// coordinate frame (the fullscreen border box, see overlayBounds).
+func (a App) aiOverlayMouse(msg tea.Msg) tea.Msg {
+	ox, oy, _, _ := a.overlayBounds(a.aiView.View().Content)
+	switch m := msg.(type) {
+	case tea.MouseMotionMsg:
+		mm := m.Mouse()
+		mm.X -= ox
+		mm.Y -= oy
+		return tea.MouseMotionMsg(mm)
+	case tea.MouseReleaseMsg:
+		mm := m.Mouse()
+		mm.X -= ox
+		mm.Y -= oy
+		return tea.MouseReleaseMsg(mm)
+	}
+	return msg
+}

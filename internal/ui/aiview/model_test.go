@@ -159,6 +159,40 @@ func TestErrorState(t *testing.T) {
 	}
 }
 
+type ctxRunner struct {
+	*FakeRunner
+	used, max int
+}
+
+func (r ctxRunner) ContextUsage() (int, int) { return r.used, r.max }
+
+func TestContextUsageInTitle(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	m := New(ctxRunner{fake, 512, 1024}, fake)
+	m.SetSize(100, 32)
+	if out := plain(m.View().Content); !strings.Contains(out, "ctx 50%") {
+		t.Fatalf("title missing context usage:\n%s", out)
+	}
+
+	m = New(ctxRunner{fake, 0, 0}, fake)
+	m.SetSize(100, 32)
+	if strings.Contains(plain(m.View().Content), "ctx ") {
+		t.Fatal("ctx shown without usage data")
+	}
+
+	// ctx plus a long model name still fits the frame at 80x24.
+	long := strings.Repeat("very-long-provider-name-", 4)
+	fake.Add(Provider{Name: long, Type: "openai"})
+	fake.Switch(long, "x")
+	m = New(ctxRunner{fake, 512, 1024}, fake)
+	m.SetSize(80, 24)
+	fillConversation(m)
+	if n := strings.Count(m.View().Content, "\n") + 1; n != 24 {
+		t.Fatalf("ctx + long model name: view height = %d, want 24", n)
+	}
+}
+
 func TestEscEmitsClose(t *testing.T) {
 	m := newTestModel(nil)
 	_, cmd := m.Update(keyMsg(tea.KeyEscape, 0))

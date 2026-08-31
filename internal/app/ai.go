@@ -157,6 +157,11 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 	if err != nil {
 		return nil, err
 	}
+	// Close is added to ai.Agent by the capabilities branch; it cancels
+	// background tasks so a replaced agent does not leak them.
+	if old, ok := b.agent.(interface{ Close() }); ok {
+		old.Close()
+	}
 	b.agent = agent
 	b.agentKey = key
 	return agent, nil
@@ -183,6 +188,19 @@ func (b *aiBridge) CancelRun() {
 		b.cancel()
 		b.cancel = nil
 	}
+}
+
+// ContextUsage reports the active agent's context token usage (aiview title
+// bar). Zero values when no agent exists yet; Usage is added to ai.Agent by
+// the capabilities branch, hence the assertion instead of the aiAgent seam.
+func (b *aiBridge) ContextUsage() (used, max int) {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if u, ok := agent.(interface{ Usage() (int, int) }); ok {
+		return u.Usage()
+	}
+	return 0, 0
 }
 
 func aiEventToView(ev ai.Event) (aiview.AgentEvent, bool) {
@@ -259,6 +277,8 @@ func (b *aiBridge) Switch(provider, model string) {
 	if err := b.store.SetActive(provider, model); err != nil {
 		return
 	}
+	// A switch mid-run strands the old agent's turn on the old provider.
+	b.CancelRun()
 	b.persistActive()
 }
 

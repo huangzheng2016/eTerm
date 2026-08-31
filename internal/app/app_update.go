@@ -535,7 +535,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			if a.aiVisible && a.aiView != nil {
-				return a.handleOverlayMouse(msg, a.aiView.View().Content, nil)
+				return a.handleOverlayMouse(msg, a.aiView.View().Content, func(lx, ly int) (tea.Model, tea.Cmd) {
+					return a, a.updateAIView(adjustMouse(msg, lx, ly))
+				})
 			}
 			if a.renamePrompt != nil {
 				return a.handleOverlayMouse(msg, a.renamePrompt.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
@@ -605,6 +607,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return a, nil
 			}
+		}
+
+	case tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		// Drag-select in the AI conversation area; hidden overlay keeps the
+		// tab-level forwarding below.
+		if a.aiVisible && a.aiView != nil {
+			return a, a.updateAIView(a.aiOverlayMouse(msg))
 		}
 
 	case tea.MouseWheelMsg:
