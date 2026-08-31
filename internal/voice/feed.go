@@ -7,6 +7,34 @@ import (
 	"time"
 )
 
+func init() {
+	RegisterEngine(EngineDescriptor{
+		ID:    "volcano",
+		Label: "Volcano Engine",
+		Params: []ParamSpec{
+			{Key: "api_key", Label: "Volcano API key", Secret: true, Required: true},
+			{Key: "app_key", Label: "Volcano App key", Secret: true, Required: true},
+			{Key: "access_key", Label: "Volcano Access key", Secret: true, Required: true},
+		},
+		Ready: func(params map[string]string) bool {
+			return params["api_key"] != "" && params["app_key"] != "" && params["access_key"] != ""
+		},
+		New: func(params map[string]string, feed FeedDeps) (Engine, error) {
+			return NewVolcanoFeedEngine(VolcanoFeedConfig{
+				Volcano: VolcanoConfig{
+					APIKey:    params["api_key"],
+					AppKey:    params["app_key"],
+					AccessKey: params["access_key"],
+				},
+				Helper: LocalConfig{
+					VAD:                feed.VAD,
+					OnDownloadProgress: feed.OnDownloadProgress,
+				},
+			}), nil
+		},
+	})
+}
+
 // VolcanoFeedConfig configures the volcano feed engine: a passthrough helper
 // (capture+VAD) streaming PCM into Volcano cloud ASR sessions.
 type VolcanoFeedConfig struct {

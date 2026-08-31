@@ -18,47 +18,71 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/voice"
 )
 
+// voice row kinds; the visible row list is built per state (rows()).
 const (
-	voiceRowEngine = iota
-	voiceRowHelper
-	voiceRowModel0
-	voiceRowModel1
-	voiceRowModel2
-	voiceRowTest
-	voiceRowThreshold
-	voiceRowSilence
-	voiceRowSentenceEnd
-	voiceRowAPIKey
-	voiceRowAppKey
-	voiceRowAccessKey
-	voiceRowCount
+	vrowEngine = iota
+	vrowHelper
+	vrowModels
+	vrowTest
+	vrowThreshold
+	vrowSilence
+	vrowSentenceEnd
+	vrowParam
+	vrowBack
+	vrowModel
+	vrowCustomPath
+)
+
+// panel views: the main settings list and the model catalog submenu.
+const (
+	voiceViewMain = iota
+	voiceViewModels
 )
 
 // voiceHelperTarget is the download target id for the helper binary; model
 // downloads use the catalog model ID.
 const voiceHelperTarget = "helper"
 
+// voiceRow is one rendered settings row; param/modelIdx qualify the kind.
+type voiceRow struct {
+	kind     int
+	param    voice.ParamSpec // vrowParam
+	modelIdx int             // vrowModel
+}
+
 // voiceSettingsModel is the voice input settings overlay (opened from the
 // command palette, the esc menu, or by ctrl+r while the setup is
-// incomplete). It guides the local setup: helper download, model
-// download/selection, and a test recording.
+// incomplete). Rows render per the selected engine's descriptor; the local
+// engine additionally shows the helper row and the Model submenu.
 type voiceSettingsModel struct {
 	db     *gorm.DB
 	mk     *security.MasterKeyManager
 	cfg    voiceSettings
 	cursor int
-	edit   int // editing key row, -1 when not editing
+	view   int // voiceView*
+	edit   int // editing row index, -1 when not editing
 	input  textinput.Model
 
 	modelsRoot        string
-	helperInstalledFn func() bool // test hook; nil = voice.HelperInstalled
+	helperInstalledFn func() bool   // test hook; nil = voice.HelperInstalled
+	helperVersionFn   func() string // test hook; nil = voice.HelperVersion
 	helperOK          bool
+	helperVersion     string // raw -version output; ""/"dev"/"0.1.0" = unknown
 	modelOK           []bool
+
+	checkingUpdate bool
+	updateChecked  bool
+	updateTag      string // latest release tag after a successful check
+	updateErr      string
 
 	dlTarget    string // "" when no download is running
 	dlPct       float64
 	dlErr       string
 	dlErrTarget string
+
+	customErr string // invalid custom model path, shown on the row
+
+	fromHotkey bool // opened by ctrl+r with an incomplete setup: show the reason
 
 	testing  bool
 	testText string // partial while recording, final when done
@@ -79,6 +103,19 @@ func (m *voiceSettingsModel) refreshInstallState() {
 		installed = helperInstalledFn
 	}
 	m.helperOK = installed()
+	m.helperVersion = ""
+	if m.helperOK {
+		vfn := m.helperVersionFn
+		if vfn == nil {
+			vfn = voice.HelperVersion
+		}
+		m.helperVersion = vfn()
+	}
+	// a fresh install state invalidates any previous update check
+	m.checkingUpdate = false
+	m.updateChecked = false
+	m.updateTag = ""
+	m.updateErr = ""
 	catalog := voice.ModelCatalog()
 	m.modelOK = make([]bool, len(catalog))
 	for i, spec := range catalog {
@@ -86,17 +123,35 @@ func (m *voiceSettingsModel) refreshInstallState() {
 	}
 }
 
-func (m *voiceSettingsModel) keyValue(row int) string {
-	switch row {
-	case voiceRowAPIKey:
-		return m.cfg.VolcanoAPIKey
-	case voiceRowAppKey:
-		return m.cfg.VolcanoAppKey
-	case voiceRowAccessKey:
-		return m.cfg.VolcanoAccessKey
+// rows builds the visible row list for the current view and engine.
+func (m *voiceSettingsModel) rows() []voiceRow {
+	if m.view == voiceViewModels {
+		rows := []voiceRow{{kind: vrowBack}}
+		for i := range voice.ModelCatalog() {
+			rows = append(rows, voiceRow{kind: vrowModel, modelIdx: i})
+		}
+		return append(rows, voiceRow{kind: vrowCustomPath})
 	}
-	return ""
+	rows := []voiceRow{{kind: vrowEngine}}
+	if m.cfg.Engine == voiceEngineLocal {
+		rows = append(rows, voiceRow{kind: vrowHelper}, voiceRow{kind: vrowModels})
+	}
+	rows = append(rows,
+		voiceRow{kind: vrowTest},
+		voiceRow{kind: vrowThreshold},
+		voiceRow{kind: vrowSilence},
+		voiceRow{kind: vrowSentenceEnd},
+	)
+	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
+		for _, p := range d.Params {
+			rows = append(rows, voiceRow{kind: vrowParam, param: p})
+		}
+	}
+	return rows
 }
+
+// rowCount is the visible row count (mouse hit-testing).
+func (m *voiceSettingsModel) rowCount() int { return len(m.rows()) }
 
 func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 	database := m.db
@@ -114,16 +169,28 @@ func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 // persist command when the row changed. Engine changes rebuild the engine,
 // VAD changes apply live via SetVAD.
 func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
-	switch m.cursor {
-	case voiceRowEngine:
-		if m.cfg.Engine == voiceEngineLocal {
-			m.cfg.Engine = voiceEngineVolcano
-		} else {
-			m.cfg.Engine = voiceEngineLocal
+	rows := m.rows()
+	if m.cursor < 0 || m.cursor >= len(rows) {
+		return nil
+	}
+	switch rows[m.cursor].kind {
+	case vrowEngine:
+		descs := voice.EngineDescriptors()
+		if len(descs) == 0 {
+			return nil
 		}
+		idx := -1
+		for i, d := range descs {
+			if d.ID == m.cfg.Engine {
+				idx = i
+				break
+			}
+		}
+		idx = (idx + dir + len(descs)) % len(descs)
+		m.cfg.Engine = descs[idx].ID
 		m.cfg.Verified = false
 		return m.persist(false)
-	case voiceRowThreshold:
+	case vrowThreshold:
 		m.cfg.VADThreshold = math.Round((m.cfg.VADThreshold+float64(dir)*0.05)*100) / 100
 		if m.cfg.VADThreshold < 0 {
 			m.cfg.VADThreshold = 0
@@ -132,7 +199,7 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 			m.cfg.VADThreshold = 1
 		}
 		return m.persist(true)
-	case voiceRowSilence:
+	case vrowSilence:
 		m.cfg.VADSilenceMs += dir * 50
 		if m.cfg.VADSilenceMs < 50 {
 			m.cfg.VADSilenceMs = 50
@@ -141,7 +208,7 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 			m.cfg.VADSilenceMs = 5000
 		}
 		return m.persist(true)
-	case voiceRowSentenceEnd:
+	case vrowSentenceEnd:
 		if m.cfg.SentenceEnd == voice.SentenceEndEnter {
 			m.cfg.SentenceEnd = voice.SentenceEndSpace
 		} else {
@@ -158,22 +225,51 @@ func (m *voiceSettingsModel) startDownload(target string) tea.Cmd {
 	if m.dlTarget != "" {
 		return nil
 	}
-	if target == voiceHelperTarget && m.helperOK {
-		return nil
-	}
 	m.dlErr = ""
 	m.dlErrTarget = ""
 	return func() tea.Msg { return voiceDownloadRequestMsg{target: target} }
 }
 
-// modelAction selects an installed model (persisted) or starts its download.
+// helperAction downloads the helper when missing (or an update is
+// available); otherwise it asks the app to check the latest release tag.
+func (m *voiceSettingsModel) helperAction() tea.Cmd {
+	if !m.helperOK || m.updateAvailable() {
+		return m.startDownload(voiceHelperTarget)
+	}
+	if m.checkingUpdate {
+		return nil
+	}
+	m.checkingUpdate = true
+	m.updateErr = ""
+	return func() tea.Msg { return voiceHelperUpdateCheckRequestMsg{} }
+}
+
+func (m *voiceSettingsModel) updateAvailable() bool {
+	return m.helperOK && m.updateTag != "" && m.updateTag != m.helperVersion
+}
+
+// updateCheckDone applies the latest-tag check result.
+func (m *voiceSettingsModel) updateCheckDone(tag string, err error) {
+	m.checkingUpdate = false
+	m.updateChecked = true
+	if err != nil {
+		m.updateErr = err.Error()
+		return
+	}
+	m.updateTag = tag
+}
+
+// modelAction selects an installed model (persisted, clearing any custom
+// path) or starts its download.
 func (m *voiceSettingsModel) modelAction(i int) tea.Cmd {
 	spec := voice.ModelCatalog()[i]
 	if m.modelOK[i] {
-		if m.cfg.ModelID == spec.ID {
+		if m.cfg.ModelID == spec.ID && m.cfg.CustomModelDir == "" {
 			return nil
 		}
 		m.cfg.ModelID = spec.ID
+		m.cfg.CustomModelDir = ""
+		m.customErr = ""
 		m.cfg.Verified = false
 		m.testText = ""
 		m.testErr = ""
@@ -182,7 +278,64 @@ func (m *voiceSettingsModel) modelAction(i int) tea.Cmd {
 	return m.startDownload(spec.ID)
 }
 
+func (m *voiceSettingsModel) enterModels() {
+	m.view = voiceViewModels
+	m.cursor = 0
+	m.customErr = ""
+}
+
+func (m *voiceSettingsModel) leaveModels() {
+	m.view = voiceViewMain
+	m.cursor = 0
+	for i, r := range m.rows() {
+		if r.kind == vrowModels {
+			m.cursor = i
+		}
+	}
+}
+
+// commitEdit applies the edited value: engine params persist encrypted and
+// rebuild the engine; the custom model path is validated before persisting
+// (empty clears it) and applies live via set_model.
+func (m *voiceSettingsModel) commitEdit(rows []voiceRow) tea.Cmd {
+	if m.edit < 0 || m.edit >= len(rows) {
+		m.edit = -1
+		return nil
+	}
+	r := rows[m.edit]
+	v := strings.TrimSpace(m.input.Value())
+	m.edit = -1
+	m.input.Blur()
+	switch r.kind {
+	case vrowParam:
+		m.cfg.setEngineParam(m.cfg.Engine, r.param.Key, v)
+		return m.persist(false)
+	case vrowCustomPath:
+		if v == "" {
+			m.cfg.CustomModelDir = ""
+			m.customErr = ""
+			m.cfg.Verified = false
+			return m.persist(true)
+		}
+		if !voice.ValidCustomModelDir(v) {
+			m.customErr = "needs tokens.txt and model.onnx or model.int8.onnx"
+			return nil
+		}
+		m.cfg.CustomModelDir = v
+		m.customErr = ""
+		m.cfg.Verified = false
+		m.testText = ""
+		m.testErr = ""
+		return m.persist(true)
+	}
+	return nil
+}
+
 func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
+	rows := m.rows()
+	if m.cursor >= len(rows) {
+		m.cursor = len(rows) - 1
+	}
 	if m.edit >= 0 {
 		switch msg.String() {
 		case "esc", "escape":
@@ -190,53 +343,66 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 			m.input.Blur()
 			return false, nil
 		case "enter":
-			v := strings.TrimSpace(m.input.Value())
-			switch m.edit {
-			case voiceRowAPIKey:
-				m.cfg.VolcanoAPIKey = v
-			case voiceRowAppKey:
-				m.cfg.VolcanoAppKey = v
-			case voiceRowAccessKey:
-				m.cfg.VolcanoAccessKey = v
-			}
-			m.edit = -1
-			m.input.Blur()
-			return false, m.persist(false)
+			return false, m.commitEdit(rows)
 		}
 		m.input, cmd = m.input.Update(msg)
 		return false, cmd
 	}
 	switch msg.String() {
 	case "esc", "escape":
+		if m.view == voiceViewModels {
+			m.leaveModels()
+			return false, nil
+		}
 		return true, nil
+	case "left", "h":
+		if m.view == voiceViewModels {
+			m.leaveModels()
+			return false, nil
+		}
+		return false, m.adjust(-1)
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
 		}
 	case "down", "j":
-		if m.cursor < voiceRowCount-1 {
+		if m.cursor < len(rows)-1 {
 			m.cursor++
 		}
-	case "left", "h":
-		return false, m.adjust(-1)
 	case "right", "l", " ":
+		if m.view == voiceViewMain && rows[m.cursor].kind == vrowModels {
+			m.enterModels()
+			return false, nil
+		}
 		return false, m.adjust(1)
 	case "enter":
-		switch {
-		case m.cursor == voiceRowHelper:
-			return false, m.startDownload(voiceHelperTarget)
-		case m.cursor >= voiceRowModel0 && m.cursor <= voiceRowModel2:
-			return false, m.modelAction(m.cursor - voiceRowModel0)
-		case m.cursor == voiceRowTest:
+		switch rows[m.cursor].kind {
+		case vrowHelper:
+			return false, m.helperAction()
+		case vrowModels:
+			m.enterModels()
+			return false, nil
+		case vrowTest:
 			if m.testing {
 				return false, func() tea.Msg { return voiceTestRequestMsg{stop: true} }
 			}
 			m.testText = ""
 			m.testErr = ""
 			return false, func() tea.Msg { return voiceTestRequestMsg{} }
-		case m.cursor >= voiceRowAPIKey:
+		case vrowBack:
+			m.leaveModels()
+			return false, nil
+		case vrowModel:
+			return false, m.modelAction(rows[m.cursor].modelIdx)
+		case vrowParam:
 			m.edit = m.cursor
-			m.input.SetValue(m.keyValue(m.cursor))
+			m.input.SetValue(m.cfg.engineParams(m.cfg.Engine)[rows[m.cursor].param.Key])
+			m.input.SetWidth(40)
+			return false, m.input.Focus()
+		case vrowCustomPath:
+			m.edit = m.cursor
+			m.customErr = ""
+			m.input.SetValue(m.cfg.CustomModelDir)
 			m.input.SetWidth(40)
 			return false, m.input.Focus()
 		}
@@ -311,16 +477,32 @@ func maskVoiceKey(v string) string {
 	return "(set)"
 }
 
+func (m *voiceSettingsModel) helperVersionDisplay() string {
+	switch m.helperVersion {
+	case "", "dev", "0.1.0":
+		return "unknown version"
+	}
+	return m.helperVersion
+}
+
 func (m *voiceSettingsModel) helperValue() string {
 	switch {
 	case m.dlTarget == voiceHelperTarget:
 		return fmt.Sprintf("downloading %.0f%%", m.dlPct)
 	case m.dlErrTarget == voiceHelperTarget && m.dlErr != "":
 		return "failed: " + m.dlErr
-	case m.helperOK:
-		return "installed"
+	case !m.helperOK:
+		return "not installed - enter to download"
+	case m.checkingUpdate:
+		return "installed (" + m.helperVersionDisplay() + ") - checking for updates"
+	case m.updateErr != "":
+		return "installed (" + m.helperVersionDisplay() + ") - update check failed: " + m.updateErr
+	case m.updateAvailable():
+		return "update available (" + m.helperVersionDisplay() + " -> " + m.updateTag + ") - enter to update"
+	case m.updateChecked:
+		return "installed (" + m.helperVersionDisplay() + ") - up to date"
 	}
-	return "missing - enter to download"
+	return "installed (" + m.helperVersionDisplay() + ") - enter to check for updates"
 }
 
 func (m *voiceSettingsModel) modelValue(i int) string {
@@ -334,10 +516,23 @@ func (m *voiceSettingsModel) modelValue(i int) string {
 	case m.modelOK[i]:
 		value = "installed"
 	}
-	if m.cfg.ModelID == spec.ID {
+	if m.cfg.ModelID == spec.ID && m.cfg.CustomModelDir == "" {
 		value = "[active] " + value
 	}
 	return value
+}
+
+func (m *voiceSettingsModel) customValue() string {
+	if m.customErr != "" {
+		return "invalid: " + m.customErr
+	}
+	if m.cfg.CustomModelDir == "" {
+		return "(not set) - enter to edit"
+	}
+	if !voice.ValidCustomModelDir(m.cfg.CustomModelDir) {
+		return m.cfg.CustomModelDir + " (missing files)"
+	}
+	return "[active] " + m.cfg.CustomModelDir
 }
 
 func (m *voiceSettingsModel) testValue() string {
@@ -365,51 +560,96 @@ func (m *voiceSettingsModel) testValue() string {
 
 // statusLine summarizes the readiness gate (what ctrl+r does next).
 func (m *voiceSettingsModel) statusLine() string {
-	if m.cfg.Engine == voiceEngineVolcano {
-		if m.cfg.VolcanoAPIKey != "" && m.cfg.VolcanoAppKey != "" && m.cfg.VolcanoAccessKey != "" {
-			return "ready - ctrl+r starts recording"
-		}
-		return "setup incomplete - enter the Volcano API keys"
-	}
-	activeInstalled := false
-	for i, spec := range voice.ModelCatalog() {
-		if spec.ID == m.cfg.ModelID && m.modelOK[i] {
-			activeInstalled = true
-		}
-	}
-	switch {
-	case !m.helperOK:
-		return "setup incomplete - download the helper binary, then a model"
-	case !activeInstalled:
-		return "setup incomplete - download the active model"
+	if issue := voiceSetupIssue(m.cfg, m.modelsRoot); issue != "" {
+		return "setup incomplete - " + issue
 	}
 	return "ready - ctrl+r starts recording"
 }
 
+// noticeText is the top-of-panel hint shown when ctrl+r routed here because
+// the setup is incomplete; it names the missing piece and clears itself once
+// the setup becomes ready while the panel is open.
+func (m *voiceSettingsModel) noticeText() string {
+	if !m.fromHotkey {
+		return ""
+	}
+	if issue := voiceSetupIssue(m.cfg, m.modelsRoot); issue != "" {
+		return "voice input is not set up yet: " + issue + " below"
+	}
+	return ""
+}
+
+func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value string) {
+	switch r.kind {
+	case vrowEngine:
+		label = "Engine"
+		if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
+			value = d.Label
+		} else {
+			value = m.cfg.Engine + " (unknown)"
+		}
+	case vrowHelper:
+		label, value = "Voice Helper", m.helperValue()
+	case vrowModels:
+		label = "Model >"
+		switch {
+		case m.dlTarget != "" && m.dlTarget != voiceHelperTarget:
+			value = fmt.Sprintf("downloading %.0f%%", m.dlPct)
+		case m.dlErrTarget != "" && m.dlErrTarget != voiceHelperTarget && m.dlErr != "":
+			value = "failed: " + m.dlErr
+		case m.cfg.CustomModelDir != "":
+			value = "custom path"
+		default:
+			value = voice.ModelByID(m.cfg.ModelID).Name
+		}
+	case vrowTest:
+		label, value = "Microphone test", m.testValue()
+	case vrowThreshold:
+		label, value = "speech sensitivity (0-1)", threshold
+	case vrowSilence:
+		label, value = "end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)
+	case vrowSentenceEnd:
+		label, value = "Sentence end", string(m.cfg.SentenceEnd)
+	case vrowParam:
+		label = r.param.Label
+		v := m.cfg.engineParams(m.cfg.Engine)[r.param.Key]
+		if r.param.Secret {
+			value = maskVoiceKey(v)
+		} else if v == "" {
+			value = "(not set)"
+		} else {
+			value = v
+		}
+	case vrowBack:
+		label, value = "Back", "<"
+	case vrowModel:
+		label, value = voice.ModelCatalog()[r.modelIdx].Name, m.modelValue(r.modelIdx)
+	case vrowCustomPath:
+		label, value = "Custom model path", m.customValue()
+	}
+	return
+}
+
 func (m *voiceSettingsModel) View() string {
+	rows := m.rows()
+	if m.cursor >= len(rows) {
+		m.cursor = len(rows) - 1
+	}
 	threshold := fmt.Sprintf("%.2f", m.cfg.VADThreshold)
 	if m.cfg.VADThreshold == 0 {
 		threshold = "default"
 	}
-	rows := []struct {
-		label string
-		value string
-	}{
-		{"Engine", m.cfg.Engine},
-		{"Helper binary", m.helperValue()},
-		{voice.ModelCatalog()[0].Name, m.modelValue(0)},
-		{voice.ModelCatalog()[1].Name, m.modelValue(1)},
-		{voice.ModelCatalog()[2].Name, m.modelValue(2)},
-		{"Microphone test", m.testValue()},
-		{"speech sensitivity (0-1)", threshold},
-		{"end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)},
-		{"Sentence end", string(m.cfg.SentenceEnd)},
-		{"Volcano API key", maskVoiceKey(m.cfg.VolcanoAPIKey)},
-		{"Volcano App key", maskVoiceKey(m.cfg.VolcanoAppKey)},
-		{"Volcano Access key", maskVoiceKey(m.cfg.VolcanoAccessKey)},
+	title := "Voice Input"
+	hint := "up/down move · left/right change · enter select/edit · esc close"
+	if m.view == voiceViewModels {
+		title = "Voice Input - Model"
+		hint = "up/down move · enter select/download · esc back"
 	}
 	var lines []string
-	lines = append(lines, ui.TitleStyle.Render("Voice Input"), "")
+	lines = append(lines, ui.TitleStyle.Render(title), "")
+	if notice := m.noticeText(); notice != "" {
+		lines = append(lines, ui.DimStyle.Render(notice), "")
+	}
 	for i, r := range rows {
 		cursor := "  "
 		style := ui.DimStyle
@@ -417,16 +657,17 @@ func (m *voiceSettingsModel) View() string {
 			cursor = "▸ "
 			style = ui.SelectedStyle
 		}
-		value := r.value
+		label, value := m.rowText(r, threshold)
 		if m.edit == i {
 			value = m.input.View()
 		}
-		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-28s", r.label)), ui.DimStyle.Render(value)))
+		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-28s", label)), ui.DimStyle.Render(value)))
 	}
-	lines = append(lines,
-		"",
-		ui.DimStyle.Render(m.statusLine()),
-		ui.DimStyle.Render("up/down move · left/right change · enter select/edit · esc close"))
+	lines = append(lines, "")
+	if m.view == voiceViewMain {
+		lines = append(lines, ui.DimStyle.Render(m.statusLine()))
+	}
+	lines = append(lines, ui.DimStyle.Render(hint))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).

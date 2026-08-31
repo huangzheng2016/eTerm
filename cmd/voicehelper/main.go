@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var version = "0.1.0"
+var version = "dev" // release builds inject the tag via -ldflags -X
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")

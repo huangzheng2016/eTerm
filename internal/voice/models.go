@@ -83,6 +83,22 @@ func (m ModelSpec) Installed(root string) bool {
 	return err == nil
 }
 
+// ValidCustomModelDir reports whether dir holds a usable SenseVoice model:
+// tokens.txt plus model.onnx or model.int8.onnx.
+func ValidCustomModelDir(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tokens.txt")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "model.onnx")); err == nil {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(dir, "model.int8.onnx"))
+	return err == nil
+}
+
 // DownloadModel downloads and extracts the model archive into root via a
 // staging dir and an atomic rename. urlOverride replaces the catalog URL
 // when non-empty.

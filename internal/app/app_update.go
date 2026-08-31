@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -1178,6 +1179,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a.endVoiceTest()
 
+	case voiceHelperUpdateCheckRequestMsg:
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			tag, err := latestHelperVersionFn(ctx)
+			return voiceHelperUpdateCheckMsg{tag: tag, err: err}
+		}
+
+	case voiceHelperUpdateCheckMsg:
+		if a.voiceSettingsView != nil {
+			a.voiceSettingsView.updateCheckDone(msg.tag, msg.err)
+		}
+		return a, nil
+
 	case openVoiceSettingsMsg:
 		a = a.ensureVoiceCfg()
 		a.voiceSettingsView = newVoiceSettingsModel(a.db, a.masterKey, a.voiceCfg)
@@ -1191,8 +1206,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.keepEngine {
 			_ = a.voiceEngine.SetVAD(msg.cfg.vadParams())
 			if msg.cfg.Engine == voiceEngineLocal {
-				spec := voice.ModelByID(msg.cfg.ModelID)
-				_ = a.voiceEngine.SetModel(spec.ModelDir(voice.ModelsRoot()), spec.Kind)
+				dir, kind := localModelTarget(msg.cfg, voice.ModelsRoot())
+				_ = a.voiceEngine.SetModel(dir, kind)
 			}
 			return a, nil
 		}

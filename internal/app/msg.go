@@ -75,6 +75,17 @@ type voiceDownloadMsg struct {
 type voiceTestRequestMsg struct{ stop bool }
 type voiceTestTimeoutMsg struct{ seq int }
 
+// voiceHelperUpdateCheckRequestMsg asks the app to query the latest helper
+// release tag (network call, runs as a command).
+type voiceHelperUpdateCheckRequestMsg struct{}
+
+// voiceHelperUpdateCheckMsg carries the latest-tag check result back to the
+// settings panel.
+type voiceHelperUpdateCheckMsg struct {
+	tag string
+	err error
+}
+
 // voiceSettingsChangedMsg carries a saved voice config; keepEngine avoids an
 // engine rebuild when only delivery-time or VAD settings changed.
 type voiceSettingsChangedMsg struct {
