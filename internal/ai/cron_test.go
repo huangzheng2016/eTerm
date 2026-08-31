@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -179,18 +180,21 @@ func TestCronCreateValidation(t *testing.T) {
 
 func TestCronPersistenceRoundTrip(t *testing.T) {
 	store := newCronTestStore()
+	now := time.Now()
 	var fires []string
-	s1 := cronTestScheduler(store, time.Now(), &fires)
+	s1 := cronTestScheduler(store, now, &fires)
 	s1.session = "sess"
 	if _, err := s1.Create("one", 5, 0); err != nil {
 		t.Fatal(err)
 	}
+	// Distinct timestamps keep the List order deterministic (CreatedAt sort).
+	s1.now = func() time.Time { return now.Add(time.Minute) }
 	if _, err := s1.Create("two", 0, 10); err != nil {
 		t.Fatal(err)
 	}
 
 	// A fresh scheduler on the same store sees the jobs after SetSession.
-	s2 := cronTestScheduler(store, time.Now(), &fires)
+	s2 := cronTestScheduler(store, now, &fires)
 	if n := len(s2.List()); n != 0 {
 		t.Fatalf("jobs leaked across sessions: %d", n)
 	}
@@ -204,6 +208,27 @@ func TestCronPersistenceRoundTrip(t *testing.T) {
 	s2.SetSession("other")
 	if n := len(s2.List()); n != 0 {
 		t.Fatalf("wrong session jobs loaded: %d", n)
+	}
+}
+
+// Jobs sharing a CreatedAt sort deterministically by id.
+func TestCronListSameTimestampTieBreak(t *testing.T) {
+	var fires []string
+	s := cronTestScheduler(nil, time.Now(), &fires)
+	s.session = "sess"
+	first, err := s.Create("a", 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Create("b", 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := s.List()
+	want := []string{first.ID, second.ID}
+	slices.Sort(want)
+	if len(jobs) != 2 || jobs[0].ID != want[0] || jobs[1].ID != want[1] {
+		t.Fatalf("same-timestamp order not id-sorted: %+v", jobs)
 	}
 }
 

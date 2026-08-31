@@ -146,7 +146,14 @@ func (s *CronScheduler) List() []CronJob {
 	for _, job := range s.jobs {
 		out = append(out, *job)
 	}
-	slices.SortFunc(out, func(a, b CronJob) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	slices.SortFunc(out, func(a, b CronJob) int {
+		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+			return c
+		}
+		// Same-timestamp jobs (fake clocks, fast successive creates) need a
+		// stable tie-break: map iteration order is random.
+		return strings.Compare(a.ID, b.ID)
+	})
 	return out
 }
 
