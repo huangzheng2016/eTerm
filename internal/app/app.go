@@ -52,6 +52,9 @@ type Tab struct {
 	Model         tea.Model
 	TmuxSession   string
 	tmuxRestoreID uint64
+	// userRenamed is set by the rename-tab flow; OSC 0/2 titles only apply
+	// while the user has not renamed the tab.
+	userRenamed bool
 }
 
 type App struct {

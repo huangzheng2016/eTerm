@@ -21,6 +21,12 @@ import (
 
 const aiSendKeysTailBytes = 2048
 
+// Bounds for the send_keys completion wait (OSC 133;D). Vars so tests can shrink them.
+var (
+	aiSendKeysMaxWait      = 10 * time.Second
+	aiSendKeysPollInterval = 100 * time.Millisecond
+)
+
 // aiSharedState is read from the agent goroutine and written on the UI
 // goroutine; the mutex guards the daemon peer list.
 type aiSharedState struct {
@@ -93,7 +99,14 @@ func (req aiToolRequest) respond(r aiToolResult) {
 }
 
 type aiToolRequestMsg struct{ req aiToolRequest }
-type aiToolSendKeysDoneMsg struct{ req aiToolRequest }
+
+// aiToolSendKeysDoneMsg fires after the minimum wait and on each later poll:
+// before is the OSC 133;D count at send time, deadline bounds the total wait.
+type aiToolSendKeysDoneMsg struct {
+	req      aiToolRequest
+	before   int
+	deadline time.Time
+}
 type aiToolRenameDoneMsg struct {
 	req  aiToolRequest
 	peer types.RemotePeer
@@ -245,9 +258,15 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 			waitMs = 300
 		}
 		// Answer after the wait so the screen tail reflects the command
-		// output; the UI loop keeps processing chunks meanwhile.
+		// output; the UI loop keeps processing chunks meanwhile. The done
+		// handler keeps polling for command completion (OSC 133;D).
+		done := aiToolSendKeysDoneMsg{
+			req:      req,
+			before:   m.CommandCount(),
+			deadline: time.Now().Add(aiSendKeysMaxWait),
+		}
 		return a, tea.Tick(time.Duration(waitMs)*time.Millisecond, func(time.Time) tea.Msg {
-			return aiToolSendKeysDoneMsg{req: req}
+			return done
 		})
 	case aiToolEnterDaemon, aiToolCreateSession:
 		peer, ok := a.aiShared.peerByName(req.id)
@@ -325,14 +344,28 @@ func (a App) sshViewByAITabID(id string) *sshview.Model {
 	return nil
 }
 
-// handleAIToolSendKeysDone answers a send_keys request after its wait: the
-// screen tail reflects output produced during the wait.
-func (a App) handleAIToolSendKeysDone(req aiToolRequest) {
-	if m := a.sshViewByAITabID(req.id); m != nil {
-		req.respond(aiToolResult{text: transcriptTail(m.PlainTranscript(sshview.MaxTranscriptBytes), aiSendKeysTailBytes)})
-	} else {
+// handleAIToolSendKeysDone answers a send_keys request once the command
+// finished (the OSC 133;D count passed the snapshot taken at send time), the
+// max wait expired, or the request context was cancelled. The wait only
+// extends past the minimum while a command is actually in flight (133;C seen,
+// 133;D pending); a stale count from an earlier 133-capable shell or a shell
+// that never emits OSC 133 answers right after the minimum wait.
+func (a App) handleAIToolSendKeysDone(msg aiToolSendKeysDoneMsg) (App, tea.Cmd) {
+	req := msg.req
+	m := a.sshViewByAITabID(req.id)
+	if m == nil {
 		req.respond(aiToolResult{err: fmt.Errorf("tab %s is gone", req.id)})
+		return a, nil
 	}
+	if req.ctx != nil && req.ctx.Err() != nil {
+		req.respond(aiToolResult{err: req.ctx.Err()})
+		return a, nil
+	}
+	if m.CommandCount() <= msg.before && m.CommandRunning() && time.Now().Before(msg.deadline) {
+		return a, tea.Tick(aiSendKeysPollInterval, func(time.Time) tea.Msg { return msg })
+	}
+	req.respond(aiToolResult{text: transcriptTail(m.PlainTranscript(sshview.MaxTranscriptBytes), aiSendKeysTailBytes)})
+	return a, nil
 }
 
 // decodeSendKeys decodes escape sequences in an AI-provided keys string

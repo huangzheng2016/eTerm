@@ -162,6 +162,7 @@ func (a App) renameTab(msg tabRenameMsg) (App, tea.Cmd) {
 		return a, nil
 	}
 	a.tabs[msg.Index].Title = title
+	a.tabs[msg.Index].userRenamed = true
 	a.syncTabBar()
 	return a, nil
 }

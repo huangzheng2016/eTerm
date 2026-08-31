@@ -342,6 +342,7 @@ func (a *App) renameRemoteTmuxTabs(peerID, sessionID, name string) {
 		spec.Target = relay.TargetTmuxAttach
 		sm.SetRemoteReconnect(spec)
 		a.tabs[i].Title = remoteTmuxTabTitle(spec.Peer.Name, name)
+		a.tabs[i].userRenamed = true
 	}
 	a.syncTabBar()
 	a.persistTmuxRestoreSnapshot()
