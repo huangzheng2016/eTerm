@@ -8,10 +8,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -54,6 +56,51 @@ func HelperInstallPath() string {
 func HelperInstalled() bool {
 	_, err := os.Stat(HelperInstallPath())
 	return err == nil
+}
+
+// HelperVersion runs the installed helper with -version and extracts the
+// version token ("dev" for builds without an injected tag); "" when the
+// helper is missing or predates the -version flag.
+func HelperVersion() string {
+	out, err := exec.Command(HelperInstallPath(), "-version").Output()
+	if err != nil {
+		return ""
+	}
+	// "voicehelper v1.2.3 (protocol 2)"
+	f := strings.Fields(string(out))
+	if len(f) >= 2 && f[0] == "voicehelper" {
+		return f[1]
+	}
+	return ""
+}
+
+// LatestHelperVersion queries the tag of the latest GitHub release; the
+// helper ships as a release asset of that tag.
+func LatestHelperVersion(ctx context.Context) (string, error) {
+	const latestURL = "https://api.github.com/repos/huangzheng2016/eTerm/releases/latest"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s: %s", latestURL, resp.Status)
+	}
+	var rel struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return "", err
+	}
+	if rel.TagName == "" {
+		return "", fmt.Errorf("latest release has no tag")
+	}
+	return rel.TagName, nil
 }
 
 // DownloadHelper installs the helper binary from url (DefaultHelperURL when

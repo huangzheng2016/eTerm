@@ -21,7 +21,7 @@ jobs:
       - name: Build and stage
         run: |
           cd cmd/voicehelper
-          CGO_ENABLED=1 go build -o dist/voicehelper .
+          CGO_ENABLED=1 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o dist/voicehelper .
           SHERPA_LIB="$(go env GOMODCACHE)/github.com/k2-fsa/sherpa-onnx-go-macos@v1.13.3/lib/aarch64-apple-darwin"
           cp "$SHERPA_LIB"/libsherpa-onnx-c-api.dylib "$SHERPA_LIB"/libonnxruntime.1.24.4.dylib dist/
           cd dist
@@ -54,7 +54,7 @@ jobs:
       - name: Build and stage
         run: |
           cd cmd/voicehelper
-          CGO_ENABLED=1 go build -o dist/voicehelper .
+          CGO_ENABLED=1 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o dist/voicehelper .
           SHERPA_LIB="$(go env GOMODCACHE)/github.com/k2-fsa/sherpa-onnx-go-linux@v1.13.3/lib/x86_64-unknown-linux-gnu"
           cp "$SHERPA_LIB"/libsherpa-onnx-c-api.so "$SHERPA_LIB"/libonnxruntime.so dist/
           patchelf --set-rpath '$ORIGIN' dist/voicehelper

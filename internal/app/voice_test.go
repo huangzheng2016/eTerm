@@ -448,7 +448,7 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	if findVoiceRow(m, vrowParam) >= 0 {
 		t.Fatal("local shows engine param rows")
 	}
-	if view := m.View(); !strings.Contains(view, "Helper binary") || !strings.Contains(view, "Model >") {
+	if view := m.View(); !strings.Contains(view, "Voice Helper") || !strings.Contains(view, "Model >") {
 		t.Fatalf("local rows not rendered:\n%s", view)
 	}
 
@@ -1111,6 +1111,102 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 }
 
 var errTest = errors.New("boom")
+
+// The Voice Helper row shows install state plus the detected version, checks
+// the latest release tag on demand, and reinstalls when an update exists.
+func TestVoiceSettingsHelperUpdate(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.helperInstalledFn = func() bool { return true }
+	ver := "v3.0.0"
+	m.helperVersionFn = func() string { return ver }
+	m.refreshInstallState()
+
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	if view := m.View(); !strings.Contains(view, "installed (v3.0.0)") {
+		t.Fatalf("version not rendered:\n%s", view)
+	}
+
+	// enter asks the app to check for updates
+	m.cursor = findVoiceRow(m, vrowHelper)
+	_, cmd := m.Update(enter)
+	if _, ok := cmd().(voiceHelperUpdateCheckRequestMsg); !ok {
+		t.Fatalf("update check request = %#v", cmd())
+	}
+	if !m.checkingUpdate {
+		t.Fatal("check not marked in flight")
+	}
+
+	// a newer tag offers the update; enter downloads the helper again
+	m.updateCheckDone("v3.1.0", nil)
+	if view := m.View(); !strings.Contains(view, "update available") || !strings.Contains(view, "v3.0.0 -> v3.1.0") {
+		t.Fatalf("update not offered:\n%s", view)
+	}
+	_, cmd = m.Update(enter)
+	req, ok := cmd().(voiceDownloadRequestMsg)
+	if !ok || req.target != voiceHelperTarget {
+		t.Fatalf("update download request = %#v", cmd())
+	}
+
+	// completion refreshes the detected version and clears the check
+	m.downloadStarted(voiceHelperTarget)
+	ver = "v3.1.0"
+	m.downloadUpdate(voiceDownloadMsg{target: voiceHelperTarget, done: true})
+	if view := m.View(); !strings.Contains(view, "installed (v3.1.0)") {
+		t.Fatalf("new version not rendered:\n%s", view)
+	}
+	if m.updateTag != "" {
+		t.Fatal("stale update tag after reinstall")
+	}
+
+	// the same tag reports up to date; a failure renders the error
+	_, cmd = m.Update(enter)
+	cmd()
+	m.updateCheckDone("v3.1.0", nil)
+	if view := m.View(); !strings.Contains(view, "up to date") {
+		t.Fatalf("up-to-date not rendered:\n%s", view)
+	}
+	m.updateCheckDone("", errTest)
+	if view := m.View(); !strings.Contains(view, "update check failed: boom") {
+		t.Fatalf("check failure not rendered:\n%s", view)
+	}
+
+	// dev/manual builds show as unknown version
+	ver = "dev"
+	m.refreshInstallState()
+	if view := m.View(); !strings.Contains(view, "installed (unknown version)") {
+		t.Fatalf("unknown version not rendered:\n%s", view)
+	}
+}
+
+// The app runs the latest-tag query as a command and routes the result to
+// the panel.
+func TestVoiceHelperUpdateCheckFlow(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	old := latestHelperVersionFn
+	latestHelperVersionFn = func(context.Context) (string, error) { return "v9.9.9", nil }
+	t.Cleanup(func() { latestHelperVersionFn = old })
+
+	upd, _ := a.Update(openVoiceSettingsMsg{})
+	a = upd.(App)
+	upd, cmd := a.Update(voiceHelperUpdateCheckRequestMsg{})
+	a = upd.(App)
+	msg, ok := cmd().(voiceHelperUpdateCheckMsg)
+	if !ok || msg.tag != "v9.9.9" || msg.err != nil {
+		t.Fatalf("check msg = %#v", msg)
+	}
+	upd, _ = a.Update(msg)
+	a = upd.(App)
+	if a.voiceSettingsView.updateTag != "v9.9.9" {
+		t.Fatal("panel not updated with the latest tag")
+	}
+}
 
 // drainVoiceDownload pumps the download wait command chain until the done
 // message arrives.

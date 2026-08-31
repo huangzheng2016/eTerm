@@ -297,6 +297,10 @@ func defaultVoiceEngine(cfg voiceSettings, onProgress func(float64)) (voice.Engi
 // package var so tests can fake it (the dev machine may have a real helper).
 var helperInstalledFn = voice.HelperInstalled
 
+// latestHelperVersionFn queries the latest helper release tag; a package var
+// so tests can fake the network call.
+var latestHelperVersionFn = voice.LatestHelperVersion
+
 // localModelTarget returns the model dir/kind for set_model: the custom
 // directory when configured, else the selected catalog model.
 func localModelTarget(cfg voiceSettings, modelsRoot string) (dir, kind string) {

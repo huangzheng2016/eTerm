@@ -64,9 +64,16 @@ type voiceSettingsModel struct {
 	input  textinput.Model
 
 	modelsRoot        string
-	helperInstalledFn func() bool // test hook; nil = voice.HelperInstalled
+	helperInstalledFn func() bool   // test hook; nil = voice.HelperInstalled
+	helperVersionFn   func() string // test hook; nil = voice.HelperVersion
 	helperOK          bool
+	helperVersion     string // raw -version output; ""/"dev"/"0.1.0" = unknown
 	modelOK           []bool
+
+	checkingUpdate bool
+	updateChecked  bool
+	updateTag      string // latest release tag after a successful check
+	updateErr      string
 
 	dlTarget    string // "" when no download is running
 	dlPct       float64
@@ -96,6 +103,19 @@ func (m *voiceSettingsModel) refreshInstallState() {
 		installed = helperInstalledFn
 	}
 	m.helperOK = installed()
+	m.helperVersion = ""
+	if m.helperOK {
+		vfn := m.helperVersionFn
+		if vfn == nil {
+			vfn = voice.HelperVersion
+		}
+		m.helperVersion = vfn()
+	}
+	// a fresh install state invalidates any previous update check
+	m.checkingUpdate = false
+	m.updateChecked = false
+	m.updateTag = ""
+	m.updateErr = ""
 	catalog := voice.ModelCatalog()
 	m.modelOK = make([]bool, len(catalog))
 	for i, spec := range catalog {
@@ -205,12 +225,38 @@ func (m *voiceSettingsModel) startDownload(target string) tea.Cmd {
 	if m.dlTarget != "" {
 		return nil
 	}
-	if target == voiceHelperTarget && m.helperOK {
-		return nil
-	}
 	m.dlErr = ""
 	m.dlErrTarget = ""
 	return func() tea.Msg { return voiceDownloadRequestMsg{target: target} }
+}
+
+// helperAction downloads the helper when missing (or an update is
+// available); otherwise it asks the app to check the latest release tag.
+func (m *voiceSettingsModel) helperAction() tea.Cmd {
+	if !m.helperOK || m.updateAvailable() {
+		return m.startDownload(voiceHelperTarget)
+	}
+	if m.checkingUpdate {
+		return nil
+	}
+	m.checkingUpdate = true
+	m.updateErr = ""
+	return func() tea.Msg { return voiceHelperUpdateCheckRequestMsg{} }
+}
+
+func (m *voiceSettingsModel) updateAvailable() bool {
+	return m.helperOK && m.updateTag != "" && m.updateTag != m.helperVersion
+}
+
+// updateCheckDone applies the latest-tag check result.
+func (m *voiceSettingsModel) updateCheckDone(tag string, err error) {
+	m.checkingUpdate = false
+	m.updateChecked = true
+	if err != nil {
+		m.updateErr = err.Error()
+		return
+	}
+	m.updateTag = tag
 }
 
 // modelAction selects an installed model (persisted, clearing any custom
@@ -332,7 +378,7 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 	case "enter":
 		switch rows[m.cursor].kind {
 		case vrowHelper:
-			return false, m.startDownload(voiceHelperTarget)
+			return false, m.helperAction()
 		case vrowModels:
 			m.enterModels()
 			return false, nil
@@ -431,16 +477,32 @@ func maskVoiceKey(v string) string {
 	return "(set)"
 }
 
+func (m *voiceSettingsModel) helperVersionDisplay() string {
+	switch m.helperVersion {
+	case "", "dev", "0.1.0":
+		return "unknown version"
+	}
+	return m.helperVersion
+}
+
 func (m *voiceSettingsModel) helperValue() string {
 	switch {
 	case m.dlTarget == voiceHelperTarget:
 		return fmt.Sprintf("downloading %.0f%%", m.dlPct)
 	case m.dlErrTarget == voiceHelperTarget && m.dlErr != "":
 		return "failed: " + m.dlErr
-	case m.helperOK:
-		return "installed"
+	case !m.helperOK:
+		return "not installed - enter to download"
+	case m.checkingUpdate:
+		return "installed (" + m.helperVersionDisplay() + ") - checking for updates"
+	case m.updateErr != "":
+		return "installed (" + m.helperVersionDisplay() + ") - update check failed: " + m.updateErr
+	case m.updateAvailable():
+		return "update available (" + m.helperVersionDisplay() + " -> " + m.updateTag + ") - enter to update"
+	case m.updateChecked:
+		return "installed (" + m.helperVersionDisplay() + ") - up to date"
 	}
-	return "missing - enter to download"
+	return "installed (" + m.helperVersionDisplay() + ") - enter to check for updates"
 }
 
 func (m *voiceSettingsModel) modelValue(i int) string {
@@ -527,7 +589,7 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 			value = m.cfg.Engine + " (unknown)"
 		}
 	case vrowHelper:
-		label, value = "Helper binary", m.helperValue()
+		label, value = "Voice Helper", m.helperValue()
 	case vrowModels:
 		label = "Model >"
 		switch {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -1177,6 +1178,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		return a.endVoiceTest()
+
+	case voiceHelperUpdateCheckRequestMsg:
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			tag, err := latestHelperVersionFn(ctx)
+			return voiceHelperUpdateCheckMsg{tag: tag, err: err}
+		}
+
+	case voiceHelperUpdateCheckMsg:
+		if a.voiceSettingsView != nil {
+			a.voiceSettingsView.updateCheckDone(msg.tag, msg.err)
+		}
+		return a, nil
 
 	case openVoiceSettingsMsg:
 		a = a.ensureVoiceCfg()
