@@ -15,7 +15,7 @@ import (
 
 const listSidebarWidth = 14
 
-var listViewTypes = []TabType{HomeTab, KeyTab, ForwardTab, SnippetTab, SessionListTab, AITab}
+var listViewTypes = []TabType{HomeTab, KeyTab, ForwardTab, SnippetTab, SessionListTab}
 
 func isListView(tabType TabType) bool {
 	for _, item := range listViewTypes {
@@ -55,18 +55,10 @@ func (a App) switchListView(delta int) (App, tea.Cmd) {
 		}
 	}
 	next := (current + delta + len(listViewTypes)) % len(listViewTypes)
-	if listViewTypes[next] == AITab {
-		// AI is an overlay, not a cycle stop; skip it so cycling wraps.
-		next = (next + delta + len(listViewTypes)) % len(listViewTypes)
-	}
 	return a.openListView(listViewTypes[next])
 }
 
 func (a App) openListView(tabType TabType) (App, tea.Cmd) {
-	if tabType == AITab {
-		// AI is an overlay, not a list page: never replace the tab model.
-		return a.openAIOverlay()
-	}
 	if a.activeTab < 0 || a.activeTab >= len(a.tabs) || !isListView(a.tabs[a.activeTab].Type) {
 		return a, nil
 	}
@@ -121,7 +113,7 @@ func renderListLayout(tabType TabType, content string, width, height int) string
 	for i := range dividerRows {
 		dividerRows[i] = "│"
 	}
-	for _, row := range []int{3, 6, 9, 12, 15, 18, 21} {
+	for _, row := range []int{3, 6, 9, 12, 15, 18} {
 		if row < len(dividerRows) {
 			dividerRows[row] = "┤"
 		}
@@ -141,7 +133,6 @@ func renderListSidebar(tabType TabType, height int) string {
 		{ForwardTab, "Forwards"},
 		{SnippetTab, "Snippets"},
 		{SessionListTab, "Sessions"},
-		{AITab, "AI"},
 	}
 	line := func(value string) string {
 		return value + strings.Repeat(" ", max(0, listSidebarWidth-lipgloss.Width(value)))

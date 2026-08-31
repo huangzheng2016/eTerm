@@ -77,20 +77,3 @@ func TestBridgeCancelRun(t *testing.T) {
 	}
 	bridge.CancelRun() // no panic when idle
 }
-
-func TestSwitchListViewSkipsAITab(t *testing.T) {
-	a := App{
-		tabs:      []Tab{{Type: SessionListTab, Title: "List"}},
-		activeTab: 0,
-		width:     100,
-		height:    30,
-	}
-	a, _ = a.switchListView(1)
-	if got := a.tabs[0].Type; got != HomeTab {
-		t.Fatalf("forward from Sessions got %s, want Home", got)
-	}
-	a, _ = a.switchListView(-1)
-	if got := a.tabs[0].Type; got != SessionListTab {
-		t.Fatalf("backward from Home got %s, want Sessions", got)
-	}
-}

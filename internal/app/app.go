@@ -44,9 +44,6 @@ const (
 	SessionHistoryTab TabType = "session-hist"
 	SessionListTab    TabType = "sessions"
 	SessionReplayTab  TabType = "session-replay"
-	// AITab never materializes as a tab: selecting it in the list sidebar
-	// opens the AI overlay instead (see openListView).
-	AITab TabType = "ai"
 )
 
 type Tab struct {

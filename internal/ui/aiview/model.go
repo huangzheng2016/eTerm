@@ -122,17 +122,12 @@ func (m *Model) SetSize(w, h int) {
 }
 
 func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
-	boxW = m.width - 4
-	if boxW > 100 {
-		boxW = 100
-	}
+	// The AI panel renders fullscreen; the border box fills the frame.
+	boxW = m.width
 	if boxW < 20 {
 		boxW = 20
 	}
-	boxH = m.height - 4
-	if boxH > 40 {
-		boxH = 40
-	}
+	boxH = m.height
 	if boxH < 8 {
 		boxH = 8
 	}

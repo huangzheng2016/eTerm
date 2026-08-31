@@ -110,7 +110,8 @@ func (a App) View() tea.View {
 			overlay := a.commandPalette.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.aiVisible && a.aiView != nil {
-			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, a.aiView.View().Content)
+			// AI panel is fullscreen: it replaces the whole frame.
+			main = a.aiView.View().Content
 		} else if a.renamePrompt != nil {
 			overlay := a.renamePrompt.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
