@@ -222,6 +222,7 @@ func (m *Model) handleEvent(ev AgentEvent) bool {
 		for i := len(m.blocks) - 1; i >= 0; i-- {
 			if m.blocks[i].kind == blockTool && !m.blocks[i].toolDone {
 				m.blocks[i].toolDone = true
+				m.renderBlock(i)
 				m.dirty = true
 				break
 			}
@@ -338,6 +339,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 	case agentEventMsg:
+		if m.events == nil {
+			return m, nil
+		}
 		terminal := m.handleEvent(msg.ev)
 		var cmds []tea.Cmd
 		if !terminal {
@@ -396,6 +400,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if m.cancel != nil {
+			m.cancel()
+			m.cancel = nil
+		}
+		if m.status == statusRunning {
+			m.status = statusIdle
+		}
 		return m, func() tea.Msg { return CloseMsg{} }
 	case "ctrl+l":
 		m.clearSession()

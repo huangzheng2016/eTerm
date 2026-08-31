@@ -294,3 +294,58 @@ func TestThrottleFlushScheduling(t *testing.T) {
 		t.Fatal("viewport missing streamed content")
 	}
 }
+
+func TestEscCancelsRun(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventTextDelta, Text: "slow"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	if m.status != statusRunning {
+		t.Fatal("status not running")
+	}
+	m.chatKey(keyMsg(tea.KeyEscape, 0))
+	if m.status != statusIdle {
+		t.Fatal("status not idle after esc")
+	}
+	if m.cancel != nil {
+		t.Fatal("run not cancelled after esc")
+	}
+}
+
+func TestCtrlLDropsInFlightEvent(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventTextDelta, Text: "stale"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	ev := <-m.events
+	m.Update(keyMsg('l', tea.ModCtrl))
+	if len(m.blocks) != 0 {
+		t.Fatal("session not cleared")
+	}
+	m.Update(agentEventMsg{ev: ev})
+	if len(m.blocks) != 0 {
+		t.Fatal("in-flight event re-appended a ghost block")
+	}
+}
+
+func TestToolCallEndRerenders(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventToolCallStart, Text: "terminal"},
+		{Kind: EventToolCallEnd},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	m.handleEvent(<-m.events)
+	if !strings.Contains(plain(m.blocks[1].cache), "running") {
+		t.Fatal("tool block should show running after start")
+	}
+	m.handleEvent(<-m.events)
+	if !strings.Contains(plain(m.blocks[1].cache), "done") {
+		t.Fatal("tool block not re-rendered on end")
+	}
+}
