@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +30,26 @@ type fakeVoiceEngine struct {
 	closed    bool
 	modelDir  string
 	modelKind string
+}
+
+// findVoiceRow returns the index of the first row of kind, -1 when absent.
+func findVoiceRow(m *voiceSettingsModel, kind int) int {
+	for i, r := range m.rows() {
+		if r.kind == kind {
+			return i
+		}
+	}
+	return -1
+}
+
+// findVoiceParamRow returns the index of the param row for key, -1 when absent.
+func findVoiceParamRow(m *voiceSettingsModel, key string) int {
+	for i, r := range m.rows() {
+		if r.kind == vrowParam && r.param.Key == key {
+			return i
+		}
+	}
+	return -1
 }
 
 func (f *fakeVoiceEngine) Start(context.Context) error { f.started = true; return nil }
@@ -269,26 +291,82 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 
-	if got := loadVoiceSettings(database, mk); got != defaultVoiceSettings() {
+	if got := loadVoiceSettings(database, mk); !reflect.DeepEqual(got, defaultVoiceSettings()) {
 		t.Fatalf("defaults = %+v", got)
 	}
 
-	cfg := voiceSettings{
-		Engine:           voiceEngineVolcano,
-		VADThreshold:     0.35,
-		VADSilenceMs:     1250,
-		SentenceEnd:      voice.SentenceEndEnter,
-		VolcanoAPIKey:    "api-key",
-		VolcanoAppKey:    "app-key",
-		VolcanoAccessKey: "access-key",
-		ModelID:          voice.ModelCatalog()[2].ID,
-		Verified:         true,
-	}
+	cfg := defaultVoiceSettings()
+	cfg.Engine = voiceEngineVolcano
+	cfg.VADThreshold = 0.35
+	cfg.VADSilenceMs = 1250
+	cfg.SentenceEnd = voice.SentenceEndEnter
+	cfg.ModelID = voice.ModelCatalog()[2].ID
+	cfg.CustomModelDir = "/tmp/custom-model"
+	cfg.Verified = true
+	cfg.setEngineParam(voiceEngineVolcano, "api_key", "api-key")
+	cfg.setEngineParam(voiceEngineVolcano, "app_key", "app-key")
+	cfg.setEngineParam(voiceEngineVolcano, "access_key", "access-key")
 	if err := persistVoiceSettings(database, mk, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := loadVoiceSettings(database, mk); got != cfg {
+	if got := loadVoiceSettings(database, mk); !reflect.DeepEqual(got, cfg) {
 		t.Fatalf("round trip = %+v, want %+v", got, cfg)
+	}
+
+	// the params blob is encrypted at rest
+	blob, err := db.GetSetting(database, voiceParamsSettingPrefix+voiceEngineVolcano)
+	if err != nil || blob == "" {
+		t.Fatal("params blob not stored")
+	}
+	if strings.Contains(blob, "api-key") {
+		t.Fatal("params stored in plaintext")
+	}
+}
+
+// The legacy voice_volcano blob migrates into voice_params_volcano on load;
+// the old key is deleted afterwards.
+func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+
+	data, err := json.Marshal(map[string]string{"api_key": "a", "app_key": "b", "access_key": "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := mk.GetKey()
+	enc, err := security.Encrypt(data, k.Bytes())
+	k.Clear()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting(database, voiceVolcanoSettingKey, enc); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadVoiceSettings(database, mk)
+	params := cfg.engineParams(voiceEngineVolcano)
+	if params["api_key"] != "a" || params["app_key"] != "b" || params["access_key"] != "c" {
+		t.Fatalf("migrated params = %v", params)
+	}
+	if _, err := db.GetSetting(database, voiceVolcanoSettingKey); err == nil {
+		t.Fatal("legacy key not deleted")
+	}
+	blob, err := db.GetSetting(database, voiceParamsSettingPrefix+voiceEngineVolcano)
+	if err != nil || blob == "" {
+		t.Fatal("new params blob missing")
+	}
+	if strings.Contains(blob, "api_key") {
+		t.Fatal("migrated blob stored in plaintext")
+	}
+
+	// the migration ran once; the new blob loads on its own
+	cfg = loadVoiceSettings(database, mk)
+	if got := cfg.engineParams(voiceEngineVolcano); got["api_key"] != "a" {
+		t.Fatalf("reloaded params = %v", got)
 	}
 }
 
@@ -312,7 +390,7 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	}
 
 	// Sensitivity row: right steps 0 -> 0.05 and keeps the engine alive.
-	m.cursor = voiceRowThreshold
+	m.cursor = findVoiceRow(m, vrowThreshold)
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	msg, ok = cmd().(voiceSettingsChangedMsg)
 	if !ok || msg.cfg.VADThreshold != 0.05 || !msg.keepEngine {
@@ -320,7 +398,7 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	}
 
 	// Silence row: right steps 1000 -> 1050 and keeps the engine alive.
-	m.cursor = voiceRowSilence
+	m.cursor = findVoiceRow(m, vrowSilence)
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	msg, ok = cmd().(voiceSettingsChangedMsg)
 	if !ok || msg.cfg.VADSilenceMs != 1050 || !msg.keepEngine {
@@ -330,25 +408,87 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 		t.Fatalf("persisted silence = %d", got.VADSilenceMs)
 	}
 
-	// API key row: enter edits, enter commits, stored encrypted.
-	m.cursor = voiceRowAPIKey
+	// API key row: enter edits, enter commits, stored encrypted, masked in view.
+	m.cursor = findVoiceParamRow(m, "api_key")
+	if m.cursor < 0 {
+		t.Fatal("api key row missing")
+	}
 	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if m.edit != voiceRowAPIKey {
+	if m.edit < 0 {
 		t.Fatal("enter did not start editing")
 	}
 	m.input.SetValue("secret")
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	msg, ok = cmd().(voiceSettingsChangedMsg)
-	if !ok || msg.cfg.VolcanoAPIKey != "secret" {
+	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["api_key"] != "secret" {
 		t.Fatalf("key change msg = %#v", msg)
 	}
-	if got := loadVoiceSettings(database, mk); got.VolcanoAPIKey != "secret" {
-		t.Fatalf("persisted api key = %q", got.VolcanoAPIKey)
+	if got := loadVoiceSettings(database, mk); got.engineParams(voiceEngineVolcano)["api_key"] != "secret" {
+		t.Fatalf("persisted api key = %q", got.engineParams(voiceEngineVolcano)["api_key"])
+	}
+	if view := m.View(); strings.Contains(view, "secret") || !strings.Contains(view, "(set)") {
+		t.Fatalf("secret not masked:\n%s", view)
 	}
 
 	closed, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	if !closed {
 		t.Fatal("esc did not close the overlay")
+	}
+}
+
+// Rows render per the selected engine: local shows the helper and Model
+// rows, volcano shows its three key rows, unknown engines render generically.
+func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
+	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+
+	// local: helper + Model > rows, no engine param rows
+	if findVoiceRow(m, vrowHelper) < 0 || findVoiceRow(m, vrowModels) < 0 {
+		t.Fatal("local helper/model rows missing")
+	}
+	if findVoiceRow(m, vrowParam) >= 0 {
+		t.Fatal("local shows engine param rows")
+	}
+	if view := m.View(); !strings.Contains(view, "Helper binary") || !strings.Contains(view, "Model >") {
+		t.Fatalf("local rows not rendered:\n%s", view)
+	}
+
+	// volcano: 3 secret param rows, no helper/model rows
+	m.cfg.Engine = voiceEngineVolcano
+	if findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
+		t.Fatal("volcano shows local-only rows")
+	}
+	n := 0
+	for _, r := range m.rows() {
+		if r.kind == vrowParam {
+			n++
+			if !r.param.Secret {
+				t.Fatalf("volcano param %q not secret", r.param.Key)
+			}
+		}
+	}
+	if n != 3 {
+		t.Fatalf("volcano param rows = %d", n)
+	}
+	view := m.View()
+	for _, label := range []string{"Volcano API key", "Volcano App key", "Volcano Access key"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("missing %q:\n%s", label, view)
+		}
+	}
+
+	// unknown engine: engine row + shared rows only, labeled unknown
+	m.cfg.Engine = "mystery"
+	if findVoiceRow(m, vrowEngine) < 0 || findVoiceRow(m, vrowTest) < 0 {
+		t.Fatal("unknown engine lost shared rows")
+	}
+	if findVoiceRow(m, vrowParam) >= 0 || findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
+		t.Fatal("unknown engine shows engine-specific rows")
+	}
+	if view = m.View(); !strings.Contains(view, "mystery (unknown)") {
+		t.Fatalf("unknown engine not labeled:\n%s", view)
+	}
+	if !strings.Contains(m.View(), "setup incomplete") {
+		t.Fatal("unknown engine shown ready")
 	}
 }
 
@@ -374,6 +514,11 @@ func TestDefaultVoiceEngineSelection(t *testing.T) {
 		t.Fatalf("volcano engine = %T", volc)
 	}
 	volc.Close()
+
+	cfg.Engine = "no-such-engine"
+	if _, err := defaultVoiceEngine(cfg, nil); err == nil {
+		t.Fatal("unknown engine built without error")
+	}
 }
 
 // A keepEngine settings change applies VAD params live via SetVAD.
@@ -428,11 +573,15 @@ func TestVoiceSettingsOverlayMouse(t *testing.T) {
 	a.voiceSettingsView = newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
 	// Click the threshold row: cursor moves there and the row adjusts.
+	thresholdRow := findVoiceRow(a.voiceSettingsView, vrowThreshold)
+	if thresholdRow < 0 {
+		t.Fatal("threshold row missing")
+	}
 	ox, oy, _, _ := a.overlayBounds(a.voiceSettingsView.View())
-	click := tea.MouseClickMsg(tea.Mouse{X: ox + 3, Y: oy + 4 + voiceRowThreshold, Button: tea.MouseLeft})
+	click := tea.MouseClickMsg(tea.Mouse{X: ox + 3, Y: oy + 4 + thresholdRow, Button: tea.MouseLeft})
 	upd, _ := a.Update(click)
 	a = upd.(App)
-	if a.voiceSettingsView == nil || a.voiceSettingsView.cursor != voiceRowThreshold {
+	if a.voiceSettingsView == nil || a.voiceSettingsView.cursor != thresholdRow {
 		t.Fatal("click did not reach the overlay")
 	}
 	if a.voiceSettingsView.cfg.VADThreshold != 0.05 {
@@ -669,11 +818,30 @@ func TestVoiceSetupReady(t *testing.T) {
 	if voiceSetupReady(vcfg, root) {
 		t.Fatal("volcano ready without keys")
 	}
-	vcfg.VolcanoAPIKey = "a"
-	vcfg.VolcanoAppKey = "b"
-	vcfg.VolcanoAccessKey = "c"
+	vcfg.setEngineParam(voiceEngineVolcano, "api_key", "a")
+	vcfg.setEngineParam(voiceEngineVolcano, "app_key", "b")
+	vcfg.setEngineParam(voiceEngineVolcano, "access_key", "c")
 	if !voiceSetupReady(vcfg, root) {
 		t.Fatal("volcano not ready with keys")
+	}
+
+	ucfg := defaultVoiceSettings()
+	ucfg.Engine = "no-such-engine"
+	if voiceSetupReady(ucfg, root) {
+		t.Fatal("unknown engine ready")
+	}
+
+	// a valid custom model dir counts as an installed model
+	ccfg := defaultVoiceSettings()
+	custom := t.TempDir()
+	ccfg.CustomModelDir = custom
+	if voiceSetupReady(ccfg, root) {
+		t.Fatal("ready with an invalid custom dir")
+	}
+	os.WriteFile(filepath.Join(custom, "tokens.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(custom, "model.int8.onnx"), []byte("x"), 0o644)
+	if !voiceSetupReady(ccfg, root) {
+		t.Fatal("not ready with a valid custom dir")
 	}
 }
 
@@ -704,7 +872,7 @@ func TestVoiceHotkeyOpensSettingsWhenNotReady(t *testing.T) {
 	}
 }
 
-func TestVoiceSettingsModelRows(t *testing.T) {
+func TestVoiceSettingsModelSubmenu(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
 		t.Fatal(err)
@@ -719,15 +887,25 @@ func TestVoiceSettingsModelRows(t *testing.T) {
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 
 	// helper row requests a helper download
-	m.cursor = voiceRowHelper
+	m.cursor = findVoiceRow(m, vrowHelper)
 	_, cmd := m.Update(enter)
 	req, ok := cmd().(voiceDownloadRequestMsg)
 	if !ok || req.target != voiceHelperTarget {
 		t.Fatalf("helper download request = %#v", cmd())
 	}
 
+	// Model > enters the submenu: back row + 3 catalog rows + custom path row
+	m.cursor = findVoiceRow(m, vrowModels)
+	m.Update(enter)
+	if m.view != voiceViewModels {
+		t.Fatal("Model > did not enter the submenu")
+	}
+	if rows := m.rows(); len(rows) != 5 || rows[0].kind != vrowBack || rows[4].kind != vrowCustomPath {
+		t.Fatalf("submenu rows = %+v", rows)
+	}
+
 	// not-downloaded model row requests the model download
-	m.cursor = voiceRowModel2
+	m.cursor = 3
 	_, cmd = m.Update(enter)
 	req, ok = cmd().(voiceDownloadRequestMsg)
 	if !ok || req.target != voice.ModelCatalog()[2].ID {
@@ -755,7 +933,6 @@ func TestVoiceSettingsModelRows(t *testing.T) {
 	}
 
 	// progress and failures render on the row and stay visible
-	m.cursor = voiceRowModel0
 	m.downloadStarted(spec.ID)
 	m.downloadUpdate(voiceDownloadMsg{target: spec.ID, pct: 42})
 	if !strings.Contains(m.View(), "downloading 42%") {
@@ -767,6 +944,109 @@ func TestVoiceSettingsModelRows(t *testing.T) {
 	}
 	if m.dlTarget != "" {
 		t.Fatal("download not cleared after done")
+	}
+
+	// left returns to the main panel; re-enter, then esc returns too, and a
+	// second esc closes the overlay
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	if m.view != voiceViewMain {
+		t.Fatal("left did not leave the submenu")
+	}
+	m.cursor = findVoiceRow(m, vrowModels)
+	m.Update(enter)
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if m.view != voiceViewMain {
+		t.Fatal("esc did not leave the submenu")
+	}
+	closed, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if !closed {
+		t.Fatal("esc did not close the overlay")
+	}
+}
+
+// The custom model path entry validates the directory, persists the setting,
+// applies via set_model kind sensevoice, and counts toward readiness.
+func TestVoiceSettingsCustomModelPath(t *testing.T) {
+	stubHelperInstalled(t, true)
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.modelsRoot = t.TempDir()
+	m.helperInstalledFn = func() bool { return true }
+	m.refreshInstallState()
+
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	m.cursor = findVoiceRow(m, vrowModels)
+	m.Update(enter)
+	m.cursor = findVoiceRow(m, vrowCustomPath)
+	if m.cursor < 0 {
+		t.Fatal("custom path row missing")
+	}
+
+	// invalid dir: rejected, error rendered, nothing persisted
+	m.Update(enter)
+	m.input.SetValue(t.TempDir())
+	_, cmd := m.Update(enter)
+	if cmd != nil {
+		t.Fatal("invalid path produced a persist command")
+	}
+	if m.customErr == "" {
+		t.Fatal("no error for an invalid path")
+	}
+	if m.cfg.CustomModelDir != "" {
+		t.Fatal("invalid path stored")
+	}
+	if !strings.Contains(m.View(), "invalid:") {
+		t.Fatalf("error not rendered:\n%s", m.View())
+	}
+
+	// valid dir (tokens.txt + model.int8.onnx): accepted and persisted
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "tokens.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("x"), 0o644)
+	m.cfg.Verified = true
+	m.cursor = findVoiceRow(m, vrowCustomPath)
+	m.Update(enter)
+	m.input.SetValue(dir)
+	_, cmd = m.Update(enter)
+	chg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || chg.cfg.CustomModelDir != dir || !chg.keepEngine {
+		t.Fatalf("custom path msg = %#v", chg)
+	}
+	if chg.cfg.Verified {
+		t.Fatal("custom path must clear verified")
+	}
+	if got := loadVoiceSettings(database, mk); got.CustomModelDir != dir {
+		t.Fatalf("persisted custom dir = %q", got.CustomModelDir)
+	}
+
+	// readiness counts the custom path; set_model targets it with sensevoice
+	if !voiceSetupReady(m.cfg, m.modelsRoot) {
+		t.Fatal("custom path not counted as model present")
+	}
+	gotDir, gotKind := localModelTarget(m.cfg, m.modelsRoot)
+	if gotDir != dir || gotKind != voice.ModelKindSenseVoice {
+		t.Fatalf("set_model target = %q %q", gotDir, gotKind)
+	}
+	if !strings.Contains(m.View(), "[active] "+dir) {
+		t.Fatal("custom path not marked active")
+	}
+
+	// clearing the path falls back to the catalog selection
+	m.cursor = findVoiceRow(m, vrowCustomPath)
+	m.Update(enter)
+	m.input.SetValue("")
+	_, cmd = m.Update(enter)
+	chg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || chg.cfg.CustomModelDir != "" {
+		t.Fatalf("clear msg = %#v", chg)
+	}
+	if got := loadVoiceSettings(database, mk); got.CustomModelDir != "" {
+		t.Fatal("clear not persisted")
 	}
 }
 

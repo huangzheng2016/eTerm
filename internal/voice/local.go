@@ -38,6 +38,20 @@ type LocalConfig struct {
 	OnDownloadProgress func(pct float64)
 }
 
+func init() {
+	RegisterEngine(EngineDescriptor{
+		ID:    "local",
+		Label: "local (sherpa-onnx)",
+		Ready: func(map[string]string) bool { return true },
+		New: func(_ map[string]string, feed FeedDeps) (Engine, error) {
+			return NewLocalEngine(LocalConfig{
+				VAD:                feed.VAD,
+				OnDownloadProgress: feed.OnDownloadProgress,
+			}), nil
+		},
+	})
+}
+
 type helperCommand struct {
 	Cmd  string `json:"cmd"`
 	Path string `json:"path,omitempty"`

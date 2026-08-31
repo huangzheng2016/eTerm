@@ -109,13 +109,13 @@ func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 }
 
 // voiceSettingsMouse handles a click inside the voice settings overlay.
-// Layout: border(1) + padding(1) + title(1) + blank(1) + rows at ly=4..15.
+// Layout: border(1) + padding(1) + title(1) + blank(1) + rows at ly=4...
 func (a App) voiceSettingsMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.voiceSettingsView == nil {
 		return a, nil
 	}
 	itemY := ly - 4
-	if itemY >= 0 && itemY < voiceRowCount {
+	if itemY >= 0 && itemY < a.voiceSettingsView.rowCount() {
 		a.voiceSettingsView.cursor = itemY
 		_, cmd := a.voiceSettingsView.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		return a, cmd

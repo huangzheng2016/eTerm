@@ -58,6 +58,114 @@ func TestModelSpecInstalled(t *testing.T) {
 	}
 }
 
+func TestValidCustomModelDir(t *testing.T) {
+	if ValidCustomModelDir("") {
+		t.Fatal("valid empty path")
+	}
+	dir := t.TempDir()
+	if ValidCustomModelDir(dir) {
+		t.Fatal("valid empty dir")
+	}
+	os.WriteFile(filepath.Join(dir, "tokens.txt"), []byte("x"), 0o644)
+	if ValidCustomModelDir(dir) {
+		t.Fatal("valid without a model file")
+	}
+	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("x"), 0o644)
+	if !ValidCustomModelDir(dir) {
+		t.Fatal("invalid with tokens+model.int8.onnx")
+	}
+	os.Remove(filepath.Join(dir, "model.int8.onnx"))
+	os.WriteFile(filepath.Join(dir, "model.onnx"), []byte("x"), 0o644)
+	if !ValidCustomModelDir(dir) {
+		t.Fatal("invalid with tokens+model.onnx")
+	}
+	if ValidCustomModelDir(filepath.Join(dir, "no-such-dir")) {
+		t.Fatal("valid missing dir")
+	}
+}
+
+func TestEngineRegistry(t *testing.T) {
+	local, ok := EngineDescriptorByID("local")
+	if !ok {
+		t.Fatal("local engine not registered")
+	}
+	if local.Label == "" {
+		t.Fatal("local descriptor has no label")
+	}
+	if !local.Ready(map[string]string{}) {
+		t.Fatal("local params never ready")
+	}
+	eng, err := local.New(nil, FeedDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := eng.(*LocalEngine); !ok {
+		t.Fatalf("local New = %T", eng)
+	}
+	eng.Close()
+
+	volc, ok := EngineDescriptorByID("volcano")
+	if !ok {
+		t.Fatal("volcano engine not registered")
+	}
+	if len(volc.Params) != 3 {
+		t.Fatalf("volcano params = %d", len(volc.Params))
+	}
+	for _, p := range volc.Params {
+		if !p.Secret || !p.Required {
+			t.Fatalf("volcano param %+v must be secret+required", p)
+		}
+	}
+	if volc.Ready(map[string]string{"api_key": "a"}) {
+		t.Fatal("volcano ready with partial keys")
+	}
+	keys := map[string]string{"api_key": "a", "app_key": "b", "access_key": "c"}
+	if !volc.Ready(keys) {
+		t.Fatal("volcano not ready with keys")
+	}
+	if got := FirstMissingParam(volc, map[string]string{"api_key": "a"}); got != "Volcano App key" {
+		t.Fatalf("first missing = %q", got)
+	}
+	veng, err := volc.New(keys, FeedDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := veng.(*VolcanoFeedEngine); !ok {
+		t.Fatalf("volcano New = %T", veng)
+	}
+	veng.Close()
+
+	// the list is sorted by id and a self-registered engine shows up
+	RegisterEngine(EngineDescriptor{
+		ID:    "zz-test-engine",
+		Label: "Test",
+		Ready: func(map[string]string) bool { return true },
+		New:   func(map[string]string, FeedDeps) (Engine, error) { return nil, nil },
+	})
+	descs := EngineDescriptors()
+	for i := 1; i < len(descs); i++ {
+		if descs[i-1].ID >= descs[i].ID {
+			t.Fatalf("descriptors not sorted: %q >= %q", descs[i-1].ID, descs[i].ID)
+		}
+	}
+	if _, ok := EngineDescriptorByID("zz-test-engine"); !ok {
+		t.Fatal("self-registration not visible")
+	}
+}
+
+func TestRegisterEngineDuplicatePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("duplicate registration did not panic")
+		}
+	}()
+	RegisterEngine(EngineDescriptor{
+		ID:    "local",
+		Ready: func(map[string]string) bool { return true },
+		New:   func(map[string]string, FeedDeps) (Engine, error) { return nil, nil },
+	})
+}
+
 func downloadTestSpec() ModelSpec {
 	return ModelSpec{
 		ID: "test-model", Name: "Test", Kind: "sensevoice",

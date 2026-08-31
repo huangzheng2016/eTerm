@@ -26,23 +26,41 @@ const (
 	voiceVADSettingKey         = "voice_vad_threshold"
 	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
-	voiceVolcanoSettingKey     = "voice_volcano" // encrypted JSON {api_key, app_key, access_key}
 	voiceModelSettingKey       = "voice_model"
+	voiceCustomModelSettingKey = "voice_custom_model" // absolute dir, local engine
 	voiceVerifiedSettingKey    = "voice_verified"
+	voiceParamsSettingPrefix   = "voice_params_" // + engine id: encrypted JSON params blob
+	voiceVolcanoSettingKey     = "voice_volcano" // legacy: migrated into voice_params_volcano
 )
 
 // voiceSettings holds the voice input configuration. VADThreshold 0 keeps the
-// engine default.
+// engine default. Params carries the per-engine values described by each
+// engine descriptor (defaults applied on load).
 type voiceSettings struct {
-	Engine           string
-	VADThreshold     float64
-	VADSilenceMs     int // trailing silence that ends an utterance, milliseconds
-	SentenceEnd      voice.SentenceEnd
-	VolcanoAPIKey    string
-	VolcanoAppKey    string
-	VolcanoAccessKey string
-	ModelID          string // offline model catalog id (local engine)
-	Verified         bool   // a test recording succeeded with this setup
+	Engine         string
+	VADThreshold   float64
+	VADSilenceMs   int // trailing silence that ends an utterance, milliseconds
+	SentenceEnd    voice.SentenceEnd
+	Params         map[string]map[string]string // engine id -> param key -> value
+	ModelID        string                       // offline model catalog id (local engine)
+	CustomModelDir string                       // validated custom model dir; overrides ModelID when set
+	Verified       bool                         // a test recording succeeded with this setup
+}
+
+// defaultEngineParams seeds every registered engine with its ParamSpec
+// defaults so a missing stored blob falls back cleanly.
+func defaultEngineParams() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, d := range voice.EngineDescriptors() {
+		params := map[string]string{}
+		for _, p := range d.Params {
+			if p.Default != "" {
+				params[p.Key] = p.Default
+			}
+		}
+		out[d.ID] = params
+	}
+	return out
 }
 
 func defaultVoiceSettings() voiceSettings {
@@ -51,7 +69,37 @@ func defaultVoiceSettings() voiceSettings {
 		VADSilenceMs: 1000,
 		SentenceEnd:  voice.SentenceEndSpace,
 		ModelID:      voice.ModelCatalog()[0].ID,
+		Params:       defaultEngineParams(),
 	}
+}
+
+// engineParams returns the configured values for one engine (descriptor
+// defaults when nothing was loaded).
+func (cfg voiceSettings) engineParams(id string) map[string]string {
+	if p := cfg.Params[id]; p != nil {
+		return p
+	}
+	params := map[string]string{}
+	if d, ok := voice.EngineDescriptorByID(id); ok {
+		for _, spec := range d.Params {
+			if spec.Default != "" {
+				params[spec.Key] = spec.Default
+			}
+		}
+	}
+	return params
+}
+
+func (cfg *voiceSettings) setEngineParam(id, key, value string) {
+	if cfg.Params == nil {
+		cfg.Params = map[string]map[string]string{}
+	}
+	p := cfg.Params[id]
+	if p == nil {
+		p = map[string]string{}
+		cfg.Params[id] = p
+	}
+	p[key] = value
 }
 
 func (cfg voiceSettings) vadParams() voice.VADParams {
@@ -66,11 +114,10 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 	if database == nil {
 		return cfg
 	}
-	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil {
-		switch v {
-		case voiceEngineLocal, voiceEngineVolcano:
-			cfg.Engine = v
-		}
+	migrateLegacyVolcanoParams(database, mk)
+	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil && v != "" {
+		// unregistered ids are kept so the panel can render them generically
+		cfg.Engine = v
 	}
 	if v, err := db.GetSetting(database, voiceVADSettingKey); err == nil && v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
@@ -93,28 +140,82 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 			cfg.ModelID = v
 		}
 	}
+	if v, err := db.GetSetting(database, voiceCustomModelSettingKey); err == nil {
+		cfg.CustomModelDir = v
+	}
 	if v, err := db.GetSetting(database, voiceVerifiedSettingKey); err == nil {
 		cfg.Verified = v == "1"
 	}
-	if enc, err := db.GetSetting(database, voiceVolcanoSettingKey); err == nil && enc != "" && mk != nil {
-		if k := mk.GetKey(); k != nil {
-			plain, err := security.Decrypt(enc, k.Bytes())
-			k.Clear()
-			if err == nil {
-				var keys struct {
-					APIKey    string `json:"api_key"`
-					AppKey    string `json:"app_key"`
-					AccessKey string `json:"access_key"`
-				}
-				if json.Unmarshal(plain, &keys) == nil {
-					cfg.VolcanoAPIKey = keys.APIKey
-					cfg.VolcanoAppKey = keys.AppKey
-					cfg.VolcanoAccessKey = keys.AccessKey
-				}
+	for id := range cfg.Params {
+		if stored := loadEngineParams(database, mk, id); stored != nil {
+			for k, v := range stored {
+				cfg.Params[id][k] = v
 			}
 		}
 	}
 	return cfg
+}
+
+// loadEngineParams reads and decrypts the voice_params_<id> blob; nil when
+// absent or unreadable (defaults then apply).
+func loadEngineParams(database *gorm.DB, mk *security.MasterKeyManager, id string) map[string]string {
+	enc, err := db.GetSetting(database, voiceParamsSettingPrefix+id)
+	if err != nil || enc == "" || mk == nil {
+		return nil
+	}
+	k := mk.GetKey()
+	if k == nil {
+		return nil
+	}
+	plain, err := security.Decrypt(enc, k.Bytes())
+	k.Clear()
+	if err != nil {
+		return nil
+	}
+	var params map[string]string
+	if json.Unmarshal(plain, &params) != nil {
+		return nil
+	}
+	return params
+}
+
+// migrateLegacyVolcanoParams moves the old voice_volcano key blob into the
+// voice_params_volcano schema, then deletes the old key. A no-op when the
+// new blob already exists or the master key is unavailable.
+func migrateLegacyVolcanoParams(database *gorm.DB, mk *security.MasterKeyManager) {
+	if _, err := db.GetSetting(database, voiceParamsSettingPrefix+voiceEngineVolcano); err == nil {
+		return
+	}
+	enc, err := db.GetSetting(database, voiceVolcanoSettingKey)
+	if err != nil || enc == "" || mk == nil {
+		return
+	}
+	k := mk.GetKey()
+	if k == nil {
+		return
+	}
+	plain, err := security.Decrypt(enc, k.Bytes())
+	k.Clear()
+	if err != nil {
+		return
+	}
+	var keys struct {
+		APIKey    string `json:"api_key"`
+		AppKey    string `json:"app_key"`
+		AccessKey string `json:"access_key"`
+	}
+	if json.Unmarshal(plain, &keys) != nil {
+		return
+	}
+	params := map[string]string{
+		"api_key":    keys.APIKey,
+		"app_key":    keys.AppKey,
+		"access_key": keys.AccessKey,
+	}
+	if persistEngineParams(database, mk, voiceEngineVolcano, params) != nil {
+		return
+	}
+	database.Unscoped().Where("key = ?", voiceVolcanoSettingKey).Delete(&db.AppSetting{})
 }
 
 func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg voiceSettings) error {
@@ -133,6 +234,9 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	if err := db.SetSetting(database, voiceModelSettingKey, cfg.ModelID); err != nil {
 		return err
 	}
+	if err := db.SetSetting(database, voiceCustomModelSettingKey, cfg.CustomModelDir); err != nil {
+		return err
+	}
 	verified := "0"
 	if cfg.Verified {
 		verified = "1"
@@ -140,11 +244,23 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	if err := db.SetSetting(database, voiceVerifiedSettingKey, verified); err != nil {
 		return err
 	}
-	data, err := json.Marshal(map[string]string{
-		"api_key":    cfg.VolcanoAPIKey,
-		"app_key":    cfg.VolcanoAppKey,
-		"access_key": cfg.VolcanoAccessKey,
-	})
+	for id, params := range cfg.Params {
+		if len(params) == 0 {
+			if d, ok := voice.EngineDescriptorByID(id); ok && len(d.Params) == 0 {
+				continue // param-less engine: no blob to store
+			}
+		}
+		if err := persistEngineParams(database, mk, id, params); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// persistEngineParams encrypts and stores one engine's params blob. Without
+// an unlocked master key the stored blob is left untouched.
+func persistEngineParams(database *gorm.DB, mk *security.MasterKeyManager, id string, params map[string]string) error {
+	data, err := json.Marshal(params)
 	if err != nil {
 		return err
 	}
@@ -160,43 +276,74 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	if err != nil {
 		return err
 	}
-	return db.SetSetting(database, voiceVolcanoSettingKey, enc)
+	return db.SetSetting(database, voiceParamsSettingPrefix+id, enc)
 }
 
-// defaultVoiceEngine builds the configured engine; onProgress reports the
-// helper binary download (the model download arrives as engine events).
-// Volcano composes a passthrough helper (capture+VAD) with the cloud client.
+// defaultVoiceEngine builds the configured engine from its registered
+// descriptor; onProgress reports the helper binary download (the model
+// download arrives as engine events).
 func defaultVoiceEngine(cfg voiceSettings, onProgress func(float64)) (voice.Engine, error) {
-	if cfg.Engine == voiceEngineVolcano {
-		return voice.NewVolcanoFeedEngine(voice.VolcanoFeedConfig{
-			Volcano: voice.VolcanoConfig{
-				APIKey:    cfg.VolcanoAPIKey,
-				AppKey:    cfg.VolcanoAppKey,
-				AccessKey: cfg.VolcanoAccessKey,
-			},
-			Helper: voice.LocalConfig{
-				VAD:                cfg.vadParams(),
-				OnDownloadProgress: onProgress,
-			},
-		}), nil
+	d, ok := voice.EngineDescriptorByID(cfg.Engine)
+	if !ok {
+		return nil, fmt.Errorf("voice: unknown engine %q", cfg.Engine)
 	}
-	return voice.NewLocalEngine(voice.LocalConfig{
+	return d.New(cfg.engineParams(cfg.Engine), voice.FeedDeps{
 		VAD:                cfg.vadParams(),
 		OnDownloadProgress: onProgress,
-	}), nil
+	})
 }
 
 // helperInstalledFn reports whether the helper binary is installed; a
 // package var so tests can fake it (the dev machine may have a real helper).
 var helperInstalledFn = voice.HelperInstalled
 
-// voiceSetupReady reports whether ctrl+r can record directly: local needs the
-// helper binary and the selected model on disk; volcano needs the API keys.
-func voiceSetupReady(cfg voiceSettings, modelsRoot string) bool {
-	if cfg.Engine == voiceEngineVolcano {
-		return cfg.VolcanoAPIKey != "" && cfg.VolcanoAppKey != "" && cfg.VolcanoAccessKey != ""
+// localModelTarget returns the model dir/kind for set_model: the custom
+// directory when configured, else the selected catalog model.
+func localModelTarget(cfg voiceSettings, modelsRoot string) (dir, kind string) {
+	if cfg.CustomModelDir != "" {
+		return cfg.CustomModelDir, voice.ModelKindSenseVoice
 	}
-	return helperInstalledFn() && voice.ModelByID(cfg.ModelID).Installed(modelsRoot)
+	spec := voice.ModelByID(cfg.ModelID)
+	return spec.ModelDir(modelsRoot), spec.Kind
+}
+
+// localModelReady reports whether the local engine has a usable model: a
+// valid custom directory counts as present.
+func localModelReady(cfg voiceSettings, modelsRoot string) bool {
+	if cfg.CustomModelDir != "" {
+		return voice.ValidCustomModelDir(cfg.CustomModelDir)
+	}
+	return voice.ModelByID(cfg.ModelID).Installed(modelsRoot)
+}
+
+// voiceSetupReady reports whether ctrl+r can record directly: the engine
+// descriptor's params must be ready; local additionally needs the helper
+// binary and a model on disk.
+func voiceSetupReady(cfg voiceSettings, modelsRoot string) bool {
+	return voiceSetupIssue(cfg, modelsRoot) == ""
+}
+
+// voiceSetupIssue describes the first unmet setup step, "" when ready.
+func voiceSetupIssue(cfg voiceSettings, modelsRoot string) string {
+	d, ok := voice.EngineDescriptorByID(cfg.Engine)
+	if !ok {
+		return "unknown engine " + cfg.Engine
+	}
+	if !d.Ready(cfg.engineParams(cfg.Engine)) {
+		if missing := voice.FirstMissingParam(d, cfg.engineParams(cfg.Engine)); missing != "" {
+			return "enter the " + missing + " first"
+		}
+		return "complete the " + d.Label + " settings first"
+	}
+	if cfg.Engine == voiceEngineLocal {
+		if !helperInstalledFn() {
+			return "download the helper binary first"
+		}
+		if !localModelReady(cfg, modelsRoot) {
+			return "download a model first"
+		}
+	}
+	return ""
 }
 
 // voiceReadyFn returns the readiness check (a.voiceReady overrides in tests).
@@ -268,8 +415,8 @@ func (a App) ensureVoice() (App, tea.Cmd) {
 	a.voiceEngine = eng
 	a.voiceName = a.voiceCfg.Engine
 	if a.voiceCfg.Engine == voiceEngineLocal {
-		spec := voice.ModelByID(a.voiceCfg.ModelID)
-		_ = eng.SetModel(spec.ModelDir(voice.ModelsRoot()), spec.Kind)
+		dir, kind := localModelTarget(a.voiceCfg, voice.ModelsRoot())
+		_ = eng.SetModel(dir, kind)
 	}
 	cmds := []tea.Cmd{waitVoiceEvent(eng.Events())}
 	if !a.voiceProgressArmed {
@@ -488,11 +635,7 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	a = a.ensureVoiceCfg()
 	if !a.voiceReadyFn()(a.voiceCfg) {
 		if a.voiceSettingsView != nil {
-			errText := "setup incomplete: download the helper and a model first"
-			if a.voiceCfg.Engine == voiceEngineVolcano {
-				errText = "setup incomplete: enter the Volcano API keys first"
-			}
-			a.voiceSettingsView.testError(errText)
+			a.voiceSettingsView.testError("setup incomplete: " + voiceSetupIssue(a.voiceCfg, voice.ModelsRoot()))
 		}
 		return a, nil
 	}
