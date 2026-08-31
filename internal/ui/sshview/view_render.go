@@ -126,6 +126,7 @@ func (m *Model) renderWithSelection() string {
 	for y := 0; y < h; y++ {
 		absLine := m.visibleAbsLine(y)
 		var line strings.Builder
+		var link uv.Link
 		for col := 0; col < w; {
 			cell := m.cellAtAbs(absLine, col)
 			width := 1
@@ -138,14 +139,19 @@ func (m *Model) renderWithSelection() string {
 			}
 			if inSelection(start, end, absLine, col) {
 				st := uv.Style{}
+				var lk uv.Link
 				if cell != nil {
 					st = cell.Style
+					lk = cell.Link
 				}
 				sel := selectionCellStyle(st)
+				writeLink(&line, &link, lk)
 				line.WriteString((&sel).Styled(content))
 			} else if cell != nil && cell.Content != "" {
+				writeLink(&line, &link, cell.Link)
 				line.WriteString(renderCellANSI(cell))
 			} else {
+				writeLink(&line, &link, uv.Link{})
 				line.WriteString(content)
 			}
 			if width < 1 {
@@ -153,6 +159,7 @@ func (m *Model) renderWithSelection() string {
 			}
 			col += width
 		}
+		writeLink(&line, &link, uv.Link{})
 		lines = append(lines, line.String())
 	}
 	return strings.Join(lines, "\n")
@@ -298,23 +305,28 @@ func overlayRight(line string, width int, overlay string) string {
 
 func renderScrollbackLine(m *Model, w, idx int) string {
 	var sb strings.Builder
+	var link uv.Link
 	for x := 0; x < w; x++ {
 		cell := m.emu.ScrollbackCellAt(x, idx)
 		if cell != nil && cell.Width == 0 {
 			continue
 		}
 		if cell == nil || cell.Content == "" {
+			writeLink(&sb, &link, uv.Link{})
 			sb.WriteByte(' ')
 		} else {
+			writeLink(&sb, &link, cell.Link)
 			sb.WriteString(renderCellANSI(cell))
 		}
 	}
+	writeLink(&sb, &link, uv.Link{})
 	return sb.String()
 }
 
 func renderScreenLine(m *Model, w, y int) string {
 	var sb strings.Builder
 	var pen uv.Style
+	var link uv.Link
 	for x := 0; x < w; x++ {
 		cell := m.emu.CellAt(x, y)
 		if cell != nil && cell.Width == 0 {
@@ -322,20 +334,40 @@ func renderScreenLine(m *Model, w, y int) string {
 		}
 		content := " "
 		var st uv.Style
+		var lk uv.Link
 		if cell != nil && cell.Content != "" {
 			content = cell.Content
 			st = cell.Style
+			lk = cell.Link
 		}
 		if !st.Equal(&pen) {
 			sb.WriteString(st.Diff(&pen))
 			pen = st
 		}
+		writeLink(&sb, &link, lk)
 		sb.WriteString(content)
 	}
+	writeLink(&sb, &link, uv.Link{})
 	if !pen.IsZero() {
 		sb.WriteString(ansi.ResetStyle)
 	}
 	return sb.String()
+}
+
+// writeLink emits the OSC 8 transitions needed to switch the open hyperlink
+// from cur to next, mirroring ultraviolet's renderLine so links survive the
+// cell-by-cell render paths.
+func writeLink(sb *strings.Builder, cur *uv.Link, next uv.Link) {
+	if next == *cur {
+		return
+	}
+	if cur.URL != "" {
+		sb.WriteString(ansi.ResetHyperlink())
+	}
+	if next.URL != "" {
+		sb.WriteString(ansi.SetHyperlink(next.URL, next.Params))
+	}
+	*cur = next
 }
 
 func renderCellANSI(cell *uv.Cell) string {

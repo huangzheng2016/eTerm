@@ -339,6 +339,12 @@ func (e *Emulator) registerDefaultOscHandlers() {
 		return true
 	})
 
+	e.RegisterOscHandler(777, func(data []byte) bool {
+		// urxvt desktop notification, aliased onto the OSC 9 flow
+		e.handleUrxvtNotify(777, data)
+		return true
+	})
+
 	for _, cmd := range []int{
 		10,  // Set/Query foreground color
 		11,  // Set/Query background color
