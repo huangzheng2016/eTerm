@@ -116,6 +116,9 @@ func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model 
 	in.ShowLineNumbers = false
 	in.Prompt = ""
 	in.SetHeight(3)
+	// The real terminal cursor follows the caret (see View); the virtual
+	// inverse-video caret would double-render it.
+	in.SetVirtualCursor(false)
 
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
@@ -666,6 +669,7 @@ func (m *Model) View() tea.View {
 		return tea.NewView("")
 	}
 	var content string
+	var cursor *tea.Cursor
 	switch m.mode {
 	case modeProviders:
 		content = m.providersView()
@@ -678,7 +682,7 @@ func (m *Model) View() tea.View {
 	case modeTaskDetail:
 		content = m.taskDetailView()
 	default:
-		content = m.chatView()
+		content, cursor = m.chatView()
 	}
 	boxW, boxH, _, _ := m.layout()
 	box := lipgloss.NewStyle().
@@ -688,7 +692,9 @@ func (m *Model) View() tea.View {
 		Width(boxW - 2).
 		Height(boxH).
 		Render(content)
-	return tea.NewView(box)
+	v := tea.NewView(box)
+	v.Cursor = cursor
+	return v
 }
 
 // humanizeTokens abbreviates a token count for the title bar: 950 -> "950",
@@ -704,7 +710,7 @@ func humanizeTokens(n int) string {
 	}
 }
 
-func (m *Model) chatView() string {
+func (m *Model) chatView() (string, *tea.Cursor) {
 	cw := m.contentWidth()
 	ctx := ""
 	if cu, ok := m.runner.(interface{ ContextUsage() (int, int) }); ok {
@@ -751,6 +757,15 @@ func (m *Model) chatView() string {
 		Width(m.contentWidth() - 2).
 		Render(m.input.View())
 
+	// Real cursor at the textarea caret: outer border(1)+padding(1), then
+	// title+blank+body+blank above the input box, then its border(1)+padding(1).
+	var cursor *tea.Cursor
+	if c := m.input.Cursor(); c != nil {
+		c.X += 4
+		c.Y += lipgloss.Height(body) + 5
+		cursor = c
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		title,
 		"",
@@ -759,5 +774,5 @@ func (m *Model) chatView() string {
 		inputBox,
 		errLine,
 		hint,
-	)
+	), cursor
 }
