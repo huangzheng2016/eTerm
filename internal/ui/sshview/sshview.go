@@ -433,6 +433,16 @@ func (m *Model) PasteText(text string) {
 	m.PasteCommand(text)
 }
 
+// SendRaw writes raw bytes to the session stdin through the same queue as
+// typed keys (no bracketed-paste wrapping, so control bytes like \x03 reach
+// the pty as-is). Returns false when the session is not writable.
+func (m *Model) SendRaw(s string) bool {
+	if m.disconnected || m.sess == nil || m.sess.Stdin == nil {
+		return false
+	}
+	return m.queueInput([]byte(s))
+}
+
 // Session returns the current session so the app layer can extract relay
 // resume state (stream id and consumed offset) after a disconnect.
 func (m *Model) Session() *internalssh.InteractiveSession { return m.currentSession() }

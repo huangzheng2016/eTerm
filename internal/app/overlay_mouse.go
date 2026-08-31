@@ -48,6 +48,7 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.importHostList = nil
 		a.importSourceMenu = nil
 		a.commandPalette = nil
+		a.aiVisible = false
 		a.helpOverlay = false
 		a.upgradePrompt = nil
 		a.connError = nil

@@ -10,6 +10,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"github.com/huangzheng2016/eTerm/internal/ui/batchresultview"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
@@ -32,6 +33,14 @@ import (
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Agent events, spinner ticks and size changes reach the AI overlay even
+	// while it is hidden; interactive input goes through the chains below.
+	if a.aiView != nil && !aiSkipForward(msg) {
+		if cmd := a.updateAIView(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -188,6 +197,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, func() tea.Msg { return selected }
 			}
 			return a, a.commandPalette.Update(msg)
+		}
+
+		// AI overlay intercepts all keys when visible; esc emits aiview.CloseMsg.
+		if a.aiVisible && a.aiView != nil {
+			if msg.String() == "ctrl+l" {
+				a.aiBridge.Clear()
+			}
+			return a, a.updateAIView(msg)
 		}
 
 		if a.renamePrompt != nil {
@@ -407,6 +424,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, a.keyMap.CommandPalette):
 			a.commandPalette = newCommandPaletteFromDB(a.db, a.width)
 			return a, a.commandPalette.input.Focus()
+		case key.Matches(msg, a.keyMap.AIOverlay):
+			return a.openAIOverlay()
 		case matchCtrlShiftAnyOf(msg, a.keyMap.PasteImageURL) || key.Matches(msg, a.keyMap.PasteImageURL):
 			if !a.activeTabIsSSH() {
 				break
@@ -452,6 +471,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.commandPalette != nil {
 			a.commandPalette.paste(msg)
 			return a, nil
+		}
+		if a.aiVisible && a.aiView != nil {
+			return a, a.updateAIView(msg)
 		}
 		if a.renamePrompt != nil {
 			a.renamePrompt.paste(msg)
@@ -509,6 +531,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a.handleOverlayMouse(msg, a.commandPalette.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
 					return a.commandPaletteMouse(lx, ly)
 				})
+			}
+			if a.aiVisible && a.aiView != nil {
+				return a.handleOverlayMouse(msg, a.aiView.View().Content, nil)
 			}
 			if a.renamePrompt != nil {
 				return a.handleOverlayMouse(msg, a.renamePrompt.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
@@ -581,6 +606,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
+		if a.aiVisible && a.aiView != nil {
+			return a, a.updateAIView(msg)
+		}
 		top := a.MainViewChromeTopLines()
 		if a.viewState == MainView && msg.Y >= 0 && msg.Y < top-1 && len(a.tabs) > 0 {
 			switch msg.Button {
@@ -931,11 +959,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Start sync tick if enabled
 		unlockCmds = append(unlockCmds, syncTickCmd(a.db))
+		var aiCmd tea.Cmd
+		a, aiCmd = a.ensureAI()
+		unlockCmds = append(unlockCmds, aiCmd)
 		return a, tea.Batch(unlockCmds...)
 
 	case types.MasterKeyLockedMsg:
 		a.viewState = LoginView
 		a.statusBar = a.statusBar.SetLocked(true)
+		a.aiVisible = false
 		return a, nil
 
 	case types.ErrorMsg:
@@ -954,6 +986,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.RemoteDaemonLoadedMsg:
 		if msg.Err != nil {
+			a.aiShared.setPeers(nil)
 			if msg.Silent {
 				return a, a.forwardToHomeTabs(msg)
 			}
@@ -961,6 +994,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.toast, tc = a.toast.Show("Daemon peers unavailable: "+msg.Err.Error(), components.ToastWarning, 5*time.Second)
 			return a, tea.Batch(tc, a.forwardToHomeTabs(msg), reflowWindow(a))
 		}
+		a.aiShared.setPeers(msg.Peers)
 		if !msg.Silent {
 			a.toast = a.toast.Dismiss()
 		}
@@ -991,6 +1025,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.EscMenuRequestMsg:
 		a.escMenu = newEscMenu()
+		return a, nil
+
+	case aiview.CloseMsg:
+		a.aiVisible = false
+		return a, nil
+
+	case aiToolRequestMsg:
+		var toolCmd tea.Cmd
+		a, toolCmd = a.handleAIToolRequest(msg.req)
+		return a, tea.Batch(toolCmd, waitAIToolRequest(a.aiToolCh))
+
+	case aiToolSendKeysDoneMsg:
+		a.handleAIToolSendKeysDone(msg.req)
+		return a, nil
+
+	case aiToolRenameDoneMsg:
+		if msg.err == nil {
+			a.renameRemoteTmuxTabs(msg.peer.ID, msg.req.arg, msg.req.arg2)
+		}
+		msg.req.respond(aiToolResult{err: msg.err})
 		return a, nil
 
 	case types.OpenImportSourceMenuMsg:

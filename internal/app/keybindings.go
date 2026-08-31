@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"runtime"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -33,6 +34,7 @@ type KeyBindingConfig struct {
 	ForwardTab     []string `json:"forward_tab"`
 	SnippetsTab    []string `json:"snippets_tab"`
 	CommandPalette []string `json:"command_palette"`
+	AIOverlay      []string `json:"ai_overlay"`
 	LocalTerminal  []string `json:"local_terminal"`
 	RenameTab      []string `json:"rename_tab"`
 	PasteImageURL  []string `json:"paste_image_url"`
@@ -110,9 +112,10 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		TabPageRight:   []string{"alt+shift+right"},
 		Lock:           []string{"ctrl+l"},
 		LockApp:        []string{"ctrl+shift+l"},
-		ForwardTab:     []string{"ctrl+p"},
+		ForwardTab:     []string{"ctrl+shift+f"},
 		SnippetsTab:    []string{"ctrl+shift+b"},
-		CommandPalette: []string{"ctrl+k"},
+		CommandPalette: []string{"ctrl+p"},
+		AIOverlay:      []string{"ctrl+k"},
 		LocalTerminal:  []string{"ctrl+shift+t"},
 		RenameTab:      []string{"ctrl+shift+r"},
 		PasteImageURL:  []string{"ctrl+shift+i"},
@@ -174,6 +177,7 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		cfg.QuitApp = []string{"alt+shift+q", "alt+shift+c"}
 		cfg.CloseTabSafe = []string{"alt+shift+w"}
 		cfg.LockApp = []string{"alt+shift+l"}
+		cfg.ForwardTab = []string{"alt+shift+f"}
 		cfg.SnippetsTab = []string{"alt+shift+b"}
 		cfg.LocalTerminal = []string{"alt+shift+t"}
 		cfg.RenameTab = []string{"alt+shift+r"}
@@ -195,7 +199,20 @@ func LoadKeyBindingConfig(database *gorm.DB) KeyBindingConfig {
 	}
 	// Unmarshal on top of defaults so missing fields keep their default values.
 	_ = json.Unmarshal([]byte(val), &cfg)
+	migrateAIKeyBindings(&cfg, runtime.GOOS)
 	return cfg
+}
+
+// migrateAIKeyBindings resolves conflicts in configs saved before the AI
+// overlay took ctrl+k: the palette moves to ctrl+p and the forwards tab moves
+// off ctrl+p.
+func migrateAIKeyBindings(cfg *KeyBindingConfig, goos string) {
+	if slices.Contains(cfg.AIOverlay, "ctrl+k") && slices.Contains(cfg.CommandPalette, "ctrl+k") {
+		cfg.CommandPalette = []string{"ctrl+p"}
+	}
+	if slices.Contains(cfg.CommandPalette, "ctrl+p") && slices.Contains(cfg.ForwardTab, "ctrl+p") {
+		cfg.ForwardTab = defaultKeyBindingConfig(goos).ForwardTab
+	}
 }
 
 func SaveKeyBindingConfig(database *gorm.DB, cfg KeyBindingConfig) error {
@@ -328,6 +345,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		CommandPalette: key.NewBinding(
 			key.WithKeys(cfg.CommandPalette...),
 			key.WithHelp(helpLabel(cfg.CommandPalette), "commands"),
+		),
+		AIOverlay: key.NewBinding(
+			key.WithKeys(cfg.AIOverlay...),
+			key.WithHelp(helpLabel(cfg.AIOverlay), "ai"),
 		),
 		LocalTerminal: key.NewBinding(
 			key.WithKeys(cfg.LocalTerminal...),

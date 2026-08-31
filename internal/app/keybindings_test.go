@@ -39,6 +39,7 @@ func TestWindowsDefaultsAvoidCtrlShiftLetters(t *testing.T) {
 		cfg.QuitApp,
 		cfg.CloseTabSafe,
 		cfg.LockApp,
+		cfg.ForwardTab,
 		cfg.SnippetsTab,
 		cfg.LocalTerminal,
 		cfg.RenameTab,
@@ -82,5 +83,38 @@ func TestBuildKeyMapTabPageKeysUseConfig(t *testing.T) {
 	}
 	if !key.Matches(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown, Mod: tea.ModAlt | tea.ModShift}), km.TabPageRight) {
 		t.Fatal("TabPageRight does not use config")
+	}
+}
+
+func TestDefaultAIAndPaletteKeys(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		cfg := defaultKeyBindingConfig(goos)
+		if len(cfg.AIOverlay) != 1 || cfg.AIOverlay[0] != "ctrl+k" {
+			t.Fatalf("%s AIOverlay = %#v", goos, cfg.AIOverlay)
+		}
+		if len(cfg.CommandPalette) != 1 || cfg.CommandPalette[0] != "ctrl+p" {
+			t.Fatalf("%s CommandPalette = %#v", goos, cfg.CommandPalette)
+		}
+		// Global app-level bindings must not collide.
+		globals := map[string][]string{
+			"quit_app": cfg.QuitApp, "quit": cfg.Quit, "help": cfg.Help,
+			"new_tab": cfg.NewTab, "close_tab": cfg.CloseTab, "close_tab_safe": cfg.CloseTabSafe,
+			"next_tab": cfg.NextTab, "prev_tab": cfg.PrevTab,
+			"tab_page_left": cfg.TabPageLeft, "tab_page_right": cfg.TabPageRight,
+			"lock": cfg.Lock, "lock_app": cfg.LockApp,
+			"forward_tab": cfg.ForwardTab, "snippets_tab": cfg.SnippetsTab,
+			"command_palette": cfg.CommandPalette, "ai_overlay": cfg.AIOverlay,
+			"local_terminal": cfg.LocalTerminal, "rename_tab": cfg.RenameTab,
+			"paste_image_url": cfg.PasteImageURL,
+		}
+		seen := map[string]string{}
+		for name, keys := range globals {
+			for _, k := range keys {
+				if prev, dup := seen[k]; dup {
+					t.Fatalf("%s: %s and %s both use %q", goos, prev, name, k)
+				}
+				seen[k] = name
+			}
+		}
 	}
 }

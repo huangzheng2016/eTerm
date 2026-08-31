@@ -6,6 +6,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/syncblob"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/remotemenu"
 	"github.com/huangzheng2016/eTerm/internal/ui/shareview"
@@ -43,6 +44,9 @@ const (
 	SessionHistoryTab TabType = "session-hist"
 	SessionListTab    TabType = "sessions"
 	SessionReplayTab  TabType = "session-replay"
+	// AITab never materializes as a tab: selecting it in the list sidebar
+	// opens the AI overlay instead (see openListView).
+	AITab TabType = "ai"
 )
 
 type Tab struct {
@@ -119,6 +123,13 @@ type App struct {
 
 	commandPalette *commandPaletteModel
 
+	// AI assistant overlay (built on first unlock; persists across page switches)
+	aiView    *aiview.Model
+	aiBridge  *aiBridge
+	aiVisible bool
+	aiToolCh  chan aiToolRequest
+	aiShared  *aiSharedState
+
 	connError *connErrorModel
 
 	remoteMenu *remotemenu.Model
@@ -164,6 +175,8 @@ func NewApp(database *gorm.DB, masterKey *security.MasterKeyManager) App {
 		keyMap:          BuildKeyMap(kbCfg),
 		kbConfig:        kbCfg,
 		tmuxRestorePath: defaultTmuxRestorePath(),
+		aiToolCh:        make(chan aiToolRequest, 16),
+		aiShared:        &aiSharedState{},
 	}
 }
 

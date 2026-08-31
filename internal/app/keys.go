@@ -27,6 +27,7 @@ type KeyMap struct {
 	ForwardTab     key.Binding
 	SnippetsTab    key.Binding
 	CommandPalette key.Binding
+	AIOverlay      key.Binding
 	LocalTerminal  key.Binding
 	RenameTab      key.Binding
 	PasteImageURL  key.Binding
