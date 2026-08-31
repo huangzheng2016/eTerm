@@ -6,7 +6,9 @@ REPO="eTerm"
 API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
 BASE="https://github.com/${OWNER}/${REPO}/releases/download"
 
-TAG=$(curl -fsSL "$API" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+if [ -z "${TAG:-}" ]; then
+  TAG=$(curl -fsSL "$API" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+fi
 if [ -z "$TAG" ]; then
   echo "Could not read latest release tag." >&2
   exit 1
