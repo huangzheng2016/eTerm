@@ -58,9 +58,6 @@ type Config struct {
 	MaxContextSize int
 	MaxIterations  int
 	Executor       Executor
-	// LocalTools binds the opt-in local-machine tools (bash, file editor)
-	// and mentions them in the system prompt.
-	LocalTools bool
 	// Cron schedules wake-ups for this session; owned by the app bridge so
 	// jobs survive agent rebuilds. Nil disables the cron tools.
 	Cron *CronScheduler
@@ -80,14 +77,12 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 		return nil, err
 	}
 	baseTools := append(tools, sleepTool)
-	if cfg.LocalTools {
-		localTools, err := BuildLocalTools()
-		if err != nil {
-			return nil, err
-		}
-		baseTools = append(baseTools, localTools...)
+	localTools, err := BuildLocalTools()
+	if err != nil {
+		return nil, err
 	}
-	instruction := agentInstruction(cfg.LocalTools)
+	baseTools = append(baseTools, localTools...)
+	instruction := agentInstruction()
 	// Sub-agents get the base tools only: no spawn_agent, so no recursion.
 	// Steer is main-agent only: queued input targets the user's turn.
 	queue := &steerQueue{}

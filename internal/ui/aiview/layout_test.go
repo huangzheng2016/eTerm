@@ -3,9 +3,27 @@ package aiview
 import (
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 func viewRows(s string) int { return strings.Count(s, "\n") + 1 }
+
+// The AI panel box must fill the frame exactly: app renders the content at
+// (0,0) and maps mouse coords via overlayBounds (centered). Any size gap
+// shifts every mouse hit and makes edge clicks dismiss the panel.
+func TestViewFillsFrameWidth(t *testing.T) {
+	sizes := [][2]int{{80, 24}, {100, 32}, {120, 40}, {60, 20}}
+	for _, sz := range sizes {
+		m := newTestModel(nil)
+		m.SetSize(sz[0], sz[1])
+		for i, l := range strings.Split(m.View().Content, "\n") {
+			if w := lipgloss.Width(l); w != sz[0] {
+				t.Fatalf("%dx%d row %d: width = %d, want %d", sz[0], sz[1], i, w, sz[0])
+			}
+		}
+	}
+}
 
 // fillConversation loads a long mixed-kind conversation with wide lines.
 func fillConversation(m *Model) {

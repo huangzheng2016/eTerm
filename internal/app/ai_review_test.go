@@ -78,7 +78,7 @@ func TestBridgeCancelRun(t *testing.T) {
 	}
 	bridge := &aiBridge{store: store}
 	bridge.agent = &fakeAgent{}
-	bridge.agentKey = "p\x00m\x00false"
+	bridge.agentKey = "p\x00m"
 
 	out, err := bridge.Run(context.Background(), "hi")
 	if err != nil {
@@ -106,7 +106,7 @@ func TestBridgeEnqueueRoutesToAgent(t *testing.T) {
 	bridge := &aiBridge{store: store}
 	agent := &fakeAgent{}
 	bridge.agent = agent
-	bridge.agentKey = "p\x00m\x00false"
+	bridge.agentKey = "p\x00m"
 
 	if err := bridge.Enqueue("too early"); err == nil {
 		t.Fatal("Enqueue without a run must fail")
@@ -156,7 +156,7 @@ func TestAgentForClosesReplacedAgent(t *testing.T) {
 	closed := make(chan struct{})
 	bridge := &aiBridge{}
 	bridge.agent = &closeAgent{closed: closed}
-	bridge.agentKey = "old\x00model\x00false"
+	bridge.agentKey = "old\x00model"
 	p := &ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"}
 	if _, err := bridge.agentFor(p, "m", 0); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestSwitchCancelsInFlightRun(t *testing.T) {
 	}
 	bridge := &aiBridge{store: store, db: database}
 	bridge.agent = &fakeAgent{}
-	bridge.agentKey = "p1\x00m1\x00false"
+	bridge.agentKey = "p1\x00m1"
 
 	out, err := bridge.Run(context.Background(), "hi")
 	if err != nil {

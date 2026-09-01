@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -18,9 +17,8 @@ import (
 )
 
 const (
-	aiProvidersSettingKey  = "ai_providers"   // encrypted JSON []ai.Provider (user-added only)
-	aiActiveSettingKey     = "ai_active"      // plain JSON {provider, model}
-	aiLocalToolsSettingKey = "ai_local_tools" // "true"/"false", default false
+	aiProvidersSettingKey = "ai_providers" // encrypted JSON []ai.Provider (user-added only)
+	aiActiveSettingKey    = "ai_active"    // plain JSON {provider, model}
 )
 
 // aiBridge adapts ai.Agent + ai.Store to the aiview interfaces. It also
@@ -35,9 +33,6 @@ type aiBridge struct {
 	agent    aiAgent
 	agentKey string
 	cancel   context.CancelFunc
-	// localTools binds the bash/file tools to newly built agents (persisted
-	// setting ai_local_tools, toggled via the panel's /tools command).
-	localTools bool
 	// running reports a run is in flight (guarded by mu, runGen defeats a
 	// stale pump goroutine clearing a newer run's flag).
 	running bool
@@ -68,7 +63,7 @@ type aiAgent interface {
 
 func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Executor) *aiBridge {
 	_ = database.AutoMigrate(&aiSession{}, &aiCronJob{})
-	b := &aiBridge{store: loadAIStore(database, mk), db: database, mk: mk, exec: exec, localTools: loadAILocalTools(database)}
+	b := &aiBridge{store: loadAIStore(database, mk), db: database, mk: mk, exec: exec}
 	if e, ok := exec.(*aiExecutor); ok {
 		b.fireCh = e.reqCh
 	}
@@ -98,22 +93,6 @@ func (b *aiBridge) setCronSession(id string) {
 	if changed {
 		b.cron.SetSession(id)
 	}
-}
-
-func loadAILocalTools(database *gorm.DB) bool {
-	v, err := db.GetSetting(database, aiLocalToolsSettingKey)
-	return err == nil && v == "true"
-}
-
-// ToggleLocalTools flips the local bash/file tools and persists the choice
-// (wired to the panel's /tools command). agentFor keys on the flag, so the
-// next run builds an agent with the new tool set.
-func (b *aiBridge) ToggleLocalTools() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.localTools = !b.localTools
-	_ = db.SetSetting(b.db, aiLocalToolsSettingKey, strconv.FormatBool(b.localTools))
-	return b.localTools
 }
 
 func loadAIStore(database *gorm.DB, mk *security.MasterKeyManager) *ai.Store {
@@ -224,7 +203,7 @@ func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentE
 }
 
 func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, error) {
-	key := p.Name + "\x00" + model + "\x00" + strconv.FormatBool(b.localTools)
+	key := p.Name + "\x00" + model
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.agent != nil && b.agentKey == key {
@@ -235,7 +214,6 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 		Model:          model,
 		MaxContextSize: maxCtx,
 		Executor:       b.exec,
-		LocalTools:     b.localTools,
 		Cron:           b.cron,
 	})
 	if err != nil {

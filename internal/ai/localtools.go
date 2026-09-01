@@ -28,12 +28,12 @@ const (
 // sandbox operator).
 //
 // Scope is deliberately unrestricted: reads and writes go to any path the
-// user account can. That is the product decision behind ai_local_tools - the
-// tools are opt-in (default off, toggled via /tools) and run without
-// permission gates; the LLM-facing prompt (localToolsPrompt) warns that the
-// tools are unsandboxed. A home-dir jail would break legitimate work outside
-// ~ (projects in /opt, /tmp scratch files), and a blocklist of sensitive
-// paths would be security theater next to an unrestricted bash tool.
+// user account can. That is the product decision behind the local tools -
+// they run without permission gates and the LLM-facing prompt
+// (localToolsPrompt) warns that the tools are unsandboxed. A home-dir jail
+// would break legitimate work outside ~ (projects in /opt, /tmp scratch
+// files), and a blocklist of sensitive paths would be security theater next
+// to an unrestricted bash tool.
 type localOperator struct{}
 
 func (localOperator) ReadFile(_ context.Context, path string) (string, error) {
@@ -150,7 +150,7 @@ func (s *safeTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	return out, nil
 }
 
-// BuildLocalTools builds the opt-in local-machine tools: bash (custom, no
+// BuildLocalTools builds the local-machine tools: bash (custom, no
 // official equivalent exists) and the official eino-ext str_replace_editor
 // for viewing/creating/editing local files.
 func BuildLocalTools() ([]tool.BaseTool, error) {

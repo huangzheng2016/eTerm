@@ -24,6 +24,7 @@ import (
 
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
@@ -31,8 +32,6 @@ var streamIDGen atomic.Uint64
 
 // bottomPadMax is how many empty rows the user can scroll past the live bottom.
 const bottomPadMax = 2
-
-const selectionAutoScrollEdgePercent = 20
 
 const maxCoalescedChunkBytes = 64 * 1024
 
@@ -137,8 +136,8 @@ type Model struct {
 	// Mouse drag text selection over the visible screen + scrollback.
 	sel selection
 
-	selectionAutoScrollDir    int
-	selectionAutoScrollQueued bool
+	// Edge-band auto-scroll while a drag selection sits at the top/bottom.
+	selAutoScroll textselection.AutoScroll
 
 	// Configurable keybindings
 	vk viewkeys.SSHKeys
@@ -939,8 +938,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sel.caret = selPoint{line: m.visibleAbsLine(y), col: x}
 		}
 		m.sel.dragging = false
-		m.selectionAutoScrollDir = 0
-		m.selectionAutoScrollQueued = false
+		m.selAutoScroll.Stop()
 		// Click without drag clears the selection; a real drag copies.
 		if m.sel.anchor == m.sel.caret && !m.sel.moved {
 			m.sel.active = false
@@ -1030,12 +1028,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.StreamID != m.streamID {
 			return m, nil
 		}
-		m.selectionAutoScrollQueued = false
-		if !m.sel.dragging || m.selectionAutoScrollDir == 0 {
+		m.selAutoScroll.Queued = false
+		if !m.sel.dragging || m.selAutoScroll.Dir == 0 {
 			return m, nil
 		}
 		if !m.scrollSelectionOnce() {
-			m.selectionAutoScrollDir = 0
+			m.selAutoScroll.Dir = 0
 			return m, nil
 		}
 		m.sel.moved = true
@@ -1149,28 +1147,17 @@ func (m *Model) scrollIndicatorVisible(now time.Time) bool {
 }
 
 func (m *Model) updateSelectionAutoScroll(y int) tea.Cmd {
-	h := m.emu.Height()
-	if h <= 0 {
-		return nil
-	}
-	edgeRows := max(2, h/selectionAutoScrollEdgePercent)
-	switch {
-	case y < edgeRows:
-		m.selectionAutoScrollDir = -1
-	case y >= h-edgeRows:
-		m.selectionAutoScrollDir = 1
-	default:
-		m.selectionAutoScrollDir = 0
+	if !m.selAutoScroll.Update(y, m.emu.Height()) {
 		return nil
 	}
 	return m.queueSelectionAutoScroll()
 }
 
 func (m *Model) queueSelectionAutoScroll() tea.Cmd {
-	if m.selectionAutoScrollQueued || m.selectionAutoScrollDir == 0 {
+	if m.selAutoScroll.Queued || m.selAutoScroll.Dir == 0 {
 		return nil
 	}
-	m.selectionAutoScrollQueued = true
+	m.selAutoScroll.Queued = true
 	streamID := m.streamID
 	return tea.Tick(60*time.Millisecond, func(time.Time) tea.Msg {
 		return selectionAutoScrollMsg{StreamID: streamID}
@@ -1178,7 +1165,7 @@ func (m *Model) queueSelectionAutoScroll() tea.Cmd {
 }
 
 func (m *Model) scrollSelectionOnce() bool {
-	switch m.selectionAutoScrollDir {
+	switch m.selAutoScroll.Dir {
 	case -1:
 		if m.bottomPad > 0 {
 			m.bottomPad--

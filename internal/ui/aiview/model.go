@@ -59,6 +59,9 @@ type block struct {
 	final    bool
 	queued   bool // blockUser only: submitted mid-run, not yet acked by the agent
 	cache    string
+	// joins has one textselection break kind per cache line: which lines are
+	// soft-wrap continuations, so copying joins them like the terminal does.
+	joins []textselection.LineBreak
 }
 
 type agentEventMsg struct{ ev AgentEvent }
@@ -84,11 +87,17 @@ type Model struct {
 	blocks []block
 	cancel context.CancelFunc
 	events <-chan AgentEvent
+	// lineBreaks mirrors the viewport content lines (see rebuild).
+	lineBreaks []textselection.LineBreak
 
 	dirty        bool
 	flushPending bool
 	expandTools  bool
 	sel          textselection.Selection
+	// selAutoScroll scrolls the conversation while a drag selection sits in
+	// the top/bottom edge band; selSeq invalidates stale ticks on a new drag.
+	selAutoScroll textselection.AutoScroll
+	selSeq        int
 
 	md *markdown
 
@@ -157,8 +166,12 @@ func (m *Model) SetSize(w, h int) {
 	m.renderAll()
 }
 
+// layout returns the panel geometry. The AI panel renders fullscreen: the
+// border box fills the frame exactly (boxW x boxH), so overlay mouse coords
+// map 1:1 (overlayBounds centers a same-sized box at offset 0,0). lipgloss
+// Width/Height include border and padding, so the interior wrap width is
+// boxW-2(border)-2(padding).
 func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
-	// The AI panel renders fullscreen; the border box fills the frame.
 	boxW = m.width
 	if boxW < 20 {
 		boxW = 20
@@ -167,9 +180,7 @@ func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
 	if boxH < 8 {
 		boxH = 8
 	}
-	// lipgloss v2 Width includes border and padding: the box is boxW-2 wide
-	// total, so its interior wrap width is boxW-2-2(border)-2(padding).
-	contentW = boxW - 6
+	contentW = boxW - 4
 	viewH = boxH - 2 - 1 - 5 - 1 - 3
 	if viewH < 1 {
 		viewH = 1
@@ -321,6 +332,7 @@ func (m *Model) clearSession() {
 	m.status = statusIdle
 	m.errMsg = ""
 	m.sel = textselection.Selection{}
+	m.selAutoScroll.Stop()
 	m.sessionID = ""
 	m.viewport.SetContent("")
 }
@@ -445,18 +457,26 @@ func truncateCells(s string, max int) string {
 func (m *Model) renderBlock(i int) {
 	b := &m.blocks[i]
 	cw := m.contentWidth()
+	var logical []string // unwrapped source lines; nil means all real breaks
 	switch b.kind {
 	case blockUser:
+		prefix := "You: "
 		if b.queued {
-			b.cache = ui.DimStyle.Width(cw).Render("Queued: " + b.text)
+			prefix = "Queued: "
+		}
+		logical = strings.Split(prefix+b.text, "\n")
+		if b.queued {
+			b.cache = ui.DimStyle.Width(cw).Render(prefix + b.text)
 			break
 		}
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fd7ff")).Width(cw).
-			Render("You: " + b.text)
+			Render(prefix + b.text)
 	case blockThinking:
+		logical = strings.Split("Thinking: "+b.text, "\n")
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#666")).Italic(true).Width(cw).
 			Render("Thinking: " + b.text)
 	case blockSystem:
+		logical = strings.Split(b.text, "\n")
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#666")).Italic(true).Width(cw).
 			Render(b.text)
 	case blockTool:
@@ -477,6 +497,7 @@ func (m *Model) renderBlock(i int) {
 		}
 		if m.expandTools {
 			b.cache = head + "\n" + ui.DimStyle.Width(cw).Render(out)
+			logical = append([]string{ansi.Strip(head)}, strings.Split(out, "\n")...)
 			break
 		}
 		lines := strings.Split(out, "\n")
@@ -498,10 +519,12 @@ func (m *Model) renderBlock(i int) {
 		// Glamour does not break overlong words (URLs); hard-wrap so no
 		// line exceeds the box interior width.
 		b.cache = strings.Trim(lipgloss.NewStyle().Width(cw).Render(out), "\n")
+		logical = m.md.renderLogical(b.text, final)
 		if final {
 			b.final = true
 		}
 	}
+	b.joins = alignBreaks(strings.Split(ansi.Strip(b.cache), "\n"), logical)
 }
 
 func (m *Model) renderAll() {
@@ -517,8 +540,25 @@ func (m *Model) rebuild() {
 	}
 	atBottom := m.viewport.AtBottom()
 	parts := make([]string, 0, len(m.blocks))
+	// lineBreaks tracks each content line's break kind to the previous line,
+	// so a copy joins soft-wrapped lines like the terminal does.
+	breaks := []textselection.LineBreak{{Kind: textselection.BreakNewline}}
 	for i := range m.blocks {
 		parts = append(parts, m.blocks[i].cache)
+		n := strings.Count(m.blocks[i].cache, "\n") + 1
+		for k := 1; k < n; k++ {
+			br := textselection.LineBreak{Kind: textselection.BreakNewline}
+			if k < len(m.blocks[i].joins) {
+				br = m.blocks[i].joins[k]
+			}
+			breaks = append(breaks, br)
+		}
+		if i < len(m.blocks)-1 {
+			// The blank separator line and the next block's first line.
+			breaks = append(breaks,
+				textselection.LineBreak{Kind: textselection.BreakNewline},
+				textselection.LineBreak{Kind: textselection.BreakNewline})
+		}
 	}
 	content := strings.Join(parts, "\n\n")
 	if m.sel.Active {
@@ -528,6 +568,7 @@ func (m *Model) rebuild() {
 		}
 		content = strings.Join(lines, "\n")
 	}
+	m.lineBreaks = breaks
 	m.viewport.SetContent(content)
 	if atBottom {
 		m.viewport.GotoBottom()
@@ -547,6 +588,47 @@ func (m *Model) contentPoint(x, y int) (line, col int) {
 		row = vh - 1
 	}
 	return m.viewport.YOffset() + row, x - 2
+}
+
+// selectionAutoScrollMsg is the tick that scrolls the conversation while a
+// drag selection sits in the top/bottom edge band.
+type selectionAutoScrollMsg struct{ seq int }
+
+const selectionAutoScrollInterval = 60 * time.Millisecond
+
+func (m *Model) queueSelectionAutoScroll() tea.Cmd {
+	if m.selAutoScroll.Queued || m.selAutoScroll.Dir == 0 {
+		return nil
+	}
+	m.selAutoScroll.Queued = true
+	seq := m.selSeq
+	return tea.Tick(selectionAutoScrollInterval, func(time.Time) tea.Msg {
+		return selectionAutoScrollMsg{seq: seq}
+	})
+}
+
+// scrollSelectionOnce scrolls the conversation one row in the auto-scroll
+// direction and extends the caret to the new edge line. False means the
+// viewport cannot scroll further.
+func (m *Model) scrollSelectionOnce() bool {
+	_, _, _, vh := m.layout()
+	switch m.selAutoScroll.Dir {
+	case -1:
+		if m.viewport.YOffset() <= 0 {
+			return false
+		}
+		m.viewport.ScrollUp(1)
+		m.sel.Move(m.viewport.YOffset(), m.sel.Caret.Col)
+	case 1:
+		if m.viewport.AtBottom() {
+			return false
+		}
+		m.viewport.ScrollDown(1)
+		m.sel.Move(m.viewport.YOffset()+vh-1, m.sel.Caret.Col)
+	default:
+		return false
+	}
+	return true
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -593,6 +675,17 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case flushTickMsg:
 		m.flush()
 		return m, nil
+	case selectionAutoScrollMsg:
+		m.selAutoScroll.Queued = false
+		if msg.seq != m.selSeq || !m.sel.Dragging {
+			return m, nil
+		}
+		if !m.scrollSelectionOnce() {
+			m.selAutoScroll.Dir = 0
+			return m, nil
+		}
+		m.rebuild()
+		return m, m.queueSelectionAutoScroll()
 	case spinner.TickMsg:
 		if m.status == statusRunning {
 			var cmd tea.Cmd
@@ -613,6 +706,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.MouseClickMsg:
 		if m.mode == modeChat && msg.Button == tea.MouseLeft {
+			m.selAutoScroll.Stop()
+			m.selSeq++
 			m.sel.Begin(m.contentPoint(msg.X, msg.Y))
 			m.rebuild()
 		}
@@ -621,13 +716,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sel.Dragging {
 			m.sel.Move(m.contentPoint(msg.X, msg.Y))
 			m.rebuild()
+			_, _, _, vh := m.layout()
+			vy := min(max(msg.Y-3, 0), vh-1)
+			if m.selAutoScroll.Update(vy, vh) {
+				return m, m.queueSelectionAutoScroll()
+			}
 		}
 		return m, nil
 	case tea.MouseReleaseMsg:
 		if m.sel.Dragging {
+			m.selAutoScroll.Stop()
+			m.selSeq++
 			if m.sel.End(m.contentPoint(msg.X, msg.Y)) {
 				m.rebuild()
-				text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
+				text := m.sel.TextJoined(strings.Split(m.viewport.GetContent(), "\n"), m.lineBreaks)
 				if text != "" {
 					return m, tea.Batch(
 						tea.SetClipboard(text),
@@ -668,6 +770,7 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.sel = textselection.Selection{}
+		m.selAutoScroll.Stop()
 		m.rebuild()
 		// Esc only hides the panel; the run keeps going in the background
 		// (status bar shows "ai running"). ctrl+c is the interrupt.
@@ -750,7 +853,7 @@ func (m *Model) View() tea.View {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(0, 1).
-		Width(boxW - 2).
+		Width(boxW).
 		Height(boxH).
 		Render(content)
 	v := tea.NewView(box)

@@ -26,7 +26,7 @@ func TestSlashHelpListsCommands(t *testing.T) {
 	if last.kind != blockSystem {
 		t.Fatalf("help block kind = %v, want blockSystem", last.kind)
 	}
-	for _, s := range []string{"/model", "/new", "/resume", "/fork", "/undo", "/tools", "ctrl+c", "ctrl+o", "ctrl+p", "ctrl+l", "esc close"} {
+	for _, s := range []string{"/model", "/new", "/resume", "/fork", "/undo", "/tasks", "ctrl+c", "ctrl+o", "ctrl+p", "ctrl+l", "esc close"} {
 		if !strings.Contains(last.text, s) {
 			t.Fatalf("help text missing %q", s)
 		}
@@ -249,23 +249,6 @@ func TestSlashForkFlushesPendingSave(t *testing.T) {
 	}
 	if parent == nil || len(parent.history) == 0 {
 		t.Fatal("parent session lost its last turn")
-	}
-}
-
-func TestSlashToolsTogglesLocalTools(t *testing.T) {
-	m := newTestModel(nil)
-	sendSlash(t, m, "/tools")
-	last := m.blocks[len(m.blocks)-1]
-	if last.kind != blockSystem || !strings.Contains(last.text, "enabled") {
-		t.Fatalf("block = %+v", last)
-	}
-	sendSlash(t, m, "/tools")
-	last = m.blocks[len(m.blocks)-1]
-	if !strings.Contains(last.text, "disabled") {
-		t.Fatalf("block = %+v", last)
-	}
-	if m.input.Value() != "" {
-		t.Fatal("input not cleared after /tools")
 	}
 }
 

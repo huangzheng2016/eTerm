@@ -33,16 +33,16 @@ func TestViewCursorFollowsWrappedCJKCaret(t *testing.T) {
 	m.Init()
 	fillConversation(m) // body becomes the full-height viewport
 
-	// 100 runes = 200 cells; input wrap width is cw-6 = 88, so the caret
-	// sits on wrapped row 2 at cell 24.
+	// 100 runes = 200 cells; input wrap width is cw-6 = 90, so the caret
+	// sits on wrapped row 2 at cell 20.
 	m.input.SetValue(strings.Repeat("你好", 50))
 
 	c := m.input.Cursor()
 	if c == nil {
 		t.Fatal("textarea reported no cursor")
 	}
-	if c.X != 24 || c.Y != 2 {
-		t.Fatalf("textarea caret = %d,%d want 24,2", c.X, c.Y)
+	if c.X != 20 || c.Y != 2 {
+		t.Fatalf("textarea caret = %d,%d want 20,2", c.X, c.Y)
 	}
 
 	v := m.View()

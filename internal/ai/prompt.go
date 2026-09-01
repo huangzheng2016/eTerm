@@ -26,18 +26,14 @@ Workflow rules:
 
 Reply concisely in plain text. Report what you did and what you observed; do not dump raw terminal output unless the user asks for it.`
 
-// localToolsPrompt is appended to the system prompt only when the user
-// enabled the local tools via /tools (setting ai_local_tools).
+// localToolsPrompt documents the local-machine tools; they are always bound.
 const localToolsPrompt = `
 
-Local machine tools (the user enabled these explicitly):
+Local machine tools:
 - bash: run a shell command on the user's local machine; returns stdout, stderr and the exit code.
 - str_replace_editor: view, create and edit local files; absolute paths only.
 These tools are not sandboxed: they run with the user's full local privileges and can read and write any path the user account can. Be careful with destructive commands and with files outside the user's project (shell rc files, SSH config, system directories); use them only when the task clearly calls for it.`
 
-func agentInstruction(localTools bool) string {
-	if localTools {
-		return systemPrompt + localToolsPrompt
-	}
-	return systemPrompt
+func agentInstruction() string {
+	return systemPrompt + localToolsPrompt
 }

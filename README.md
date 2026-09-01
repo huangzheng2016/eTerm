@@ -134,7 +134,6 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 | `/fork`    | 分叉当前会话                              |
 | `/undo`    | 撤销上一轮                               |
 | `/tasks`   | 后台子代理列表（j/k 移动、enter 查看、x 取消）      |
-| `/tools`   | 开关本地工具（见下）                          |
 | `/help`    | 帮助                                  |
 
 面板按键：enter 发送；运行中继续输入会排队（Queued），在下一步边界注入当前 run；`C-c` 中断当前 run；`C-o` 展开/折叠工具输出；`C-l` 清屏；标题栏显示 context 用量（已用/上限）。
@@ -146,7 +145,7 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 - 打开会话：`open_local_terminal` / `open_ssh`（按 `list_hosts` 的主机名，重名报歧义）/ `open_tmux`（按 `list_tmux_sessions` 的会话名）
 - 其他：`sleep`（最长 10 分钟）；`spawn_agent` / `wait_agent` / `list_agents` 后台子代理（最多 4 个并发）
 
-本地工具（默认关闭）：`/tools` 开启后追加 `bash` 与 `str_replace_editor`（读/写/改/undo），对下一轮 run 生效。无沙箱，以当前用户完整权限执行，仅在信任当前任务时开启。
+本地工具：`bash` 与 `str_replace_editor`（读/写/改/undo）。无沙箱，以当前用户完整权限执行。
 
 ## 语音输入
 

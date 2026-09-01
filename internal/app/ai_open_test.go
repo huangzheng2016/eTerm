@@ -179,26 +179,6 @@ func TestFindFreshAITab(t *testing.T) {
 	}
 }
 
-func TestToggleLocalToolsPersists(t *testing.T) {
-	database := aiTestDB(t)
-	if loadAILocalTools(database) {
-		t.Fatal("default must be off")
-	}
-	bridge := &aiBridge{db: database}
-	if !bridge.ToggleLocalTools() {
-		t.Fatal("first toggle must turn on")
-	}
-	if !loadAILocalTools(database) {
-		t.Fatal("toggle not persisted")
-	}
-	if bridge.ToggleLocalTools() {
-		t.Fatal("second toggle must turn off")
-	}
-	if loadAILocalTools(database) {
-		t.Fatal("off state not persisted")
-	}
-}
-
 // The returned connect cmd must be an SSHConnectMsg for the resolved host,
 // i.e. the same message the command palette emits.
 func TestOpenSSHRequestEmitsPaletteConnectMsg(t *testing.T) {

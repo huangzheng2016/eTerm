@@ -486,10 +486,10 @@ func TestDragSelectionAutoScrollUsesFivePercentEdge(t *testing.T) {
 		t.Fatal("expected auto-scroll inside 5 percent edge")
 	}
 
-	m.selectionAutoScrollDir = 0
-	m.selectionAutoScrollQueued = false
+	m.selAutoScroll.Dir = 0
+	m.selAutoScroll.Queued = false
 	_, cmd = m.Update(tea.MouseMotionMsg(tea.Mouse{X: 0, Y: 5}))
-	if cmd != nil || m.selectionAutoScrollDir != 0 {
+	if cmd != nil || m.selAutoScroll.Dir != 0 {
 		t.Fatal("unexpected auto-scroll outside 5 percent edge")
 	}
 }

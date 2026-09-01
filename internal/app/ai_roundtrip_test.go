@@ -170,6 +170,25 @@ func (a *cronFireAgent) Run(ctx context.Context, input string) <-chan ai.Event {
 	return a.fakeAgent.Run(ctx, input)
 }
 
+// The fullscreen AI panel must sit at overlay origin (0,0) exactly: clicks
+// outside overlayBounds dismiss the panel, so any gap makes edge clicks
+// close it and shifts every drag selection.
+func TestAIOverlayBoundsFillFrame(t *testing.T) {
+	store := &ai.Store{}
+	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
+	if err := store.SetActive("p", "m"); err != nil {
+		t.Fatal(err)
+	}
+	bridge := &aiBridge{store: store}
+	av := aiview.New(bridge, bridge, bridge)
+	av.SetSize(100, 32)
+	a := App{aiView: av, width: 100, height: 32}
+	ox, oy, ow, oh := a.overlayBounds(a.aiView.View().Content)
+	if ox != 0 || oy != 0 || ow != 100 || oh != 32 {
+		t.Fatalf("overlayBounds = %d,%d %dx%d, want 0,0 100x32", ox, oy, ow, oh)
+	}
+}
+
 // A cron fire routed through the panel's send path starts a new run when the
 // panel is idle and queues onto the active run when one is in flight.
 func TestAICronFireDelivery(t *testing.T) {
@@ -181,7 +200,7 @@ func TestAICronFireDelivery(t *testing.T) {
 	bridge := &aiBridge{store: store}
 	agent := &cronFireAgent{}
 	bridge.agent = agent
-	bridge.agentKey = "p\x00m\x00false"
+	bridge.agentKey = "p\x00m"
 	a := App{aiView: aiview.New(bridge, bridge, bridge)}
 	defer bridge.CancelRun()
 

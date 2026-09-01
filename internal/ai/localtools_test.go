@@ -122,22 +122,18 @@ func (failingTool) InvokableRun(context.Context, string, ...tool.Option) (string
 	return "", errors.New("boom")
 }
 
-func TestAgentInstructionGatesLocalTools(t *testing.T) {
-	off := agentInstruction(false)
-	if strings.Contains(off, "str_replace_editor") || strings.Contains(off, "bash:") {
-		t.Fatal("local tools mentioned while disabled")
+func TestAgentInstructionIncludesLocalTools(t *testing.T) {
+	on := agentInstruction()
+	if !strings.Contains(on, "str_replace_editor") || !strings.Contains(on, "bash:") {
+		t.Fatal("local tools missing from the prompt")
 	}
 	for _, s := range []string{"open_local_terminal", "open_ssh", "open_tmux", "list_hosts", "list_tmux_sessions"} {
-		if !strings.Contains(off, s) {
+		if !strings.Contains(on, s) {
 			t.Fatalf("base prompt missing %q", s)
 		}
 	}
-	on := agentInstruction(true)
-	if !strings.Contains(on, "str_replace_editor") || !strings.Contains(on, "bash:") {
-		t.Fatal("local tools missing while enabled")
-	}
-	if !strings.HasPrefix(on, off) {
-		t.Fatal("enabled prompt must extend the base prompt")
+	if !strings.HasPrefix(on, systemPrompt) {
+		t.Fatal("prompt must extend the base prompt")
 	}
 }
 
