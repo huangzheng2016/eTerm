@@ -36,6 +36,20 @@ type AgentRunner interface {
 	Enqueue(text string) error
 	// ClearQueue drops queued messages not yet injected (ctrl+c, ctrl+l).
 	ClearQueue()
+	// DequeueLast removes the newest queued (not yet injected) message for
+	// queue recall; ok is false when nothing is queued.
+	DequeueLast() (text string, ok bool)
+	// Compact summarizes older history with the chat model and reports the
+	// before/after message and estimated token counts.
+	Compact(ctx context.Context) (CompactStats, error)
+}
+
+// CompactStats reports a compaction's effect for display.
+type CompactStats struct {
+	MessagesBefore int
+	MessagesAfter  int
+	TokensBefore   int
+	TokensAfter    int
 }
 
 type Provider struct {

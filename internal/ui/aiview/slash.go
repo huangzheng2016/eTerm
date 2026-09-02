@@ -16,8 +16,8 @@ import (
 
 const saveDebounce = 2 * time.Second
 
-const slashHelpText = "Commands: /model pick model · /tasks background agents · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /help this help" +
-	"\nKeys: enter send · ctrl+c stop · ctrl+o expand · ctrl+p models · pgup/pgdn scroll · drag copy · esc close"
+const slashHelpText = "Commands: /model pick model · /tasks background agents · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /copy copy last reply · /export export markdown · /compact compact history · /help this help" +
+	"\nKeys: enter send · ctrl+c stop · ctrl+o expand · ctrl+p models · ctrl+g editor · up/down history · pgup/pgdn scroll · drag copy · esc close"
 
 // slashCommand is one menu entry: the command and its one-line description.
 type slashCommand struct {
@@ -32,14 +32,18 @@ var slashCommands = []slashCommand{
 	{"/fork", "fork session"},
 	{"/undo", "rewind one turn"},
 	{"/tasks", "background agents"},
+	{"/copy", "copy last reply"},
+	{"/export", "export session as markdown"},
+	{"/compact", "compact history"},
 	{"/help", "this help"},
 }
 
 // slashMatches returns the menu entries for the current input: the prefix
 // matches when it starts with "/". Nil when the menu is hidden (input empty
-// or not a command, dismissed with esc, outside chat mode, or no matches).
+// or not a command, dismissed with esc, outside chat mode, browsing input
+// history, or no matches).
 func (m *Model) slashMatches() []slashCommand {
-	if m.mode != modeChat || m.slashMenuOff {
+	if m.mode != modeChat || m.slashMenuOff || m.histIdx >= 0 {
 		return nil
 	}
 	v := strings.TrimSpace(m.input.Value())
@@ -91,12 +95,13 @@ type historyMessage struct {
 func (m *Model) runSlashCommand(input string) tea.Cmd {
 	cmd := strings.Fields(input)[0]
 	switch cmd {
-	case "/model", "/new", "/resume", "/fork", "/undo", "/help", "/tasks":
+	case "/model", "/new", "/resume", "/fork", "/undo", "/help", "/tasks", "/copy", "/export", "/compact":
 	default:
 		return m.slashError("unknown command " + cmd + " - try /help")
 	}
-	// /tasks stays available mid-run: background agents run then.
-	if m.status == statusRunning && cmd != "/help" && cmd != "/model" && cmd != "/tasks" {
+	// Mid-run only read-only commands stay available (/copy, /export, ...);
+	// /compact and the other session-changing commands are refused.
+	if m.status == statusRunning && cmd != "/help" && cmd != "/model" && cmd != "/tasks" && cmd != "/copy" && cmd != "/export" {
 		return m.slashError("run in progress - ctrl+c to stop")
 	}
 	m.input.Reset()
@@ -121,6 +126,12 @@ func (m *Model) runSlashCommand(input string) tea.Cmd {
 		m.undoTurn()
 	case "/tasks":
 		return m.openTasks()
+	case "/copy":
+		return m.copyLastReply()
+	case "/export":
+		return m.exportSession()
+	case "/compact":
+		return m.compactSession()
 	}
 	return nil
 }
@@ -194,6 +205,7 @@ func (m *Model) openSessions() {
 		return
 	}
 	m.sCursor = 0
+	m.sFilter = ""
 	m.mode = modeSessions
 }
 
@@ -225,21 +237,54 @@ func (m *Model) loadSession(e SessionEntry) {
 	m.renderAll()
 }
 
+// filteredSessions applies the /resume filter: a case-insensitive substring
+// match on the session title.
+func (m *Model) filteredSessions() []SessionEntry {
+	if m.sFilter == "" {
+		return m.sessionList
+	}
+	f := strings.ToLower(m.sFilter)
+	var out []SessionEntry
+	for _, e := range m.sessionList {
+		if strings.Contains(strings.ToLower(e.Title), f) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func (m *Model) updateSessions(msg tea.KeyPressMsg) tea.Cmd {
+	list := m.filteredSessions()
 	switch msg.String() {
 	case "esc":
+		if m.sFilter != "" {
+			m.sFilter = ""
+			m.sCursor = 0
+			return nil
+		}
 		m.mode = modeChat
-	case "up", "k":
+	case "up":
 		if m.sCursor > 0 {
 			m.sCursor--
 		}
-	case "down", "j":
-		if m.sCursor < len(m.sessionList)-1 {
+	case "down":
+		if m.sCursor < len(list)-1 {
 			m.sCursor++
 		}
 	case "enter":
-		if m.sCursor < len(m.sessionList) {
-			m.loadSession(m.sessionList[m.sCursor])
+		if m.sCursor < len(list) {
+			m.loadSession(list[m.sCursor])
+		}
+	case "backspace":
+		if m.sFilter != "" {
+			r := []rune(m.sFilter)
+			m.sFilter = string(r[:len(r)-1])
+			m.sCursor = 0
+		}
+	default:
+		if msg.Text != "" {
+			m.sFilter += msg.Text
+			m.sCursor = 0
 		}
 	}
 	return nil
@@ -247,7 +292,11 @@ func (m *Model) updateSessions(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *Model) sessionsView() string {
 	rows := []string{ui.TitleStyle.Render("Sessions"), ""}
-	for i, e := range m.sessionList {
+	if m.sFilter != "" {
+		rows = append(rows, ui.DimStyle.Render("filter: ")+m.sFilter)
+	}
+	list := m.filteredSessions()
+	for i, e := range list {
 		cursor := "  "
 		style := ui.DimStyle
 		if i == m.sCursor {
@@ -262,8 +311,11 @@ func (m *Model) sessionsView() string {
 		line := fmt.Sprintf("%s%s %s", cursor, style.Render(e.Title), ui.DimStyle.Render("["+detail+"]"))
 		rows = append(rows, truncateCells(line, max(0, m.contentWidth())))
 	}
+	if len(list) == 0 {
+		rows = append(rows, ui.DimStyle.Render("no matching sessions"))
+	}
 	rows = append(rows, "",
-		ui.DimStyle.Render("enter restore | esc back"))
+		ui.DimStyle.Render("type to filter | enter restore | esc back"))
 	return strings.Join(rows, "\n")
 }
 
