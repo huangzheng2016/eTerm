@@ -283,3 +283,108 @@ func TestBridgeCronOverdueFiresOnLoad(t *testing.T) {
 		t.Fatalf("job not rescheduled: %+v", jobs)
 	}
 }
+
+// /new: the current session's jobs are wiped from the scheduler and the db;
+// other sessions are untouched.
+func TestBridgeResetHistoryWipesCronJobs(t *testing.T) {
+	bridge := testCronBridge(t)
+	bridge.setCronSession("s1")
+	if _, err := bridge.cron.Create("watch the build", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.db.Create(&aiCronJob{
+		ID: "other", SessionID: "s2", Prompt: "keep me",
+		NextFireAt: time.Now().Add(time.Hour), CreatedAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	bridge.ResetHistory()
+	if n := len(bridge.cron.List()); n != 0 {
+		t.Fatalf("jobs not wiped from scheduler: %d", n)
+	}
+	if stored, _ := bridge.LoadCronJobs("s1"); len(stored) != 0 {
+		t.Fatalf("current session jobs not wiped from db: %+v", stored)
+	}
+	if stored, _ := bridge.LoadCronJobs("s2"); len(stored) != 1 {
+		t.Fatalf("other session jobs wiped: %+v", stored)
+	}
+}
+
+// /resume: the previous session's jobs are wiped and the target session's
+// persisted jobs load into the scheduler.
+func TestBridgeLoadSessionCronLifecycle(t *testing.T) {
+	bridge := testCronBridge(t)
+	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
+	bridge.SaveSession("s1", "one", "")
+	bridge.SaveSession("s2", "two", "")
+
+	bridge.setCronSession("s1")
+	if _, err := bridge.cron.Create("s1 watch", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridge.db.Create(&aiCronJob{
+		ID: "s2job", SessionID: "s2", Prompt: "s2 watch",
+		NextFireAt: time.Now().Add(time.Hour), CreatedAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := bridge.LoadSession("s2"); !ok {
+		t.Fatal("load failed")
+	}
+	jobs := bridge.cron.List()
+	if len(jobs) != 1 || jobs[0].ID != "s2job" {
+		t.Fatalf("target session jobs not resumed: %+v", jobs)
+	}
+	if stored, _ := bridge.LoadCronJobs("s1"); len(stored) != 0 {
+		t.Fatalf("previous session jobs not wiped: %+v", stored)
+	}
+	if stored, _ := bridge.LoadCronJobs("s2"); len(stored) != 1 {
+		t.Fatalf("target session jobs wiped from db: %+v", stored)
+	}
+}
+
+// /resume of the session already active in the panel keeps its cron jobs.
+func TestBridgeLoadSameSessionKeepsCronJobs(t *testing.T) {
+	bridge := testCronBridge(t)
+	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
+	bridge.SaveSession("s1", "one", "")
+	job, err := bridge.cron.Create("keep watching", 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := bridge.LoadSession("s1"); !ok {
+		t.Fatal("load failed")
+	}
+	jobs := bridge.cron.List()
+	if len(jobs) != 1 || jobs[0].ID != job.ID {
+		t.Fatalf("jobs wiped on same-session resume: %+v", jobs)
+	}
+	if stored, _ := bridge.LoadCronJobs("s1"); len(stored) != 1 {
+		t.Fatalf("jobs wiped from db on same-session resume: %+v", stored)
+	}
+}
+
+// An unsaved conversation's jobs are still abandoned on /resume: the panel
+// has no session id (""), which never matches the loaded id.
+func TestBridgeLoadSessionWipesUnsavedJobs(t *testing.T) {
+	bridge := testCronBridge(t)
+	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
+	bridge.SaveSession("s1", "one", "")
+	bridge.ResetHistory() // /new: the panel conversation is unsaved again
+	if _, err := bridge.cron.Create("unsaved watch", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := bridge.LoadSession("s1"); !ok {
+		t.Fatal("load failed")
+	}
+	if n := len(bridge.cron.List()); n != 0 {
+		t.Fatalf("unsaved jobs survived /resume: %d", n)
+	}
+	if stored, _ := bridge.LoadCronJobs(""); len(stored) != 0 {
+		t.Fatalf("unsaved jobs left in db: %+v", stored)
+	}
+}

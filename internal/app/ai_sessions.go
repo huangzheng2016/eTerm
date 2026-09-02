@@ -65,6 +65,11 @@ func (b *aiBridge) DeleteCronJob(id string) error {
 	return b.db.Where("id = ?", id).Delete(&aiCronJob{}).Error
 }
 
+// DeleteSessionCronJobs implements ai.CronStore.
+func (b *aiBridge) DeleteSessionCronJobs(sessionID string) error {
+	return b.db.Where("session_id = ?", sessionID).Delete(&aiCronJob{}).Error
+}
+
 // MoveCronJobs implements ai.CronStore.
 func (b *aiBridge) MoveCronJobs(from, to string) error {
 	return b.db.Model(&aiCronJob{}).Where("session_id = ?", from).Update("session_id", to).Error
@@ -117,15 +122,35 @@ func (b *aiBridge) Sessions() []aiview.SessionEntry {
 	return out
 }
 
+// abandonCronSession wipes the current session's cron jobs (/new or a switch
+// to another session): jobs die with their conversation.
+func (b *aiBridge) abandonCronSession() {
+	if b.cron == nil {
+		return
+	}
+	b.mu.Lock()
+	b.cronSession = ""
+	b.mu.Unlock()
+	b.cron.AbandonSession()
+}
+
 // LoadSession implements aiview.SessionStore: import the row's history into
 // the agent (or stash it until the first agent exists) and return it so the
-// panel can rebuild its blocks.
+// panel can rebuild its blocks. A switch wipes the previous session's cron
+// jobs and resumes the loaded session's jobs; resuming the session already
+// active in the panel keeps its jobs.
 func (b *aiBridge) LoadSession(id string) ([]byte, bool) {
 	var row aiSession
 	if err := b.db.Select("history").Where("id = ?", id).First(&row).Error; err != nil {
 		return nil, false
 	}
-	b.setCronSession(id)
+	b.mu.Lock()
+	same := b.cronSession == id
+	b.mu.Unlock()
+	if !same {
+		b.abandonCronSession()
+		b.setCronSession(id)
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.agent != nil {
@@ -152,9 +177,10 @@ func (b *aiBridge) UndoLastTurn() {
 }
 
 // ResetHistory implements aiview.SessionStore. Synchronous: slash commands
-// are rejected while a run is active, so the agent mutex is free.
+// are rejected while a run is active, so the agent mutex is free. The current
+// session's cron jobs are wiped.
 func (b *aiBridge) ResetHistory() {
-	b.setCronSession("")
+	b.abandonCronSession()
 	b.mu.Lock()
 	agent := b.agent
 	b.pendingHistory = nil
