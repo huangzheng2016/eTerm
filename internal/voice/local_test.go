@@ -111,7 +111,7 @@ func TestLocalEngineRoundTrip(t *testing.T) {
 	eng := NewLocalEngine(LocalConfig{BinPath: fakeHelperWrapper(t)})
 	ctx := context.Background()
 
-	if err := eng.SetVAD(VADParams{Threshold: 0.7, TrailingSilence: 1.5, MaxSegment: 20}); err != nil {
+	if err := eng.SetVAD(VADParams{Threshold: 0.7, TrailingSilence: 1.5, MaxSegment: 20, NoSpeechTimeout: 7}); err != nil {
 		t.Fatal(err)
 	}
 	if err := eng.Start(ctx); err != nil {
@@ -119,13 +119,25 @@ func TestLocalEngineRoundTrip(t *testing.T) {
 	}
 
 	echo := waitEvent(t, eng, func(ev Event) bool { return ev.Type == "echo" })
-	for _, want := range []string{`"cmd":"set_vad_params"`, `"threshold":0.7`, `"trailing_silence":1.5`, `"max_segment":20`} {
+	for _, want := range []string{`"cmd":"set_vad_params"`, `"threshold":0.7`, `"trailing_silence":1.5`, `"max_segment":20`, `"no_speech_timeout":7`} {
 		if !strings.Contains(echo.Text, want) {
 			t.Fatalf("set_vad_params echo missing %s: %s", want, echo.Text)
 		}
 	}
 
 	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventState && ev.State == StateListening })
+
+	// a zero no_speech_timeout is transmitted too: it disables the
+	// helper-side no-speech cancel rather than keeping the helper default
+	if err := eng.SetVAD(VADParams{Threshold: 0.7}); err != nil {
+		t.Fatal(err)
+	}
+	echo = waitEvent(t, eng, func(ev Event) bool {
+		return ev.Type == "echo" && strings.Contains(ev.Text, `"threshold":0.7`)
+	})
+	if !strings.Contains(echo.Text, `"no_speech_timeout":0`) {
+		t.Fatalf("zero no_speech_timeout not transmitted: %s", echo.Text)
+	}
 
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)

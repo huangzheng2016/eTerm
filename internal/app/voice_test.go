@@ -17,6 +17,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/voice"
@@ -199,13 +200,58 @@ func TestVoiceStatusHintShowsRecording(t *testing.T) {
 	a.voiceName = voiceEngineLocal
 	a.voicePartial = "hello wor"
 	got := a.withVoiceStatusHint("hint")
-	if !strings.Contains(got, "REC 5s") || !strings.Contains(got, "local") || !strings.Contains(got, "hello wor") {
-		t.Fatalf("recording hint = %q", got)
+	if want := ui.ErrorStyle.Render("REC") + " · hint"; got != want {
+		t.Fatalf("recording hint = %q, want %q", got, want)
 	}
 }
 
 func voiceFinalMsg(text string) voiceEventMsg {
 	return voiceEventMsg{ev: voice.Event{Type: voice.EventFinal, Text: text}}
+}
+
+// Dictation disables the helper no-speech timeout (record until ctrl+r); the
+// settings-panel test recording keeps it so a silent mic reports "no speech".
+func TestVoiceNoSpeechTimeoutPerPath(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	key := tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl})
+	pump := func(cmd tea.Cmd, want func(tea.Msg) bool) {
+		for _, m := range collectCmdMsgs(t, cmd, want) {
+			upd, _ := a.Update(m)
+			a = upd.(App)
+		}
+	}
+	started := func(m tea.Msg) bool { _, ok := m.(voiceStartedMsg); return ok }
+	stopped := func(m tea.Msg) bool { _, ok := m.(voiceStoppedMsg); return ok }
+
+	upd, cmd := a.Update(key)
+	a = upd.(App)
+	if fe.vad.NoSpeechTimeout != 0 {
+		t.Fatalf("dictation no-speech timeout = %v", fe.vad.NoSpeechTimeout)
+	}
+	pump(cmd, started)
+
+	upd, cmd = a.Update(key)
+	a = upd.(App)
+	pump(cmd, stopped)
+
+	upd, cmd = a.Update(voiceTestRequestMsg{})
+	a = upd.(App)
+	if fe.vad.NoSpeechTimeout != voiceTestNoSpeechSecs {
+		t.Fatalf("test no-speech timeout = %v", fe.vad.NoSpeechTimeout)
+	}
+	pump(cmd, started)
+
+	upd, cmd = a.Update(voiceFinalMsg("done"))
+	a = upd.(App)
+	pump(cmd, stopped)
+
+	// the test's timeout must not leak into the next dictation session
+	upd, _ = a.Update(key)
+	a = upd.(App)
+	if fe.vad.NoSpeechTimeout != 0 {
+		t.Fatalf("dictation no-speech timeout after test = %v", fe.vad.NoSpeechTimeout)
+	}
 }
 
 func TestVoiceDeliveryToAiviewInsertsText(t *testing.T) {

@@ -31,14 +31,15 @@ type Event struct {
 	Pct   float64 // download progress, percent
 }
 
-// VADParams tunes endpoint detection. Zero fields keep engine defaults.
+// VADParams tunes endpoint detection. Zero fields keep engine defaults,
+// except NoSpeechTimeout which is always transmitted: 0 disables the cancel.
 type VADParams struct {
 	Threshold       float64 // speech probability threshold, 0..1
 	MinSilence      float64 // seconds of silence to split segments
 	MinSpeech       float64 // seconds of speech to keep a segment
 	TrailingSilence float64 // seconds of silence after speech to finalize
 	MaxSegment      float64 // seconds; force-finalize long speech
-	NoSpeechTimeout float64 // seconds waiting for speech before cancel
+	NoSpeechTimeout float64 // seconds waiting for speech before cancel; 0 disables
 }
 
 // Engine is a speech-to-text session.
