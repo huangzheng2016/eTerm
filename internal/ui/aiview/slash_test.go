@@ -26,7 +26,7 @@ func TestSlashHelpListsCommands(t *testing.T) {
 	if last.kind != blockSystem {
 		t.Fatalf("help block kind = %v, want blockSystem", last.kind)
 	}
-	for _, s := range []string{"/model", "/new", "/resume", "/fork", "/undo", "/tasks", "ctrl+c", "ctrl+o", "ctrl+p", "ctrl+l", "esc close"} {
+	for _, s := range []string{"/model", "/new", "/resume", "/fork", "/undo", "/tasks", "ctrl+c", "ctrl+o", "ctrl+p", "esc close"} {
 		if !strings.Contains(last.text, s) {
 			t.Fatalf("help text missing %q", s)
 		}

@@ -105,27 +105,6 @@ func TestCtrlCDuringRunDiscardsQueue(t *testing.T) {
 	}
 }
 
-func TestCtrlLClearsQueue(t *testing.T) {
-	m, fake := newSteerTestModel()
-
-	m.input.SetValue("first")
-	m.send()
-	m.input.SetValue("second")
-	m.send()
-
-	m.chatKey(keyMsg('l', tea.ModCtrl))
-
-	fake.mu.Lock()
-	remaining := fake.Queued
-	fake.mu.Unlock()
-	if len(remaining) != 0 {
-		t.Fatalf("runner queue not cleared: %v", remaining)
-	}
-	if len(m.blocks) != 0 {
-		t.Fatalf("blocks not cleared: %d", len(m.blocks))
-	}
-}
-
 func TestEnqueueFailureKeepsInputAndShowsError(t *testing.T) {
 	m, fake := newSteerTestModel()
 	fake.EnqueueErr = errors.New("no run in progress")

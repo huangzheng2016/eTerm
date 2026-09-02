@@ -17,7 +17,7 @@ import (
 const saveDebounce = 2 * time.Second
 
 const slashHelpText = "Commands: /model pick model · /tasks background agents · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /help this help" +
-	"\nKeys: enter send · ctrl+c stop · ctrl+o tools · ctrl+p models · ctrl+l clear · pgup/pgdn scroll · drag copy · esc close"
+	"\nKeys: enter send · ctrl+c stop · ctrl+o tools · ctrl+p models · pgup/pgdn scroll · drag copy · esc close"
 
 // historyMessage is the panel's read view of exported agent history JSON
 // (eino schema.Message); only user/assistant text turns rebuild into blocks.

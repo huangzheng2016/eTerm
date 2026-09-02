@@ -210,26 +210,6 @@ func TestEscEmitsClose(t *testing.T) {
 	}
 }
 
-func TestCtrlLClearsSession(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "reply"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
-	pumpEvents(t, m)
-	if len(m.blocks) == 0 {
-		t.Fatal("expected blocks")
-	}
-	m.Update(keyMsg('l', tea.ModCtrl))
-	if len(m.blocks) != 0 {
-		t.Fatal("session not cleared")
-	}
-	if m.status != statusIdle {
-		t.Fatal("status not idle after clear")
-	}
-}
-
 func TestScrollKeys(t *testing.T) {
 	m := newTestModel(nil)
 	for i := 0; i < 40; i++ {
@@ -390,24 +370,6 @@ func TestCtrlCInterruptsRun(t *testing.T) {
 	m.chatKey(keyMsg('c', tea.ModCtrl))
 	if m.input.Value() != "" {
 		t.Fatal("idle ctrl+c should clear the input")
-	}
-}
-
-func TestCtrlLDropsInFlightEvent(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "stale"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
-	ev := <-m.events
-	m.Update(keyMsg('l', tea.ModCtrl))
-	if len(m.blocks) != 0 {
-		t.Fatal("session not cleared")
-	}
-	m.Update(agentEventMsg{ev: ev})
-	if len(m.blocks) != 0 {
-		t.Fatal("in-flight event re-appended a ghost block")
 	}
 }
 

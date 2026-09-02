@@ -241,10 +241,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 			cmd := a.updateAIView(msg)
-			if msg.String() == "ctrl+l" {
-				// Async: Agent.Clear blocks on the run mutex otherwise.
-				a.aiBridge.Clear()
-			}
 			return a, cmd
 		}
 

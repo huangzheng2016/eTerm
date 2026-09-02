@@ -136,7 +136,7 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 | `/tasks`   | 后台子代理列表（j/k 移动、enter 查看、x 取消）      |
 | `/help`    | 帮助                                  |
 
-面板按键：enter 发送；运行中继续输入会排队（Queued），在下一步边界注入当前 run；`C-c` 中断当前 run；`C-o` 展开/折叠工具输出；`C-l` 清屏；标题栏显示 context 用量（已用/上限）。
+面板按键：enter 发送；运行中继续输入会排队（Queued），在下一步边界注入当前 run；`C-c` 中断当前 run；`C-o` 展开/折叠工具输出；标题栏显示 context 用量（已用/上限）。清空会话用 `/new`。
 
 终端控制工具：
 

@@ -818,9 +818,6 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.input.SetValue("")
 		return m, nil
-	case "ctrl+l":
-		m.clearSession()
-		return m, nil
 	case "ctrl+o":
 		m.expandTools = !m.expandTools
 		for i := range m.blocks {

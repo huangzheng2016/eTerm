@@ -102,13 +102,16 @@ func TestEscClearsSelection(t *testing.T) {
 	}
 }
 
-func TestCtrlLClearsSelection(t *testing.T) {
+func TestCtrlLDoesNotClear(t *testing.T) {
 	m := newSelectionModel()
 	m.Update(tea.MouseClickMsg(mouse(2, 3)))
 	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
 	m.Update(keyMsg('l', tea.ModCtrl))
-	if m.sel.Active {
-		t.Fatal("ctrl+l did not clear the selection")
+	if !m.sel.Active {
+		t.Fatal("ctrl+l must not clear the selection")
+	}
+	if len(m.blocks) != 2 {
+		t.Fatal("ctrl+l must not clear the conversation")
 	}
 }
 
