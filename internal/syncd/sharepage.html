@@ -344,6 +344,52 @@ body { display: flex; flex-direction: column; }
     e.preventDefault();
   }, { passive: false });
 
+  // Touch scroll when unlocked: a one-finger vertical swipe scrolls the
+  // viewport. Capture phase + stopPropagation keeps xterm's own touchmove
+  // handler from scrolling a second time. Movement under the threshold is
+  // left alone so taps still focus the hidden textarea (soft keyboard) and
+  // mouse-based selection is untouched.
+  var swipeX = null;
+  var swipeY = null;
+  var swiping = false;
+  // Sub-line pixel remainder: per-event deltas are often below the 20px
+  // line height, so rounding each event on its own would never scroll a
+  // slow drag. Accumulate and scroll only whole lines.
+  var swipeRem = 0;
+  termEl.addEventListener("touchstart", function (e) {
+    if (e.touches.length !== 1) {
+      swipeY = null;
+      return;
+    }
+    swipeX = e.touches[0].clientX;
+    swipeY = e.touches[0].clientY;
+    swiping = false;
+    swipeRem = 0;
+  }, { passive: true });
+  termEl.addEventListener("touchmove", function (e) {
+    if (swipeY === null || e.touches.length !== 1) return;
+    var y = e.touches[0].clientY;
+    if (!swiping) {
+      var dy = swipeY - y;
+      if (Math.abs(dy) <= 10 || Math.abs(dy) <= Math.abs(swipeX - e.touches[0].clientX)) return;
+      swiping = true;
+    }
+    var px = swipeY - y + swipeRem;
+    var lines = Math.trunc(px / 20);
+    if (lines !== 0) term.scrollLines(lines);
+    swipeRem = px - lines * 20;
+    swipeY = y;
+    e.preventDefault();
+    e.stopPropagation();
+  }, { capture: true, passive: false });
+  function endSwipe() {
+    swipeY = null;
+    swiping = false;
+    swipeRem = 0;
+  }
+  termEl.addEventListener("touchend", endSwipe);
+  termEl.addEventListener("touchcancel", endSwipe);
+
   // Paste: batch input, wrapped in bracketed-paste markers when the remote
   // side enabled them.
   var pastebg = document.getElementById("pastebg");
