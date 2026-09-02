@@ -154,8 +154,8 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 helper 或模型未就绪时按 `C-r` 会打开设置面板引导下载。设置面板也可从命令面板或 `Esc` 菜单（`v`）进入：
 
 - helper：一键下载 CI 构建的 voicehelper（release 产物 `voicehelper-<os>-<arch>.tar.gz`，darwin-arm64 / linux-amd64，约 45 MB，含 sherpa-onnx 动态库）
-- 模型：SenseVoice 2024-07-17（约 1 GB，默认；同包含 fp32/int8 两套权重，Precision 行切换）/ Paraformer zh-small int8（约 74 MB）
-- Engine：enter 进入子菜单选择 - local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，需 API key / App key / Access key，加密存储）等
+- 模型：SenseVoice 2024-07-17（约 1 GB，默认；同包含 fp32/int8 两套权重）/ Paraformer zh-small int8（约 74 MB）；模型含两套权重时主视图显示 Precision 开关（自定义目录需同时有 model.onnx 与 model.int8.onnx）
+- Engine：enter 进入子菜单选择，顺序为 local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，需 API key / App key / Access key，加密存储）/ 其他云端引擎
 - speech sensitivity (0-1)：VAD 触发灵敏度
 - end-of-sentence silence (ms)：句尾静音判停时长
 - Sentence end：句尾动作 enter / space

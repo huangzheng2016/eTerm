@@ -131,18 +131,15 @@ func (m *voiceSettingsModel) refreshInstallState() {
 // rows builds the visible row list for the current view and engine.
 func (m *voiceSettingsModel) rows() []voiceRow {
 	if m.view == voiceViewModels {
-		var rows []voiceRow
-		for i, spec := range voice.ModelCatalog() {
+		rows := make([]voiceRow, 0, len(voice.ModelCatalog())+1)
+		for i := range voice.ModelCatalog() {
 			rows = append(rows, voiceRow{kind: vrowModel, modelIdx: i})
-			if spec.Kind == voice.ModelKindSenseVoice {
-				rows = append(rows, voiceRow{kind: vrowPrecision})
-			}
 		}
 		return append(rows, voiceRow{kind: vrowCustomPath})
 	}
 	if m.view == voiceViewEngines {
-		rows := make([]voiceRow, 0, len(voice.EngineDescriptors()))
-		for i := range voice.EngineDescriptors() {
+		rows := make([]voiceRow, 0, len(enginePickerDescriptors()))
+		for i := range enginePickerDescriptors() {
 			rows = append(rows, voiceRow{kind: vrowEngineOption, engineIdx: i})
 		}
 		return rows
@@ -150,6 +147,9 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 	rows := []voiceRow{{kind: vrowEngine}}
 	if m.cfg.Engine == voiceEngineLocal {
 		rows = append(rows, voiceRow{kind: vrowHelper}, voiceRow{kind: vrowModels})
+		if m.precisionAvailable() {
+			rows = append(rows, voiceRow{kind: vrowPrecision})
+		}
 	}
 	rows = append(rows,
 		voiceRow{kind: vrowTest},
@@ -163,6 +163,39 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 		}
 	}
 	return rows
+}
+
+// precisionAvailable reports whether the active model offers an fp32/int8
+// choice: the SenseVoice catalog model always does (its archive carries both
+// weights); a custom directory only when it holds both weight files.
+func (m *voiceSettingsModel) precisionAvailable() bool {
+	if m.cfg.Engine != voiceEngineLocal {
+		return false
+	}
+	if m.cfg.CustomModelDir != "" {
+		return voice.HasBothPrecisions(m.cfg.CustomModelDir)
+	}
+	return voice.ModelByID(m.cfg.ModelID).Kind == voice.ModelKindSenseVoice
+}
+
+// enginePickerDescriptors orders the engine picker: local first, volcano
+// second, everything else in registry order.
+func enginePickerDescriptors() []voice.EngineDescriptor {
+	descs := voice.EngineDescriptors()
+	out := make([]voice.EngineDescriptor, 0, len(descs))
+	for _, want := range []string{voiceEngineLocal, voiceEngineVolcano} {
+		for _, d := range descs {
+			if d.ID == want {
+				out = append(out, d)
+			}
+		}
+	}
+	for _, d := range descs {
+		if d.ID != voiceEngineLocal && d.ID != voiceEngineVolcano {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // rowCount is the visible row count (mouse hit-testing).
@@ -302,7 +335,7 @@ func (m *voiceSettingsModel) leaveModels() {
 func (m *voiceSettingsModel) enterEngines() {
 	m.view = voiceViewEngines
 	m.cursor = 0
-	for i, d := range voice.EngineDescriptors() {
+	for i, d := range enginePickerDescriptors() {
 		if d.ID == m.cfg.Engine {
 			m.cursor = i
 		}
@@ -316,7 +349,7 @@ func (m *voiceSettingsModel) leaveEngines() {
 
 // selectEngine applies the engine picker choice and returns to the main view.
 func (m *voiceSettingsModel) selectEngine(idx int) tea.Cmd {
-	descs := voice.EngineDescriptors()
+	descs := enginePickerDescriptors()
 	if idx < 0 || idx >= len(descs) {
 		return nil
 	}
@@ -646,7 +679,7 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 			value = m.cfg.Engine + " (unknown)"
 		}
 	case vrowEngineOption:
-		d := voice.EngineDescriptors()[r.engineIdx]
+		d := enginePickerDescriptors()[r.engineIdx]
 		label = d.Label
 		if d.ID == m.cfg.Engine {
 			value = "[active]"

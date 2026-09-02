@@ -107,6 +107,19 @@ func ValidCustomModelDir(dir string) bool {
 	return err == nil
 }
 
+// HasBothPrecisions reports whether dir holds both fp32 and int8 weights,
+// i.e. the precision toggle applies to a custom model directory.
+func HasBothPrecisions(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "model.onnx")); err != nil {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, "model.int8.onnx"))
+	return err == nil
+}
+
 // DownloadModel downloads and extracts the model archive into root via a
 // staging dir and an atomic rename. urlOverride replaces the catalog URL
 // when non-empty.

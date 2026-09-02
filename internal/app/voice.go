@@ -320,7 +320,11 @@ var latestHelperVersionFn = voice.LatestHelperVersion
 // directory when configured, else the selected catalog model.
 func localModelTarget(cfg voiceSettings, modelsRoot string) (dir, kind string) {
 	if cfg.CustomModelDir != "" {
-		return cfg.CustomModelDir, voice.ModelKindSenseVoice
+		kind = voice.ModelKindSenseVoice
+		if cfg.ModelInt8 && voice.HasBothPrecisions(cfg.CustomModelDir) {
+			kind = voice.ModelKindSenseVoiceInt8
+		}
+		return cfg.CustomModelDir, kind
 	}
 	spec := voice.ModelByID(cfg.ModelID)
 	kind = spec.Kind

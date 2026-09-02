@@ -388,7 +388,7 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("opening the picker must not change the engine")
 	}
-	for i, d := range voice.EngineDescriptors() {
+	for i, d := range enginePickerDescriptors() {
 		if d.ID == voiceEngineVolcano {
 			m.cursor = i
 		}
@@ -973,20 +973,20 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatalf("helper download request = %#v", cmd())
 	}
 
-	// Model > enters the submenu: catalog rows (SenseVoice + its precision
-	// row) + custom path row, no Back row (esc back like other pickers)
+	// Model > enters the submenu: catalog rows + custom path row, no Back
+	// row (esc back like other pickers)
 	m.cursor = findVoiceRow(m, vrowModels)
 	m.Update(enter)
 	if m.view != voiceViewModels {
 		t.Fatal("Model > did not enter the submenu")
 	}
 	rows := m.rows()
-	if len(rows) != 4 || rows[0].kind != vrowModel || rows[1].kind != vrowPrecision || rows[2].kind != vrowModel || rows[3].kind != vrowCustomPath {
+	if len(rows) != 3 || rows[0].kind != vrowModel || rows[1].kind != vrowModel || rows[2].kind != vrowCustomPath {
 		t.Fatalf("submenu rows = %+v", rows)
 	}
 
 	// not-downloaded model row requests the model download
-	m.cursor = 2
+	m.cursor = 1
 	_, cmd = m.Update(enter)
 	req, ok = cmd().(voiceDownloadRequestMsg)
 	if !ok || req.target != voice.ModelCatalog()[1].ID {
@@ -1131,8 +1131,9 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	}
 }
 
-// The precision row toggles fp32/int8 for the merged SenseVoice entry,
-// persists, and steers the set_model kind.
+// The precision row lives in the main view under Model >, shown only when
+// the active model has both weight variants; it toggles fp32/int8, persists,
+// and steers the set_model kind.
 func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
@@ -1143,10 +1144,9 @@ func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 	m.cfg.Verified = true
 
-	m.enterModels()
-	m.cursor = 1 // precision row after the SenseVoice catalog row
-	if rows := m.rows(); rows[1].kind != vrowPrecision {
-		t.Fatalf("rows = %+v", rows)
+	m.cursor = findVoiceRow(m, vrowPrecision)
+	if m.cursor < 0 || m.rows()[m.cursor].kind != vrowPrecision {
+		t.Fatalf("precision row missing in main view: %+v", m.rows())
 	}
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	chg, ok := cmd().(voiceSettingsChangedMsg)
@@ -1165,10 +1165,64 @@ func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	if !strings.Contains(m.View(), "int8") {
 		t.Fatal("precision not rendered")
 	}
-	// paraformer keeps its own kind regardless of the toggle
+
+	// paraformer has no precision variants: the row disappears from the main
+	// view and the kind is unaffected by the toggle.
 	m.cfg.ModelID = voice.ModelCatalog()[1].ID
+	if findVoiceRow(m, vrowPrecision) >= 0 {
+		t.Fatal("precision row shown for paraformer")
+	}
 	if _, kind := localModelTarget(m.cfg, m.modelsRoot); kind != voice.ModelKindParaformer {
 		t.Fatalf("paraformer kind = %q", kind)
+	}
+}
+
+// The precision row and the set_model kind follow a custom directory's
+// contents: both weight files -> toggle offered and honored; one file -> no
+// toggle, helper falls back to whatever is present.
+func TestVoiceSettingsPrecisionCustomDir(t *testing.T) {
+	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+	m.cfg.ModelInt8 = true
+
+	both := t.TempDir()
+	os.WriteFile(filepath.Join(both, "tokens.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(both, "model.onnx"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(both, "model.int8.onnx"), []byte("x"), 0o644)
+	m.cfg.CustomModelDir = both
+	if findVoiceRow(m, vrowPrecision) < 0 {
+		t.Fatal("precision row missing for a two-weights custom dir")
+	}
+	if _, kind := localModelTarget(m.cfg, m.modelsRoot); kind != voice.ModelKindSenseVoiceInt8 {
+		t.Fatalf("custom dir kind = %q", kind)
+	}
+
+	fp32only := t.TempDir()
+	os.WriteFile(filepath.Join(fp32only, "tokens.txt"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(fp32only, "model.onnx"), []byte("x"), 0o644)
+	m.cfg.CustomModelDir = fp32only
+	if findVoiceRow(m, vrowPrecision) >= 0 {
+		t.Fatal("precision row shown for a single-weight custom dir")
+	}
+	if _, kind := localModelTarget(m.cfg, m.modelsRoot); kind != voice.ModelKindSenseVoice {
+		t.Fatalf("single-weight custom dir kind = %q", kind)
+	}
+}
+
+// The engine picker lists local first, volcano second, then the rest.
+func TestVoiceSettingsEnginePickerOrder(t *testing.T) {
+	descs := enginePickerDescriptors()
+	if len(descs) < 2 || descs[0].ID != voiceEngineLocal || descs[1].ID != voiceEngineVolcano {
+		t.Fatalf("picker order = %v", descs)
+	}
+	seen := map[string]bool{}
+	for _, d := range descs {
+		if seen[d.ID] {
+			t.Fatalf("duplicate %q in picker", d.ID)
+		}
+		seen[d.ID] = true
+	}
+	if len(seen) != len(voice.EngineDescriptors()) {
+		t.Fatal("picker lost an engine")
 	}
 }
 
