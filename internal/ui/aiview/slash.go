@@ -17,7 +17,67 @@ import (
 const saveDebounce = 2 * time.Second
 
 const slashHelpText = "Commands: /model pick model · /tasks background agents · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /help this help" +
-	"\nKeys: enter send · ctrl+c stop · ctrl+o tools · ctrl+p models · pgup/pgdn scroll · drag copy · esc close"
+	"\nKeys: enter send · ctrl+c stop · ctrl+o expand · ctrl+p models · pgup/pgdn scroll · drag copy · esc close"
+
+// slashCommand is one menu entry: the command and its one-line description.
+type slashCommand struct {
+	name string
+	desc string
+}
+
+var slashCommands = []slashCommand{
+	{"/model", "pick model"},
+	{"/new", "new session"},
+	{"/resume", "restore session"},
+	{"/fork", "fork session"},
+	{"/undo", "rewind one turn"},
+	{"/tasks", "background agents"},
+	{"/help", "this help"},
+}
+
+// slashMatches returns the menu entries for the current input: the prefix
+// matches when it starts with "/". Nil when the menu is hidden (input empty
+// or not a command, dismissed with esc, outside chat mode, or no matches).
+func (m *Model) slashMatches() []slashCommand {
+	if m.mode != modeChat || m.slashMenuOff {
+		return nil
+	}
+	v := strings.TrimSpace(m.input.Value())
+	if !strings.HasPrefix(v, "/") {
+		return nil
+	}
+	var out []slashCommand
+	for _, c := range slashCommands {
+		if strings.HasPrefix(c.name, v) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// slashMenuView renders the completion menu above the input box; "" when
+// the menu is hidden.
+func (m *Model) slashMenuView() string {
+	matches := m.slashMatches()
+	if len(matches) == 0 {
+		return ""
+	}
+	cur := m.slashCursor
+	if cur >= len(matches) {
+		cur = len(matches) - 1
+	}
+	lines := make([]string, len(matches))
+	for i, c := range matches {
+		cursor := "  "
+		name := ui.DimStyle.Render(c.name)
+		if i == cur {
+			cursor = "▸ "
+			name = ui.SelectedStyle.Render(c.name)
+		}
+		lines[i] = truncateCells(cursor+name+ui.DimStyle.Render(" "+c.desc), max(0, m.contentWidth()))
+	}
+	return strings.Join(lines, "\n")
+}
 
 // historyMessage is the panel's read view of exported agent history JSON
 // (eino schema.Message); only user/assistant text turns rebuild into blocks.

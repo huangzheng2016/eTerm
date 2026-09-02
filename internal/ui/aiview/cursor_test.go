@@ -17,7 +17,7 @@ func TestViewReportsInputCursor(t *testing.T) {
 	}
 	// Empty input: caret at textarea origin; body is the 1-row placeholder.
 	// x = border(1)+padding(1)+input border(1)+padding(1) = 4
-	// y = border(1)+title(1)+blank(1)+body(1)+blank(1)+input border(1) = 6
+	// y = border(1)+title(1)+blank(1)+body(1)+status(1)+input border(1) = 6
 	if v.Cursor.X != 4 || v.Cursor.Y != 6 {
 		t.Fatalf("cursor = %d,%d want 4,6", v.Cursor.X, v.Cursor.Y)
 	}

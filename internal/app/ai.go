@@ -350,7 +350,7 @@ func aiEventToView(ev ai.Event) (aiview.AgentEvent, bool) {
 	case ai.EventThinkingDelta:
 		return aiview.AgentEvent{Kind: aiview.EventThinkingDelta, Text: ev.Text}, true
 	case ai.EventToolCall:
-		return aiview.AgentEvent{Kind: aiview.EventToolCallStart, Text: toolCallLabel(ev.ToolName, ev.ToolArgs)}, true
+		return aiview.AgentEvent{Kind: aiview.EventToolCallStart, Text: toolCallLabel(ev.ToolName, ev.ToolArgs), ToolName: ev.ToolName, ToolArgs: ev.ToolArgs}, true
 	case ai.EventToolResult:
 		return aiview.AgentEvent{Kind: aiview.EventToolCallEnd, Text: ev.Text}, true
 	case ai.EventDone:
