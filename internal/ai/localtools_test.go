@@ -123,22 +123,31 @@ func (failingTool) InvokableRun(context.Context, string, ...tool.Option) (string
 }
 
 func TestAgentInstructionIncludesLocalTools(t *testing.T) {
-	on := agentInstruction()
+	on := agentInstruction(true)
 	if !strings.Contains(on, "str_replace_editor") || !strings.Contains(on, "bash:") {
 		t.Fatal("local tools missing from the prompt")
 	}
-	for _, s := range []string{"open_local_terminal", "open_ssh", "open_tmux", "list_hosts", "list_tmux_sessions"} {
+	for _, s := range []string{"open_local_terminal", "open_ssh", "open_tmux", "list_hosts", "list_tmux_sessions", "notify"} {
 		if !strings.Contains(on, s) {
 			t.Fatalf("base prompt missing %q", s)
 		}
 	}
-	if !strings.HasPrefix(on, systemPrompt) {
-		t.Fatal("prompt must extend the base prompt")
+	if !strings.Contains(on, "list_daemons") || !strings.Contains(on, "kill_session") {
+		t.Fatal("daemon section missing while enabled")
+	}
+	off := agentInstruction(false)
+	if strings.Contains(off, "list_daemons") || strings.Contains(off, "kill_session") {
+		t.Fatal("daemon section present while disabled")
+	}
+	for _, s := range []string{"open_local_terminal", "str_replace_editor", "notify"} {
+		if !strings.Contains(off, s) {
+			t.Fatalf("non-daemon prompt missing %q", s)
+		}
 	}
 }
 
 func TestBuildToolsIncludesSessionOpenTools(t *testing.T) {
-	tools, err := BuildTools(fakeExecutor{}, nil)
+	tools, err := BuildTools(fakeExecutor{}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,10 +159,74 @@ func TestBuildToolsIncludesSessionOpenTools(t *testing.T) {
 		}
 		names[info.Name] = true
 	}
-	for _, want := range []string{"open_local_terminal", "list_hosts", "open_ssh", "list_tmux_sessions", "open_tmux"} {
+	for _, want := range []string{"open_local_terminal", "list_hosts", "open_ssh", "list_tmux_sessions", "open_tmux", "notify"} {
 		if !names[want] {
 			t.Fatalf("missing %s in %v", want, names)
 		}
+	}
+	for _, unwanted := range []string{"list_daemons", "list_daemon_sessions", "enter_daemon", "create_session", "rename_session", "kill_session"} {
+		if names[unwanted] {
+			t.Fatalf("daemon tool %s present without daemons", unwanted)
+		}
+	}
+
+	tools, err = BuildTools(fakeExecutor{}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names = map[string]bool{}
+	for _, bt := range tools {
+		info, err := bt.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[info.Name] = true
+	}
+	for _, want := range []string{"list_daemons", "list_daemon_sessions", "enter_daemon", "create_session", "rename_session", "kill_session"} {
+		if !names[want] {
+			t.Fatalf("missing daemon tool %s in %v", want, names)
+		}
+	}
+}
+
+type notifyExecutor struct {
+	Executor
+	texts []string
+}
+
+func (e *notifyExecutor) Notify(ctx context.Context, text string) error {
+	e.texts = append(e.texts, text)
+	return nil
+}
+
+func TestNotifyToolCallsExecutor(t *testing.T) {
+	exec := &notifyExecutor{}
+	tools, err := BuildTools(exec, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notifyTool tool.BaseTool
+	for _, bt := range tools {
+		info, err := bt.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Name == "notify" {
+			notifyTool = bt
+		}
+	}
+	if notifyTool == nil {
+		t.Fatal("notify tool missing")
+	}
+	out, err := notifyTool.(tool.InvokableTool).InvokableRun(context.Background(), `{"text":"build finished"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "true") {
+		t.Fatalf("out = %q", out)
+	}
+	if len(exec.texts) != 1 || exec.texts[0] != "build finished" {
+		t.Fatalf("texts = %v", exec.texts)
 	}
 }
 

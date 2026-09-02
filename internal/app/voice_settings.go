@@ -28,26 +28,31 @@ const (
 	vrowSilence
 	vrowSentenceEnd
 	vrowParam
-	vrowBack
 	vrowModel
 	vrowCustomPath
+	vrowPrecision
+	vrowEngineOption
 )
 
-// panel views: the main settings list and the model catalog submenu.
+// panel views: the main settings list, the model catalog submenu and the
+// engine picker submenu.
 const (
 	voiceViewMain = iota
 	voiceViewModels
+	voiceViewEngines
 )
 
 // voiceHelperTarget is the download target id for the helper binary; model
 // downloads use the catalog model ID.
 const voiceHelperTarget = "helper"
 
-// voiceRow is one rendered settings row; param/modelIdx qualify the kind.
+// voiceRow is one rendered settings row; param/modelIdx/engineIdx qualify
+// the kind.
 type voiceRow struct {
-	kind     int
-	param    voice.ParamSpec // vrowParam
-	modelIdx int             // vrowModel
+	kind      int
+	param     voice.ParamSpec // vrowParam
+	modelIdx  int             // vrowModel
+	engineIdx int             // vrowEngineOption
 }
 
 // voiceSettingsModel is the voice input settings overlay (opened from the
@@ -126,11 +131,21 @@ func (m *voiceSettingsModel) refreshInstallState() {
 // rows builds the visible row list for the current view and engine.
 func (m *voiceSettingsModel) rows() []voiceRow {
 	if m.view == voiceViewModels {
-		rows := []voiceRow{{kind: vrowBack}}
-		for i := range voice.ModelCatalog() {
+		var rows []voiceRow
+		for i, spec := range voice.ModelCatalog() {
 			rows = append(rows, voiceRow{kind: vrowModel, modelIdx: i})
+			if spec.Kind == voice.ModelKindSenseVoice {
+				rows = append(rows, voiceRow{kind: vrowPrecision})
+			}
 		}
 		return append(rows, voiceRow{kind: vrowCustomPath})
+	}
+	if m.view == voiceViewEngines {
+		rows := make([]voiceRow, 0, len(voice.EngineDescriptors()))
+		for i := range voice.EngineDescriptors() {
+			rows = append(rows, voiceRow{kind: vrowEngineOption, engineIdx: i})
+		}
+		return rows
 	}
 	rows := []voiceRow{{kind: vrowEngine}}
 	if m.cfg.Engine == voiceEngineLocal {
@@ -165,31 +180,15 @@ func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 	}
 }
 
-// adjust cycles the enum rows and steps the numeric rows; returns the
-// persist command when the row changed. Engine changes rebuild the engine,
-// VAD changes apply live via SetVAD.
+// adjust steps the numeric rows and toggles the enum rows; returns the
+// persist command when the row changed. VAD changes apply live via SetVAD,
+// precision changes via SetModel.
 func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 	rows := m.rows()
 	if m.cursor < 0 || m.cursor >= len(rows) {
 		return nil
 	}
 	switch rows[m.cursor].kind {
-	case vrowEngine:
-		descs := voice.EngineDescriptors()
-		if len(descs) == 0 {
-			return nil
-		}
-		idx := -1
-		for i, d := range descs {
-			if d.ID == m.cfg.Engine {
-				idx = i
-				break
-			}
-		}
-		idx = (idx + dir + len(descs)) % len(descs)
-		m.cfg.Engine = descs[idx].ID
-		m.cfg.Verified = false
-		return m.persist(false)
 	case vrowThreshold:
 		m.cfg.VADThreshold = math.Round((m.cfg.VADThreshold+float64(dir)*0.05)*100) / 100
 		if m.cfg.VADThreshold < 0 {
@@ -214,6 +213,12 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		} else {
 			m.cfg.SentenceEnd = voice.SentenceEndEnter
 		}
+		return m.persist(true)
+	case vrowPrecision:
+		m.cfg.ModelInt8 = !m.cfg.ModelInt8
+		m.cfg.Verified = false
+		m.testText = ""
+		m.testErr = ""
 		return m.persist(true)
 	}
 	return nil
@@ -294,6 +299,36 @@ func (m *voiceSettingsModel) leaveModels() {
 	}
 }
 
+func (m *voiceSettingsModel) enterEngines() {
+	m.view = voiceViewEngines
+	m.cursor = 0
+	for i, d := range voice.EngineDescriptors() {
+		if d.ID == m.cfg.Engine {
+			m.cursor = i
+		}
+	}
+}
+
+func (m *voiceSettingsModel) leaveEngines() {
+	m.view = voiceViewMain
+	m.cursor = 0
+}
+
+// selectEngine applies the engine picker choice and returns to the main view.
+func (m *voiceSettingsModel) selectEngine(idx int) tea.Cmd {
+	descs := voice.EngineDescriptors()
+	if idx < 0 || idx >= len(descs) {
+		return nil
+	}
+	m.leaveEngines()
+	if descs[idx].ID == m.cfg.Engine {
+		return nil
+	}
+	m.cfg.Engine = descs[idx].ID
+	m.cfg.Verified = false
+	return m.persist(false)
+}
+
 // commitEdit applies the edited value: engine params persist encrypted and
 // rebuild the engine; the custom model path is validated before persisting
 // (empty clears it) and applies live via set_model.
@@ -350,14 +385,22 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 	}
 	switch msg.String() {
 	case "esc", "escape":
-		if m.view == voiceViewModels {
+		switch m.view {
+		case voiceViewModels:
 			m.leaveModels()
+			return false, nil
+		case voiceViewEngines:
+			m.leaveEngines()
 			return false, nil
 		}
 		return true, nil
 	case "left", "h":
-		if m.view == voiceViewModels {
+		switch m.view {
+		case voiceViewModels:
 			m.leaveModels()
+			return false, nil
+		case voiceViewEngines:
+			m.leaveEngines()
 			return false, nil
 		}
 		return false, m.adjust(-1)
@@ -370,13 +413,24 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 			m.cursor++
 		}
 	case "right", "l", " ":
-		if m.view == voiceViewMain && rows[m.cursor].kind == vrowModels {
-			m.enterModels()
-			return false, nil
+		if m.view == voiceViewMain {
+			switch rows[m.cursor].kind {
+			case vrowModels:
+				m.enterModels()
+				return false, nil
+			case vrowEngine:
+				m.enterEngines()
+				return false, nil
+			}
 		}
 		return false, m.adjust(1)
 	case "enter":
 		switch rows[m.cursor].kind {
+		case vrowEngine:
+			m.enterEngines()
+			return false, nil
+		case vrowEngineOption:
+			return false, m.selectEngine(rows[m.cursor].engineIdx)
 		case vrowHelper:
 			return false, m.helperAction()
 		case vrowModels:
@@ -389,9 +443,6 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 			m.testText = ""
 			m.testErr = ""
 			return false, func() tea.Msg { return voiceTestRequestMsg{} }
-		case vrowBack:
-			m.leaveModels()
-			return false, nil
 		case vrowModel:
 			return false, m.modelAction(rows[m.cursor].modelIdx)
 		case vrowParam:
@@ -515,6 +566,12 @@ func (m *voiceSettingsModel) modelValue(i int) string {
 		value = "failed: " + m.dlErr
 	case m.modelOK[i]:
 		value = "installed"
+		if spec.Kind == voice.ModelKindSenseVoice {
+			value = "installed (fp32)"
+			if m.cfg.ModelInt8 {
+				value = "installed (int8)"
+			}
+		}
 	}
 	if m.cfg.ModelID == spec.ID && m.cfg.CustomModelDir == "" {
 		value = "[active] " + value
@@ -582,11 +639,17 @@ func (m *voiceSettingsModel) noticeText() string {
 func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value string) {
 	switch r.kind {
 	case vrowEngine:
-		label = "Engine"
+		label = "Engine >"
 		if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
 			value = d.Label
 		} else {
 			value = m.cfg.Engine + " (unknown)"
+		}
+	case vrowEngineOption:
+		d := voice.EngineDescriptors()[r.engineIdx]
+		label = d.Label
+		if d.ID == m.cfg.Engine {
+			value = "[active]"
 		}
 	case vrowHelper:
 		label, value = "Voice Helper", m.helperValue()
@@ -620,10 +683,14 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 		} else {
 			value = v
 		}
-	case vrowBack:
-		label, value = "Back", "<"
 	case vrowModel:
 		label, value = voice.ModelCatalog()[r.modelIdx].Name, m.modelValue(r.modelIdx)
+	case vrowPrecision:
+		label = "Precision"
+		value = "fp32"
+		if m.cfg.ModelInt8 {
+			value = "int8"
+		}
 	case vrowCustomPath:
 		label, value = "Custom model path", m.customValue()
 	}
@@ -641,9 +708,13 @@ func (m *voiceSettingsModel) View() string {
 	}
 	title := "Voice Input"
 	hint := "up/down move · left/right change · enter select/edit · esc close"
-	if m.view == voiceViewModels {
+	switch m.view {
+	case voiceViewModels:
 		title = "Voice Input - Model"
-		hint = "up/down move · enter select/download · esc back"
+		hint = "up/down move · left/right change · enter select/download · esc back"
+	case voiceViewEngines:
+		title = "Voice Input - Engine"
+		hint = "up/down move · enter select · esc back"
 	}
 	var lines []string
 	lines = append(lines, ui.TitleStyle.Render(title), "")

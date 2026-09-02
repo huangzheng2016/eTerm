@@ -1070,11 +1070,11 @@ func (m *Model) takeOSC52ClipboardCommands() []tea.Cmd {
 	return out
 }
 
-// osc9Sequence re-emits an OSC 9 notification to the outer terminal with
-// control characters stripped so the payload cannot inject sequences.
-// C1 controls (U+0080-U+009F) are stripped too: on C1-interpreting
-// terminals U+009C would terminate the OSC envelope early.
-func osc9Sequence(text string) string {
+// OSC9Sequence builds an OSC 9 desktop-notification escape for the outer
+// terminal. C0 controls are stripped so the payload cannot break out of the
+// OSC envelope; C1 controls (U+0080-U+009F) are stripped too: on
+// C1-interpreting terminals U+009C would terminate the OSC envelope early.
+func OSC9Sequence(text string) string {
 	clean := strings.Map(func(r rune) rune {
 		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
 			return -1
@@ -1090,7 +1090,7 @@ func (m *Model) takeOSC9NotificationCommands() []tea.Cmd {
 	}
 	out := make([]tea.Cmd, 0, len(m.osc9Notifications))
 	for _, text := range m.osc9Notifications {
-		out = append(out, tea.Raw(osc9Sequence(text)))
+		out = append(out, tea.Raw(OSC9Sequence(text)))
 	}
 	m.osc9Notifications = nil
 	return out

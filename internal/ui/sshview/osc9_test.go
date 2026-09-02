@@ -48,7 +48,7 @@ func TestOSC9NotificationReturnsRawCommand(t *testing.T) {
 }
 
 func TestOSC9SequenceStripsControlChars(t *testing.T) {
-	got := osc9Sequence("hi\x07\x1b\n\x7fthere")
+	got := OSC9Sequence("hi\x07\x1b\n\x7fthere")
 	want := "\x1b]9;hithere\a"
 	if got != want {
 		t.Fatalf("osc9Sequence = %q want %q", got, want)
@@ -56,7 +56,7 @@ func TestOSC9SequenceStripsControlChars(t *testing.T) {
 
 	// C1 controls (U+0080-U+009F): U+009C would terminate the OSC envelope
 	// early on C1-interpreting terminals.
-	got = osc9Sequence("hi\u0080\u009c\u009fthere")
+	got = OSC9Sequence("hi\u0080\u009c\u009fthere")
 	want = "\x1b]9;hithere\a"
 	if got != want {
 		t.Fatalf("osc9Sequence = %q want %q", got, want)

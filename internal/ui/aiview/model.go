@@ -13,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
 )
@@ -94,6 +93,10 @@ type Model struct {
 	flushPending bool
 	expandTools  bool
 	sel          textselection.Selection
+	// toast is a transient confirmation at the title row's right edge (e.g.
+	// "Copied N chars"); toastSeq invalidates stale clear ticks.
+	toast    string
+	toastSeq int
 	// selAutoScroll scrolls the conversation while a drag selection sits in
 	// the top/bottom edge band; selSeq invalidates stale ticks on a new drag.
 	selAutoScroll textselection.AutoScroll
@@ -596,6 +599,11 @@ type selectionAutoScrollMsg struct{ seq int }
 
 const selectionAutoScrollInterval = 60 * time.Millisecond
 
+// toastClearMsg expires the title-row toast.
+type toastClearMsg struct{ seq int }
+
+const toastDuration = 3 * time.Second
+
 func (m *Model) queueSelectionAutoScroll() tea.Cmd {
 	if m.selAutoScroll.Queued || m.selAutoScroll.Dir == 0 {
 		return nil
@@ -686,6 +694,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuild()
 		return m, m.queueSelectionAutoScroll()
+	case toastClearMsg:
+		if msg.seq == m.toastSeq {
+			m.toast = ""
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if m.status == statusRunning {
 			var cmd tea.Cmd
@@ -731,9 +744,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuild()
 				text := m.sel.TextJoined(strings.Split(m.viewport.GetContent(), "\n"), m.lineBreaks)
 				if text != "" {
+					// Toast inside the panel: the app-level toast renders
+					// behind the fullscreen overlay.
+					m.toast = fmt.Sprintf("Copied %d chars", len([]rune(text)))
+					m.toastSeq++
+					seq := m.toastSeq
 					return m, tea.Batch(
 						tea.SetClipboard(text),
-						func() tea.Msg { return types.SuccessMsg{Message: fmt.Sprintf("Copied %d chars", len([]rune(text)))} },
+						tea.Tick(toastDuration, func(time.Time) tea.Msg { return toastClearMsg{seq: seq} }),
 					)
 				}
 				return m, nil
@@ -899,6 +917,12 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 		title += " " + ui.ErrorStyle.Render("REC")
 	}
 	title += ui.DimStyle.Render(ctx)
+	if m.toast != "" {
+		t := ui.SuccessStyle.Render(m.toast)
+		if gap := cw - lipgloss.Width(title) - lipgloss.Width(t); gap > 0 {
+			title += strings.Repeat(" ", gap) + t
+		}
+	}
 
 	hintText := truncateCells("enter send · /help · esc close", max(0, cw))
 	hint := ui.DimStyle.Render(hintText)

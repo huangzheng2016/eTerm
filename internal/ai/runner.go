@@ -58,6 +58,9 @@ type Config struct {
 	MaxContextSize int
 	MaxIterations  int
 	Executor       Executor
+	// Daemons binds the remote-daemon tools and their prompt section; false
+	// when no daemon is registered (they could not do anything anyway).
+	Daemons bool
 	// Cron schedules wake-ups for this session; owned by the app bridge so
 	// jobs survive agent rebuilds. Nil disables the cron tools.
 	Cron *CronScheduler
@@ -68,7 +71,7 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	tools, err := BuildTools(cfg.Executor, cfg.Cron)
+	tools, err := BuildTools(cfg.Executor, cfg.Cron, cfg.Daemons)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +85,7 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 		return nil, err
 	}
 	baseTools = append(baseTools, localTools...)
-	instruction := agentInstruction()
+	instruction := agentInstruction(cfg.Daemons)
 	// Sub-agents get the base tools only: no spawn_agent, so no recursion.
 	// Steer is main-agent only: queued input targets the user's turn.
 	queue := &steerQueue{}

@@ -300,7 +300,7 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	cfg.VADThreshold = 0.35
 	cfg.VADSilenceMs = 1250
 	cfg.SentenceEnd = voice.SentenceEndEnter
-	cfg.ModelID = voice.ModelCatalog()[2].ID
+	cfg.ModelID = voice.ModelCatalog()[1].ID
 	cfg.CustomModelDir = "/tmp/custom-model"
 	cfg.Verified = true
 	cfg.setEngineParam(voiceEngineVolcano, "api_key", "api-key")
@@ -379,11 +379,27 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
-	// Engine row: right cycles local -> volcano and rebuilds the engine.
+	// Engine row: right opens the picker; enter on an option selects it and
+	// rebuilds the engine.
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if m.view != voiceViewEngines {
+		t.Fatal("engine row did not open the picker")
+	}
+	if cmd != nil {
+		t.Fatal("opening the picker must not change the engine")
+	}
+	for i, d := range voice.EngineDescriptors() {
+		if d.ID == voiceEngineVolcano {
+			m.cursor = i
+		}
+	}
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	msg, ok := cmd().(voiceSettingsChangedMsg)
 	if !ok || msg.cfg.Engine != voiceEngineVolcano || msg.keepEngine {
 		t.Fatalf("engine change msg = %#v", msg)
+	}
+	if m.view != voiceViewMain {
+		t.Fatal("engine select did not return to the main view")
 	}
 	if strings.Contains(m.View(), "coming soon") {
 		t.Fatal("gated note still in the view")
@@ -957,26 +973,28 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatalf("helper download request = %#v", cmd())
 	}
 
-	// Model > enters the submenu: back row + 3 catalog rows + custom path row
+	// Model > enters the submenu: catalog rows (SenseVoice + its precision
+	// row) + custom path row, no Back row (esc back like other pickers)
 	m.cursor = findVoiceRow(m, vrowModels)
 	m.Update(enter)
 	if m.view != voiceViewModels {
 		t.Fatal("Model > did not enter the submenu")
 	}
-	if rows := m.rows(); len(rows) != 5 || rows[0].kind != vrowBack || rows[4].kind != vrowCustomPath {
+	rows := m.rows()
+	if len(rows) != 4 || rows[0].kind != vrowModel || rows[1].kind != vrowPrecision || rows[2].kind != vrowModel || rows[3].kind != vrowCustomPath {
 		t.Fatalf("submenu rows = %+v", rows)
 	}
 
 	// not-downloaded model row requests the model download
-	m.cursor = 3
+	m.cursor = 2
 	_, cmd = m.Update(enter)
 	req, ok = cmd().(voiceDownloadRequestMsg)
-	if !ok || req.target != voice.ModelCatalog()[2].ID {
+	if !ok || req.target != voice.ModelCatalog()[1].ID {
 		t.Fatalf("model download request = %#v", cmd())
 	}
 
 	// installed model row selects and persists the model, clearing verified
-	spec := voice.ModelCatalog()[2]
+	spec := voice.ModelCatalog()[1]
 	writeFakeModel(t, m.modelsRoot, spec)
 	m.cfg.Verified = true
 	m.refreshInstallState()
@@ -1110,6 +1128,86 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	}
 	if got := loadVoiceSettings(database, mk); got.CustomModelDir != "" {
 		t.Fatal("clear not persisted")
+	}
+}
+
+// The precision row toggles fp32/int8 for the merged SenseVoice entry,
+// persists, and steers the set_model kind.
+func TestVoiceSettingsPrecisionToggle(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.cfg.Verified = true
+
+	m.enterModels()
+	m.cursor = 1 // precision row after the SenseVoice catalog row
+	if rows := m.rows(); rows[1].kind != vrowPrecision {
+		t.Fatalf("rows = %+v", rows)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	chg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || !chg.cfg.ModelInt8 || !chg.keepEngine {
+		t.Fatalf("precision msg = %#v", chg)
+	}
+	if chg.cfg.Verified {
+		t.Fatal("precision switch must clear verified")
+	}
+	if got := loadVoiceSettings(database, mk); !got.ModelInt8 {
+		t.Fatal("int8 not persisted")
+	}
+	if _, kind := localModelTarget(m.cfg, m.modelsRoot); kind != voice.ModelKindSenseVoiceInt8 {
+		t.Fatalf("kind = %q", kind)
+	}
+	if !strings.Contains(m.View(), "int8") {
+		t.Fatal("precision not rendered")
+	}
+	// paraformer keeps its own kind regardless of the toggle
+	m.cfg.ModelID = voice.ModelCatalog()[1].ID
+	if _, kind := localModelTarget(m.cfg, m.modelsRoot); kind != voice.ModelKindParaformer {
+		t.Fatalf("paraformer kind = %q", kind)
+	}
+}
+
+// A persisted pre-merge model id migrates to the merged entry + precision.
+func TestVoiceSettingsLegacyModelIDMigration(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSetting(database, voiceModelSettingKey, "sensevoice-int8"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadVoiceSettings(database, nil)
+	if cfg.ModelID != voice.ModelCatalog()[0].ID || !cfg.ModelInt8 {
+		t.Fatalf("migrated = %q int8=%v", cfg.ModelID, cfg.ModelInt8)
+	}
+	if err := db.SetSetting(database, voiceModelSettingKey, "sensevoice-fp32"); err != nil {
+		t.Fatal(err)
+	}
+	cfg = loadVoiceSettings(database, nil)
+	if cfg.ModelID != voice.ModelCatalog()[0].ID || cfg.ModelInt8 {
+		t.Fatalf("migrated = %q int8=%v", cfg.ModelID, cfg.ModelInt8)
+	}
+}
+
+// The engine picker leaves the engine untouched on esc.
+func TestVoiceSettingsEnginePickerEscKeepsEngine(t *testing.T) {
+	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+	m.enterEngines()
+	if m.view != voiceViewEngines {
+		t.Fatal("not in the picker")
+	}
+	m.cursor = 1
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if m.view != voiceViewMain {
+		t.Fatal("esc did not leave the picker")
+	}
+	if m.cfg.Engine != voiceEngineLocal {
+		t.Fatalf("engine changed on esc: %q", m.cfg.Engine)
 	}
 }
 
@@ -1456,13 +1554,13 @@ func TestVoiceSettingsModelChangeAppliesToEngine(t *testing.T) {
 	a.voiceEngine = fe
 
 	cfg := defaultVoiceSettings()
-	cfg.ModelID = voice.ModelCatalog()[2].ID
+	cfg.ModelID = voice.ModelCatalog()[1].ID
 	upd, _ := a.Update(voiceSettingsChangedMsg{cfg: cfg, keepEngine: true})
 	a = upd.(App)
 	if fe.modelKind != voice.ModelKindParaformer {
 		t.Fatalf("kind = %q", fe.modelKind)
 	}
-	if !strings.HasSuffix(fe.modelDir, voice.ModelCatalog()[2].Dir) {
+	if !strings.HasSuffix(fe.modelDir, voice.ModelCatalog()[1].Dir) {
 		t.Fatalf("dir = %q", fe.modelDir)
 	}
 }

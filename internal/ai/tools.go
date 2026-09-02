@@ -62,6 +62,8 @@ type Executor interface {
 	OpenSSH(ctx context.Context, host string) (tabID string, err error)
 	ListTmuxSessions(ctx context.Context) ([]SessionInfo, error)
 	OpenTmux(ctx context.Context, session string) (tabID string, err error)
+	// Notify emits a desktop notification (OSC 9) on the user's terminal.
+	Notify(ctx context.Context, text string) error
 }
 
 type ListTabsInput struct{}
@@ -176,6 +178,15 @@ type OpenTmuxInput struct {
 	Session string `json:"session" jsonschema_description:"Session name from list_tmux_sessions"`
 }
 
+type NotifyInput struct {
+	Text string `json:"text" jsonschema_description:"Short notification text for the desktop popup"`
+}
+
+type NotifyOutput struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
 // Tool handlers report executor failures in the output struct instead of
 // returning a Go error: eino aborts the whole agent run on any tool error,
 // and a failed operation (e.g. unknown session) is recoverable.
@@ -183,9 +194,10 @@ type toolBuilder struct {
 	exec Executor
 }
 
-// BuildTools builds the terminal/daemon tools; cron (when non-nil) adds the
-// cron_create/cron_list/cron_delete scheduled-wake tools.
-func BuildTools(exec Executor, cron *CronScheduler) ([]tool.BaseTool, error) {
+// BuildTools builds the terminal tools; cron (when non-nil) adds the
+// cron_create/cron_list/cron_delete scheduled-wake tools, and daemons adds
+// the remote-daemon tools (pointless when no daemon is registered).
+func BuildTools(exec Executor, cron *CronScheduler, daemons bool) ([]tool.BaseTool, error) {
 	tb := &toolBuilder{exec: exec}
 
 	listTabs, err := utils.InferTool("list_tabs", "List all open terminal tabs with their id, title, type and which one is active", tb.listTabs)
@@ -200,6 +212,50 @@ func BuildTools(exec Executor, cron *CronScheduler) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build send_keys: %w", err)
 	}
+	openLocal, err := utils.InferTool("open_local_terminal", "Open a new local shell tab on the user's machine and return the new tab id, ready for read_tab/send_keys", tb.openLocalTerminal)
+	if err != nil {
+		return nil, fmt.Errorf("build open_local_terminal: %w", err)
+	}
+	listHosts, err := utils.InferTool("list_hosts", "List the SSH hosts saved in the app with their name, address and tags", tb.listHosts)
+	if err != nil {
+		return nil, fmt.Errorf("build list_hosts: %w", err)
+	}
+	openSSH, err := utils.InferTool("open_ssh", "Open an SSH connection to a saved host (by name from list_hosts) in a new tab and return the new tab id. The connect runs asynchronously; the tool waits for the tab to appear, so a failure surfaces as a wait timeout", tb.openSSH)
+	if err != nil {
+		return nil, fmt.Errorf("build open_ssh: %w", err)
+	}
+	listTmux, err := utils.InferTool("list_tmux_sessions", "List the tmux sessions running on the user's local machine", tb.listTmuxSessions)
+	if err != nil {
+		return nil, fmt.Errorf("build list_tmux_sessions: %w", err)
+	}
+	openTmux, err := utils.InferTool("open_tmux", "Attach to a local tmux session (by name from list_tmux_sessions) in a new tab and return the new tab id", tb.openTmux)
+	if err != nil {
+		return nil, fmt.Errorf("build open_tmux: %w", err)
+	}
+	notify, err := utils.InferTool("notify", "Send a desktop notification to the user's machine (OSC 9 terminal notification). Use when the user asked to be notified about an event, e.g. a watched task finishing, typically from a cron wake or a sub-agent. The popup may never be seen (unsupported terminal, notifications disabled), so always also report the same information in your conversation reply", tb.notify)
+	if err != nil {
+		return nil, fmt.Errorf("build notify: %w", err)
+	}
+
+	tools := []tool.BaseTool{listTabs, readTab, sendKeys, openLocal, listHosts, openSSH, listTmux, openTmux, notify}
+	if daemons {
+		daemonTools, err := buildDaemonTools(tb)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, daemonTools...)
+	}
+	if cron != nil {
+		cronTools, err := buildCronTools(cron)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, cronTools...)
+	}
+	return tools, nil
+}
+
+func buildDaemonTools(tb *toolBuilder) ([]tool.BaseTool, error) {
 	listDaemons, err := utils.InferTool("list_daemons", "List all registered remote daemons with their name, status and OS", tb.listDaemons)
 	if err != nil {
 		return nil, fmt.Errorf("build list_daemons: %w", err)
@@ -224,36 +280,7 @@ func BuildTools(exec Executor, cron *CronScheduler) ([]tool.BaseTool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build kill_session: %w", err)
 	}
-	openLocal, err := utils.InferTool("open_local_terminal", "Open a new local shell tab on the user's machine and return the new tab id, ready for read_tab/send_keys", tb.openLocalTerminal)
-	if err != nil {
-		return nil, fmt.Errorf("build open_local_terminal: %w", err)
-	}
-	listHosts, err := utils.InferTool("list_hosts", "List the SSH hosts saved in the app with their name, address and tags", tb.listHosts)
-	if err != nil {
-		return nil, fmt.Errorf("build list_hosts: %w", err)
-	}
-	openSSH, err := utils.InferTool("open_ssh", "Open an SSH connection to a saved host (by name from list_hosts) in a new tab and return the new tab id. The connect runs asynchronously; the tool waits for the tab to appear, so a failure surfaces as a wait timeout", tb.openSSH)
-	if err != nil {
-		return nil, fmt.Errorf("build open_ssh: %w", err)
-	}
-	listTmux, err := utils.InferTool("list_tmux_sessions", "List the tmux sessions running on the user's local machine", tb.listTmuxSessions)
-	if err != nil {
-		return nil, fmt.Errorf("build list_tmux_sessions: %w", err)
-	}
-	openTmux, err := utils.InferTool("open_tmux", "Attach to a local tmux session (by name from list_tmux_sessions) in a new tab and return the new tab id", tb.openTmux)
-	if err != nil {
-		return nil, fmt.Errorf("build open_tmux: %w", err)
-	}
-
-	tools := []tool.BaseTool{listTabs, readTab, sendKeys, listDaemons, listDaemonSessions, enterDaemon, createSession, renameSession, killSession, openLocal, listHosts, openSSH, listTmux, openTmux}
-	if cron != nil {
-		cronTools, err := buildCronTools(cron)
-		if err != nil {
-			return nil, err
-		}
-		tools = append(tools, cronTools...)
-	}
-	return tools, nil
+	return []tool.BaseTool{listDaemons, listDaemonSessions, enterDaemon, createSession, renameSession, killSession}, nil
 }
 
 func (tb *toolBuilder) listTabs(ctx context.Context, in *ListTabsInput) (*ListTabsOutput, error) {
@@ -374,4 +401,11 @@ func (tb *toolBuilder) openTmux(ctx context.Context, in *OpenTmuxInput) (*OpenTa
 		return &OpenTabOutput{Error: err.Error()}, nil
 	}
 	return &OpenTabOutput{Success: true, TabID: id}, nil
+}
+
+func (tb *toolBuilder) notify(ctx context.Context, in *NotifyInput) (*NotifyOutput, error) {
+	if err := tb.exec.Notify(ctx, in.Text); err != nil {
+		return &NotifyOutput{Error: err.Error()}, nil
+	}
+	return &NotifyOutput{Success: true}, nil
 }

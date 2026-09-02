@@ -7,11 +7,14 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 	"gorm.io/gorm"
 )
 
@@ -25,6 +28,29 @@ func aiTestDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	return database
+}
+
+// The AI overlay key toggles the panel closed without touching the draft or
+// the conversation: it must not fall through to the textarea (where ctrl+k
+// kills the line).
+func TestAIOverlayKeyTogglesWithoutClearing(t *testing.T) {
+	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
+	fake := aiview.NewFakeRunner()
+	av := aiview.New(fake, fake, fake)
+	av.SetSize(80, 24)
+	av.InsertText("draft")
+	a.aiView = av
+	a.aiVisible = true
+
+	upd, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 'k', Mod: tea.ModCtrl}))
+	a = upd.(App)
+	if a.aiVisible {
+		t.Fatal("ctrl+k did not hide the overlay")
+	}
+	a, _ = a.openAIOverlay()
+	if !strings.Contains(a.aiView.View().Content, "draft") {
+		t.Fatal("toggle cleared the input draft")
+	}
 }
 
 func TestFindHostsByName(t *testing.T) {

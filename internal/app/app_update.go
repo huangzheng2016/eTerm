@@ -234,6 +234,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// AI overlay intercepts all keys when visible; esc emits aiview.CloseMsg.
 		if a.aiVisible && a.aiView != nil {
+			if key.Matches(msg, a.keyMap.AIOverlay) {
+				// The open key toggles the overlay closed; it never reaches the
+				// panel, so it cannot kill the input draft or the session.
+				a.aiVisible = false
+				return a, nil
+			}
 			cmd := a.updateAIView(msg)
 			if msg.String() == "ctrl+l" {
 				// Async: Agent.Clear blocks on the run mutex otherwise.

@@ -16,7 +16,7 @@ import (
 
 func TestModelCatalog(t *testing.T) {
 	catalog := ModelCatalog()
-	if len(catalog) != 3 {
+	if len(catalog) != 2 {
 		t.Fatalf("catalog size = %d", len(catalog))
 	}
 	seen := map[string]bool{}
@@ -35,8 +35,18 @@ func TestModelCatalog(t *testing.T) {
 	if ModelByID("no-such-model").ID != catalog[0].ID {
 		t.Fatal("unknown id must fall back to the default")
 	}
-	if ModelByID(catalog[2].ID).ID != catalog[2].ID {
+	if ModelByID(catalog[1].ID).ID != catalog[1].ID {
 		t.Fatal("known id not resolved")
+	}
+	// Pre-merge catalog ids resolve to the merged entry with their precision.
+	if id, int8, legacy := LegacyModelID("sensevoice-int8"); !legacy || id != catalog[0].ID || !int8 {
+		t.Fatalf("LegacyModelID(sensevoice-int8) = %q,%v,%v", id, int8, legacy)
+	}
+	if id, int8, legacy := LegacyModelID("sensevoice-fp32"); !legacy || id != catalog[0].ID || int8 {
+		t.Fatalf("LegacyModelID(sensevoice-fp32) = %q,%v,%v", id, int8, legacy)
+	}
+	if _, _, legacy := LegacyModelID(catalog[1].ID); legacy {
+		t.Fatal("current id reported as legacy")
 	}
 }
 

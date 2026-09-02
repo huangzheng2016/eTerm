@@ -189,6 +189,34 @@ func TestAIOverlayBoundsFillFrame(t *testing.T) {
 	}
 }
 
+// The notify tool request is answered and emitted as an OSC 9 raw sequence.
+func TestAINotifyEmitsOSC9(t *testing.T) {
+	store := &ai.Store{}
+	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
+	if err := store.SetActive("p", "m"); err != nil {
+		t.Fatal(err)
+	}
+	bridge := &aiBridge{store: store}
+	a := App{aiView: aiview.New(bridge, bridge, bridge)}
+	req := aiToolRequest{op: aiToolNotify, arg: "task done", resp: make(chan aiToolResult, 1)}
+	_, cmd := a.handleAIToolRequest(req)
+	if cmd == nil {
+		t.Fatal("notify returned no cmd")
+	}
+	msg, ok := cmd().(tea.RawMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want tea.RawMsg", cmd())
+	}
+	if raw, _ := msg.Msg.(string); raw != "\x1b]9;task done\a" {
+		t.Fatalf("raw = %q", raw)
+	}
+	select {
+	case <-req.resp:
+	default:
+		t.Fatal("notify request not answered")
+	}
+}
+
 // A cron fire routed through the panel's send path starts a new run when the
 // panel is idle and queues onto the active run when one is in flight.
 func TestAICronFireDelivery(t *testing.T) {
@@ -200,7 +228,7 @@ func TestAICronFireDelivery(t *testing.T) {
 	bridge := &aiBridge{store: store}
 	agent := &cronFireAgent{}
 	bridge.agent = agent
-	bridge.agentKey = "p\x00m"
+	bridge.agentKey = "p\x00m\x00false"
 	a := App{aiView: aiview.New(bridge, bridge, bridge)}
 	defer bridge.CancelRun()
 

@@ -283,7 +283,7 @@ func TestCronDelete(t *testing.T) {
 func TestBuildToolsWiresCron(t *testing.T) {
 	var fires []string
 	s := cronTestScheduler(nil, time.Now(), &fires)
-	tools, err := BuildTools(fakeExecutor{}, s)
+	tools, err := BuildTools(fakeExecutor{}, s, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestBuildToolsWiresCron(t *testing.T) {
 			t.Fatalf("%s missing from BuildTools", name)
 		}
 	}
-	plain, err := BuildTools(fakeExecutor{}, nil)
+	plain, err := BuildTools(fakeExecutor{}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -87,6 +87,7 @@ const (
 	aiToolOpenSSH
 	aiToolOpenTmux
 	aiToolPollTab
+	aiToolNotify
 	// aiToolCronFire is not a tool call: the cron scheduler posts a scheduled
 	// wake through the same pump (app.go/app_update.go carry no cron case).
 	aiToolCronFire
@@ -322,6 +323,20 @@ func (e *aiExecutor) ListDaemons(ctx context.Context) ([]ai.DaemonInfo, error) {
 	return e.shared.daemonInfos(), nil
 }
 
+// hasDaemons reports whether any remote daemon is currently registered; the
+// bridge keys its agent cache on this so the daemon tools appear and disappear
+// with the peer list.
+func (e *aiExecutor) hasDaemons() bool {
+	e.shared.mu.RLock()
+	defer e.shared.mu.RUnlock()
+	return len(e.shared.peers) > 0
+}
+
+func (e *aiExecutor) Notify(ctx context.Context, text string) error {
+	_, err := e.roundTrip(ctx, aiToolRequest{op: aiToolNotify, arg: text})
+	return err
+}
+
 func (e *aiExecutor) remoteBase() (string, esync.Config, *esync.Tunnel, error) {
 	cfg := esync.LoadConfig(e.db, e.mk)
 	base, tunnel, err := syncHTTPBaseFor(e.db, e.mk, cfg)
@@ -480,6 +495,9 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 		return a, func() tea.Msg { return types.SSHConnectMsg{HostID: host.ID} }
 	case aiToolPollTab:
 		req.respond(aiToolResult{text: a.findFreshAITab(req.id, req.arg, req.beforeIDs)})
+	case aiToolNotify:
+		req.respond(aiToolResult{})
+		return a, tea.Raw(sshview.OSC9Sequence(req.arg))
 	case aiToolCronFire:
 		// One-way (no respond): the panel's injection channel delivers the
 		// wake without touching the user's draft (running turn: dim Queued

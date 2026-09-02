@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func newSelectionModel() *Model {
@@ -70,22 +68,12 @@ func TestDragSelectCopyShowsToast(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("release after drag returned no clipboard cmd")
 	}
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("cmd msg = %T, want tea.BatchMsg", cmd())
+	if m.toast != "Copied 9 chars" {
+		t.Fatalf("toast = %q", m.toast)
 	}
-	var success *types.SuccessMsg
-	for _, c := range batch {
-		if c == nil {
-			continue
-		}
-		if msg, ok := c().(types.SuccessMsg); ok {
-			m := msg
-			success = &m
-		}
-	}
-	if success == nil || success.Message != "Copied 9 chars" {
-		t.Fatalf("success msg = %+v", success)
+	m.Update(toastClearMsg{seq: m.toastSeq})
+	if m.toast != "" {
+		t.Fatal("toast not cleared after the expiry tick")
 	}
 }
 

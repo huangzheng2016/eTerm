@@ -29,15 +29,11 @@ const senseVoice20240717 = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
 
 var modelCatalog = []ModelSpec{
 	{
-		ID: "sensevoice-fp32", Name: "SenseVoice 2024-07-17 fp32", Kind: ModelKindSenseVoice,
+		// The archive carries both fp32 (model.onnx) and int8
+		// (model.int8.onnx) weights; the precision is a settings toggle,
+		// not a separate download.
+		ID: "sensevoice", Name: "SenseVoice 2024-07-17", Kind: ModelKindSenseVoice,
 		Dir: senseVoice20240717, File: "model.onnx",
-		URL:  "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" + senseVoice20240717 + ".tar.bz2",
-		Size: "1.0 GB",
-	},
-	{
-		// same archive as fp32, runs the quantized weights instead
-		ID: "sensevoice-int8", Name: "SenseVoice 2024-07-17 int8", Kind: ModelKindSenseVoiceInt8,
-		Dir: senseVoice20240717, File: "model.int8.onnx",
 		URL:  "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/" + senseVoice20240717 + ".tar.bz2",
 		Size: "1.0 GB",
 	},
@@ -61,6 +57,18 @@ func ModelByID(id string) ModelSpec {
 		}
 	}
 	return modelCatalog[0]
+}
+
+// LegacyModelID maps the pre-merge catalog ids (sensevoice-fp32,
+// sensevoice-int8) to the merged entry, reporting the precision they implied.
+func LegacyModelID(id string) (newID string, int8 bool, legacy bool) {
+	switch id {
+	case "sensevoice-fp32":
+		return modelCatalog[0].ID, false, true
+	case "sensevoice-int8":
+		return modelCatalog[0].ID, true, true
+	}
+	return "", false, false
 }
 
 // ModelsRoot is where downloaded models live.

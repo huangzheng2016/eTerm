@@ -120,7 +120,7 @@ Windows 默认使用 `A-S-字母` 代替 `C-S-字母`，因为 Windows 的终端
 
 ## AI 助手
 
-`C-k` 打开全屏 AI 助手面板，`Esc` 收起；收起后当前 run 在后台继续，状态栏显示 `ai running`。
+`C-k` 打开全屏 AI 助手面板，再按一次（或 `Esc`）收起；收起后当前 run 在后台继续，状态栏显示 `ai running`。会话内容只在 `/new` 时清空。
 
 Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类型的 provider（OAuth 类型跳过），也可在面板中手动添加。`/model`（或面板内 `C-p`）选择模型。会话保存在 SQLite `ai_sessions` 表，`/resume` 恢复。
 
@@ -141,9 +141,9 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 终端控制工具：
 
 - 标签页：`list_tabs` / `read_tab`（`skip_from_end` 向前翻历史）/ `send_keys`（解码 `\n` `\r` `\t` `\xHH` 转义，等 OSC 133;D 或超时后返回屏幕尾部）
-- 远程 daemon：`list_daemons` / `list_daemon_sessions` / `enter_daemon` / `create_session` / `rename_session` / `kill_session`
+- 远程 daemon（仅在已注册 daemon 时挂载）：`list_daemons` / `list_daemon_sessions` / `enter_daemon` / `create_session` / `rename_session` / `kill_session`
 - 打开会话：`open_local_terminal` / `open_ssh`（按 `list_hosts` 的主机名，重名报歧义）/ `open_tmux`（按 `list_tmux_sessions` 的会话名）
-- 其他：`sleep`（最长 10 分钟）；`spawn_agent` / `wait_agent` / `list_agents` 后台子代理（最多 4 个并发）
+- 其他：`sleep`（最长 10 分钟）；`spawn_agent` / `wait_agent` / `list_agents` 后台子代理（最多 4 个并发）；`notify` 桌面通知（OSC 9）
 
 本地工具：`bash` 与 `str_replace_editor`（读/写/改/undo）。无沙箱，以当前用户完整权限执行。
 
@@ -154,8 +154,8 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 helper 或模型未就绪时按 `C-r` 会打开设置面板引导下载。设置面板也可从命令面板或 `Esc` 菜单（`v`）进入：
 
 - helper：一键下载 CI 构建的 voicehelper（release 产物 `voicehelper-<os>-<arch>.tar.gz`，darwin-arm64 / linux-amd64，约 45 MB，含 sherpa-onnx 动态库）
-- 模型：SenseVoice 2024-07-17 fp32（约 1 GB，默认）/ SenseVoice int8（同包内，更省内存）/ Paraformer zh-small int8（约 74 MB）
-- Engine：local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，需 API key / App key / Access key，加密存储）
+- 模型：SenseVoice 2024-07-17（约 1 GB，默认；同包含 fp32/int8 两套权重，Precision 行切换）/ Paraformer zh-small int8（约 74 MB）
+- Engine：enter 进入子菜单选择 - local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，需 API key / App key / Access key，加密存储）等
 - speech sensitivity (0-1)：VAD 触发灵敏度
 - end-of-sentence silence (ms)：句尾静音判停时长
 - Sentence end：句尾动作 enter / space

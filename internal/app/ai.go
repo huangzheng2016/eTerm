@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -203,7 +204,11 @@ func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentE
 }
 
 func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, error) {
-	key := p.Name + "\x00" + model
+	hasDaemons := false
+	if e, ok := b.exec.(*aiExecutor); ok {
+		hasDaemons = e.hasDaemons()
+	}
+	key := p.Name + "\x00" + model + "\x00" + strconv.FormatBool(hasDaemons)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.agent != nil && b.agentKey == key {
@@ -214,6 +219,7 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 		Model:          model,
 		MaxContextSize: maxCtx,
 		Executor:       b.exec,
+		Daemons:        hasDaemons,
 		Cron:           b.cron,
 	})
 	if err != nil {

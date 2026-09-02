@@ -27,7 +27,8 @@ const (
 	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
 	voiceModelSettingKey       = "voice_model"
-	voiceCustomModelSettingKey = "voice_custom_model" // absolute dir, local engine
+	voiceModelInt8SettingKey   = "voice_model_int8"      // "1"/"0": run the quantized SenseVoice weights
+	voiceCustomModelSettingKey = "voice_custom_model"    // absolute dir, local engine
 	voiceVerifiedSettingKey    = "voice_verified"
 	voiceParamsSettingPrefix   = "voice_params_" // + engine id: encrypted JSON params blob
 	voiceVolcanoSettingKey     = "voice_volcano" // legacy: migrated into voice_params_volcano
@@ -43,6 +44,7 @@ type voiceSettings struct {
 	SentenceEnd    voice.SentenceEnd
 	Params         map[string]map[string]string // engine id -> param key -> value
 	ModelID        string                       // offline model catalog id (local engine)
+	ModelInt8      bool                         // run the quantized weights (SenseVoice catalog model)
 	CustomModelDir string                       // validated custom model dir; overrides ModelID when set
 	Verified       bool                         // a test recording succeeded with this setup
 }
@@ -136,9 +138,15 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 		}
 	}
 	if v, err := db.GetSetting(database, voiceModelSettingKey); err == nil && v != "" {
-		if m := voice.ModelByID(v); m.ID == v {
+		if newID, int8, legacy := voice.LegacyModelID(v); legacy {
+			cfg.ModelID = newID
+			cfg.ModelInt8 = int8
+		} else if m := voice.ModelByID(v); m.ID == v {
 			cfg.ModelID = v
 		}
+	}
+	if v, err := db.GetSetting(database, voiceModelInt8SettingKey); err == nil && v == "1" {
+		cfg.ModelInt8 = true
 	}
 	if v, err := db.GetSetting(database, voiceCustomModelSettingKey); err == nil {
 		cfg.CustomModelDir = v
@@ -234,6 +242,13 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	if err := db.SetSetting(database, voiceModelSettingKey, cfg.ModelID); err != nil {
 		return err
 	}
+	int8 := "0"
+	if cfg.ModelInt8 {
+		int8 = "1"
+	}
+	if err := db.SetSetting(database, voiceModelInt8SettingKey, int8); err != nil {
+		return err
+	}
 	if err := db.SetSetting(database, voiceCustomModelSettingKey, cfg.CustomModelDir); err != nil {
 		return err
 	}
@@ -308,7 +323,11 @@ func localModelTarget(cfg voiceSettings, modelsRoot string) (dir, kind string) {
 		return cfg.CustomModelDir, voice.ModelKindSenseVoice
 	}
 	spec := voice.ModelByID(cfg.ModelID)
-	return spec.ModelDir(modelsRoot), spec.Kind
+	kind = spec.Kind
+	if cfg.ModelInt8 && spec.Kind == voice.ModelKindSenseVoice {
+		kind = voice.ModelKindSenseVoiceInt8
+	}
+	return spec.ModelDir(modelsRoot), kind
 }
 
 // localModelReady reports whether the local engine has a usable model: a
