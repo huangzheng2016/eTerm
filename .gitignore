@@ -54,3 +54,4 @@ Thumbs.db
 # Local planning notes (not committed)
 .plan/
 /docs/superpowers/
+tmp_remote_diag/
