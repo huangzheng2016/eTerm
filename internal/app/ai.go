@@ -246,19 +246,6 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 	return agent, nil
 }
 
-// Clear resets the agent conversation history (wired to the overlay's ctrl+l).
-// Agent.Clear blocks on the run mutex for the rest of the turn, so it runs
-// off the caller's goroutine: the overlay cancels the run in the same key
-// handling, and the clear lands as soon as the turn unwinds.
-func (b *aiBridge) Clear() {
-	b.mu.Lock()
-	agent := b.agent
-	b.mu.Unlock()
-	if agent != nil {
-		go agent.Clear()
-	}
-}
-
 // Enqueue implements aiview.AgentRunner: input submitted mid-run is queued on
 // the agent, which injects it at the next step boundary. It fails rather than
 // dropping the message silently when there is no run to steer.

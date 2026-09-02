@@ -5,11 +5,9 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/ai"
 	"github.com/huangzheng2016/eTerm/internal/db"
-	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"gorm.io/gorm"
 )
 
@@ -46,28 +44,6 @@ func (f *fakeAgent) TaskSnapshots() []ai.TaskSnapshot           { return f.snaps
 func (f *fakeAgent) CancelTask(id string) bool {
 	f.cancelledTasks = append(f.cancelledTasks, id)
 	return true
-}
-
-func TestCtrlLReturnsPromptlyMidRun(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	bridge := &aiBridge{}
-	bridge.agent = &fakeAgent{clearRelease: release}
-	a := App{
-		aiView:    aiview.New(bridge, bridge, bridge),
-		aiBridge:  bridge,
-		aiVisible: true,
-	}
-	done := make(chan struct{})
-	go func() {
-		a.Update(tea.KeyPressMsg(tea.Key{Code: 'l', Mod: tea.ModCtrl}))
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("ctrl+l blocked while the agent was busy")
-	}
 }
 
 func TestBridgeCancelRun(t *testing.T) {

@@ -47,6 +47,17 @@ func (s *cronTestStore) DeleteCronJob(id string) error {
 	return nil
 }
 
+func (s *cronTestStore) DeleteSessionCronJobs(sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, j := range s.jobs {
+		if j.SessionID == sessionID {
+			delete(s.jobs, id)
+		}
+	}
+	return nil
+}
+
 func (s *cronTestStore) MoveCronJobs(from, to string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -257,6 +268,49 @@ func TestCronSetSessionAdoptsUnsavedJobs(t *testing.T) {
 	}
 	if stored, _ := store.LoadCronJobs("s1"); len(stored) != 1 {
 		t.Fatal("s1 jobs moved again")
+	}
+}
+
+// AbandonSession wipes the active session's jobs from memory and the store,
+// including jobs of the unsaved session (""); other sessions are untouched.
+func TestCronAbandonSessionWipesJobs(t *testing.T) {
+	store := newCronTestStore()
+	var fires []string
+	s := cronTestScheduler(store, time.Now(), &fires)
+
+	// Jobs created before the first save (session "").
+	if _, err := s.Create("pre-save", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	s.AbandonSession()
+	if n := len(s.List()); n != 0 || store.count() != 0 {
+		t.Fatalf("unsaved jobs not wiped: mem %d, store %d", n, store.count())
+	}
+
+	// Jobs of a saved session; a second session's jobs must survive.
+	s.SetSession("s1")
+	if _, err := s.Create("s1 job", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	s.SetSession("s2")
+	if _, err := s.Create("s2 job", 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	s.AbandonSession()
+	if n := len(s.List()); n != 0 {
+		t.Fatalf("jobs not wiped from memory: %d", n)
+	}
+	if stored, _ := store.LoadCronJobs("s2"); len(stored) != 0 {
+		t.Fatalf("s2 jobs not wiped from store: %+v", stored)
+	}
+	if stored, _ := store.LoadCronJobs("s1"); len(stored) != 1 {
+		t.Fatalf("other session jobs wiped: %+v", stored)
+	}
+
+	// The wiped session stays empty when re-entered.
+	s.SetSession("s2")
+	if n := len(s.List()); n != 0 {
+		t.Fatalf("wiped jobs came back: %d", n)
 	}
 }
 

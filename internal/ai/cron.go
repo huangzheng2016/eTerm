@@ -38,6 +38,9 @@ type CronStore interface {
 	LoadCronJobs(sessionID string) ([]CronJob, error)
 	UpsertCronJob(job CronJob) error
 	DeleteCronJob(id string) error
+	// DeleteSessionCronJobs wipes every job of a session (the conversation
+	// is abandoned on /new or a switch to another session).
+	DeleteSessionCronJobs(sessionID string) error
 	// MoveCronJobs re-homes jobs from one session to another (first save of
 	// a previously unsaved conversation).
 	MoveCronJobs(fromSession, toSession string) error
@@ -75,6 +78,19 @@ func (s *CronScheduler) loop() {
 	for range tick.C {
 		s.fireDue()
 	}
+}
+
+// AbandonSession wipes the current session's jobs and detaches from it: used
+// on /new and when switching to another session, since cron jobs die with
+// their conversation. The "" pre-save jobs are wiped too.
+func (s *CronScheduler) AbandonSession() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.store != nil {
+		_ = s.store.DeleteSessionCronJobs(s.session)
+	}
+	s.session = ""
+	s.jobs = map[string]*CronJob{}
 }
 
 // SetSession switches the active session: the previous session's jobs stay
