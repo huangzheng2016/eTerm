@@ -50,8 +50,8 @@ func TestRenderSmokeEmpty(t *testing.T) {
 	if !strings.Contains(out, "openai") {
 		t.Fatal("missing active provider")
 	}
-	if !strings.Contains(out, "esc close") {
-		t.Fatal("missing hint line")
+	if strings.Contains(out, "/help") {
+		t.Fatal("slash menu must stay hidden on empty input")
 	}
 }
 
@@ -166,19 +166,25 @@ type ctxRunner struct {
 
 func (r ctxRunner) ContextUsage() (int, int) { return r.used, r.max }
 
-func TestContextUsageInTitle(t *testing.T) {
+func TestContextUsageInBottomRow(t *testing.T) {
 	fake := NewFakeRunner()
 	fake.Delay = 0
 	m := New(ctxRunner{fake, 512, 1024}, fake, fake)
 	m.SetSize(100, 32)
-	if out := plain(m.View().Content); !strings.Contains(out, "context: 50% (512/1k)") {
-		t.Fatalf("title missing context usage:\n%s", out)
+	content, _ := m.chatView()
+	lines := strings.Split(plain(content), "\n")
+	if strings.Contains(lines[0], "openai") || strings.Contains(lines[0], "context:") {
+		t.Fatalf("title must not carry the model/context summary: %q", lines[0])
+	}
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "openai") || !strings.Contains(last, "context: 50% (512/1k)") {
+		t.Fatalf("bottom-right summary missing:\n%s", strings.Join(lines, "\n"))
 	}
 
 	m = New(ctxRunner{fake, 114688, 1048576}, fake, fake)
 	m.SetSize(100, 32)
 	if out := plain(m.View().Content); !strings.Contains(out, "context: 10% (114k/1M)") {
-		t.Fatalf("title missing humanized usage:\n%s", out)
+		t.Fatalf("bottom row missing humanized usage:\n%s", out)
 	}
 
 	m = New(ctxRunner{fake, 0, 0}, fake, fake)
@@ -196,6 +202,34 @@ func TestContextUsageInTitle(t *testing.T) {
 	fillConversation(m)
 	if n := strings.Count(m.View().Content, "\n") + 1; n != 24 {
 		t.Fatalf("ctx + long model name: view height = %d, want 24", n)
+	}
+}
+
+func TestRunningIndicatorAboveInput(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventTextDelta, Text: "slow"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+
+	content, _ := m.chatView()
+	lines := strings.Split(plain(content), "\n")
+	// The input box takes the 5 rows above the last row; the status row sits
+	// right above it.
+	statusRow := lines[len(lines)-7]
+	if strings.TrimSpace(statusRow) == "" {
+		t.Fatal("status row blank while running")
+	}
+	if strings.TrimSpace(lines[0]) != "AI Assistant" {
+		t.Fatalf("title must only carry the name while running: %q", lines[0])
+	}
+	pumpEvents(t, m)
+
+	content, _ = m.chatView()
+	lines = strings.Split(plain(content), "\n")
+	if strings.TrimSpace(lines[len(lines)-7]) != "" {
+		t.Fatal("status row must be blank when idle")
 	}
 }
 
@@ -539,4 +573,168 @@ func TestClearSessionDropsInjectedBuffer(t *testing.T) {
 	if len(m.injected) != 0 {
 		t.Fatalf("buffer survived clearSession: %v", m.injected)
 	}
+}
+
+func TestThinkingTailWindowThenCollapsed(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventThinkingDelta, Text: "line1\nline2\nline3\nline4"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	m.handleEvent(<-m.events)
+	m.flush()
+
+	// Streaming: a fixed tail window shows only the last 2 lines.
+	live := plain(m.blocks[1].cache)
+	if !strings.Contains(live, "line3") || !strings.Contains(live, "line4") {
+		t.Fatalf("live window missing tail lines:\n%s", live)
+	}
+	if strings.Contains(live, "line1") {
+		t.Fatalf("live window must not show head lines:\n%s", live)
+	}
+
+	// Done: collapsed to the first 2 lines plus a hint.
+	m.handleEvent(<-m.events)
+	collapsed := plain(m.blocks[1].cache)
+	if !strings.Contains(collapsed, "line1") || !strings.Contains(collapsed, "line2") {
+		t.Fatalf("collapsed view missing head lines:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "line3") {
+		t.Fatalf("collapsed view must hide the rest:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "2 more lines, ctrl+o to expand") {
+		t.Fatalf("collapsed view missing hint:\n%s", collapsed)
+	}
+}
+
+func TestThinkingCollapsesWhenToolStarts(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventThinkingDelta, Text: "t1\nt2\nt3\nt4"},
+		{Kind: EventToolCallStart, ToolName: "terminal", ToolArgs: `{"cmd":"ls"}`},
+		{Kind: EventToolCallEnd},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	m.handleEvent(<-m.events)
+	m.flush()
+	m.handleEvent(<-m.events) // tool start seals the thinking block mid-run
+	sealed := plain(m.blocks[1].cache)
+	if !strings.Contains(sealed, "t1") || strings.Contains(sealed, "t3") {
+		t.Fatalf("sealed thinking must collapse to the head:\n%s", sealed)
+	}
+	if !strings.Contains(sealed, "2 more lines, ctrl+o to expand") {
+		t.Fatalf("sealed thinking missing hint:\n%s", sealed)
+	}
+	pumpEvents(t, m)
+}
+
+func TestThinkingExpandWithCtrlO(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventThinkingDelta, Text: "line1\nline2\nline3\nline4"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	pumpEvents(t, m)
+
+	m.Update(keyMsg('o', tea.ModCtrl))
+	expanded := plain(m.blocks[1].cache)
+	if !strings.Contains(expanded, "line3") || !strings.Contains(expanded, "line4") {
+		t.Fatalf("ctrl+o did not expand thinking:\n%s", expanded)
+	}
+	if strings.Contains(expanded, "more lines") {
+		t.Fatal("expanded view still shows the hint")
+	}
+
+	m.Update(keyMsg('o', tea.ModCtrl))
+	if strings.Contains(plain(m.blocks[1].cache), "line3") {
+		t.Fatal("ctrl+o did not collapse thinking")
+	}
+}
+
+func TestToolBlockNameAndArgsLines(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventToolCallStart, ToolName: "send_keys", ToolArgs: "{\n  \"keys\": \"ls -la\"\n}"},
+		{Kind: EventToolCallEnd, Text: "out1\nout2"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	pumpEvents(t, m)
+
+	lines := strings.Split(plain(m.blocks[1].cache), "\n")
+	if !strings.Contains(lines[0], "▸ tool: send_keys") || !strings.Contains(lines[0], "done") {
+		t.Fatalf("head line: %q", lines[0])
+	}
+	if strings.Contains(lines[0], "ls -la") {
+		t.Fatalf("head line must not show args: %q", lines[0])
+	}
+	if got, want := lines[1], `{ "keys": "ls -la" }`; got != want {
+		t.Fatalf("args line = %q, want %q (whitespace collapsed)", got, want)
+	}
+	if lines[2] != "out1" {
+		t.Fatalf("output preview after args line: %q", lines[2])
+	}
+}
+
+func TestToolBlockLegacyTextHasNoArgsLine(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventToolCallStart, Text: "terminal ls -la"},
+		{Kind: EventToolCallEnd},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	pumpEvents(t, m)
+
+	lines := strings.Split(plain(m.blocks[1].cache), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "▸ tool: terminal ls -la") {
+		t.Fatalf("legacy text-only call renders the head line only: %q", lines)
+	}
+}
+
+func TestToolBlockArgsTruncatedToWidth(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventToolCallStart, ToolName: "run", ToolArgs: strings.Repeat("x", 300)},
+		{Kind: EventToolCallEnd},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	pumpEvents(t, m)
+
+	lines := strings.Split(m.blocks[1].cache, "\n")
+	if w := ansi.StringWidth(lines[1]); w > m.contentWidth() {
+		t.Fatalf("args line width = %d, want <= %d", w, m.contentWidth())
+	}
+	if !strings.HasSuffix(plain(lines[1]), "...") {
+		t.Fatalf("truncated args must end with ...: %q", plain(lines[1]))
+	}
+}
+
+func TestQueuedMessageCollapsesTailThinking(t *testing.T) {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventThinkingDelta, Text: "t1\nt2\nt3\nt4"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("first")
+	m.send()
+	m.handleEvent(<-m.events)
+	m.flush()
+	if got := plain(m.blocks[1].cache); !strings.Contains(got, "t3") {
+		t.Fatalf("thinking should stream in the tail window: %q", got)
+	}
+
+	m.input.SetValue("second")
+	m.send() // queued mid-run; the user block seals the thinking tail
+	got := plain(m.blocks[1].cache)
+	if !strings.Contains(got, "t1") || strings.Contains(got, "t3") {
+		t.Fatalf("queued message must collapse the thinking block: %q", got)
+	}
+	if !strings.Contains(got, "2 more lines, ctrl+o to expand") {
+		t.Fatalf("missing collapse hint: %q", got)
+	}
+	pumpEvents(t, m)
 }

@@ -325,13 +325,99 @@ func TestAutosaveScheduledOnRunEnd(t *testing.T) {
 	}
 }
 
-func TestShortHint(t *testing.T) {
+func TestSlashMenuShowsAllOnSlashInput(t *testing.T) {
 	m := newTestModel(nil)
-	out := plain(m.View().Content)
-	if !strings.Contains(out, "enter send · /help · esc close") {
-		t.Fatalf("short hint missing:\n%s", out)
+	if out := plain(m.View().Content); strings.Contains(out, "/model") {
+		t.Fatal("menu must stay hidden on empty input")
 	}
-	if strings.Contains(out, "ctrl+p models") {
-		t.Fatal("long hint still present")
+
+	m.input.SetValue("/")
+	out := plain(m.View().Content)
+	for _, s := range []string{"/model", "/new", "/resume", "/fork", "/undo", "/tasks", "/help", "pick model", "background agents"} {
+		if !strings.Contains(out, s) {
+			t.Fatalf("menu missing %q:\n%s", s, out)
+		}
+	}
+	if !strings.Contains(out, "▸ /model") {
+		t.Fatal("cursor not on the first command")
+	}
+	if n := strings.Count(out, "\n") + 1; n != 32 {
+		t.Fatalf("menu must not grow the frame: view height = %d, want 32", n)
+	}
+}
+
+func TestSlashMenuFiltersByPrefix(t *testing.T) {
+	m := newTestModel(nil)
+	m.input.SetValue("/re")
+	out := plain(m.View().Content)
+	if !strings.Contains(out, "/resume") {
+		t.Fatal("menu missing the prefix match")
+	}
+	if strings.Contains(out, "/model") {
+		t.Fatal("menu not filtered by prefix")
+	}
+
+	m.input.SetValue("hello")
+	out = plain(m.View().Content)
+	if strings.Contains(out, "/resume") {
+		t.Fatal("menu visible without a / prefix")
+	}
+}
+
+func TestSlashMenuNavigateAndComplete(t *testing.T) {
+	m := newTestModel(nil)
+	m.input.SetValue("/")
+	m.Update(keyMsg(tea.KeyDown, 0))
+	if out := plain(m.View().Content); !strings.Contains(out, "▸ /new") {
+		t.Fatalf("down did not move the cursor:\n%s", out)
+	}
+	m.Update(keyMsg(tea.KeyUp, 0))
+	if out := plain(m.View().Content); !strings.Contains(out, "▸ /model") {
+		t.Fatalf("up did not move the cursor back:\n%s", out)
+	}
+	m.Update(keyMsg(tea.KeyDown, 0))
+	m.Update(keyMsg(tea.KeyDown, 0))
+	m.Update(keyMsg(tea.KeyTab, 0))
+	if m.input.Value() != "/resume" {
+		t.Fatalf("tab completion: input = %q, want /resume", m.input.Value())
+	}
+
+	m.input.SetValue("/fo")
+	m.Update(keyMsg(tea.KeyRight, 0))
+	if m.input.Value() != "/fork" {
+		t.Fatalf("right completion: input = %q, want /fork", m.input.Value())
+	}
+}
+
+func TestSlashMenuEnterCompletesThenRuns(t *testing.T) {
+	m := newTestModel(nil)
+	m.input.SetValue("/fo")
+	m.Update(keyMsg(tea.KeyEnter, 0))
+	if m.input.Value() != "/fork" {
+		t.Fatalf("enter did not complete: input = %q", m.input.Value())
+	}
+	if m.errMsg != "" {
+		t.Fatalf("completion must not run the command: %q", m.errMsg)
+	}
+	m.Update(keyMsg(tea.KeyEnter, 0))
+	if !strings.Contains(m.errMsg, "nothing to fork") {
+		t.Fatalf("second enter must run the command: %q", m.errMsg)
+	}
+}
+
+func TestSlashMenuEscDismisses(t *testing.T) {
+	m := newTestModel(nil)
+	m.Init() // focus the textarea so it accepts typed keys
+	m.input.SetValue("/mo")
+	_, cmd := m.Update(keyMsg(tea.KeyEscape, 0))
+	if cmd != nil {
+		t.Fatal("esc with a / draft must not close the panel")
+	}
+	if out := plain(m.View().Content); strings.Contains(out, "/model") {
+		t.Fatal("menu still visible after esc")
+	}
+	m.Update(keyMsg('d', 0)) // any edit re-arms the menu
+	if out := plain(m.View().Content); !strings.Contains(out, "/model") {
+		t.Fatal("menu did not reappear after an edit")
 	}
 }

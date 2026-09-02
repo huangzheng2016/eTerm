@@ -22,6 +22,10 @@ const (
 type AgentEvent struct {
 	Kind EventKind
 	Text string
+	// ToolName/ToolArgs carry the tool call's name and raw input on
+	// EventToolCallStart; when ToolName is empty, Text is the display name.
+	ToolName string
+	ToolArgs string
 }
 
 type AgentRunner interface {

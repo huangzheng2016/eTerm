@@ -53,6 +53,7 @@ const (
 type block struct {
 	kind     blockKind
 	text     string
+	args     string // tool input (blockTool only)
 	output   string // tool result (blockTool only)
 	toolDone bool
 	final    bool
@@ -119,6 +120,11 @@ type Model struct {
 	taskDetailID string
 	dOffset      int
 
+	// slashCursor is the highlighted row of the slash-command menu;
+	// slashMenuOff dismisses it (esc) until the input changes.
+	slashCursor  int
+	slashMenuOff bool
+
 	voiceActive bool // recording indicator in the title (voice input)
 
 	// injected holds programmatic user messages (cron wakes) buffered while a
@@ -184,7 +190,9 @@ func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
 		boxH = 8
 	}
 	contentW = boxW - 4
-	viewH = boxH - 2 - 1 - 5 - 1 - 3
+	// Non-viewport rows: border(2) + title(1) + blank(1) + status(1) +
+	// input box(5) + last row(1).
+	viewH = boxH - 11
 	if viewH < 1 {
 		viewH = 1
 	}
@@ -255,6 +263,7 @@ func (m *Model) queueOrRun(prompt string) (cmd tea.Cmd, ok bool) {
 			return nil, false
 		}
 		m.blocks = append(m.blocks, block{kind: blockUser, text: prompt, queued: true})
+		m.collapseThinking(len(m.blocks) - 2)
 		m.renderBlock(len(m.blocks) - 1)
 		m.rebuild()
 		return nil, true
@@ -265,6 +274,7 @@ func (m *Model) queueOrRun(prompt string) (cmd tea.Cmd, ok bool) {
 	m.status = statusRunning
 	m.errMsg = ""
 	m.blocks = append(m.blocks, block{kind: blockUser, text: prompt})
+	m.collapseThinking(len(m.blocks) - 2)
 	m.renderBlock(len(m.blocks) - 1)
 	m.rebuild()
 
@@ -353,7 +363,12 @@ func (m *Model) handleEvent(ev AgentEvent) bool {
 		m.dirty = true
 	case EventToolCallStart:
 		m.sealStream()
-		m.blocks = append(m.blocks, block{kind: blockTool, text: ev.Text})
+		name := ev.ToolName
+		if name == "" {
+			name = ev.Text
+		}
+		m.blocks = append(m.blocks, block{kind: blockTool, text: name, args: ev.ToolArgs})
+		m.collapseThinking(len(m.blocks) - 2)
 		m.renderBlock(len(m.blocks) - 1)
 		m.dirty = true
 	case EventToolCallEnd:
@@ -392,8 +407,18 @@ func (m *Model) openBlock(kind blockKind) *block {
 	if len(m.blocks) == 0 || m.blocks[len(m.blocks)-1].kind != kind {
 		m.sealStream()
 		m.blocks = append(m.blocks, block{kind: kind})
+		m.collapseThinking(len(m.blocks) - 2)
 	}
 	return &m.blocks[len(m.blocks)-1]
+}
+
+// collapseThinking re-renders block i when it is a thinking block that just
+// stopped being the stream tail, folding its live tail-window into the
+// collapsed head view.
+func (m *Model) collapseThinking(i int) {
+	if i >= 0 && m.blocks[i].kind == blockThinking {
+		m.renderBlock(i)
+	}
 }
 
 func (m *Model) sealStream() {
@@ -475,9 +500,29 @@ func (m *Model) renderBlock(i int) {
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#5fd7ff")).Width(cw).
 			Render(prefix + b.text)
 	case blockThinking:
-		logical = strings.Split("Thinking: "+b.text, "\n")
+		lines := strings.Split(strings.TrimRight(b.text, "\n"), "\n")
+		// Live (stream tail) shows a fixed tail window that scrolls with the
+		// deltas; sealed blocks collapse to the head plus a hint; ctrl+o
+		// (expandTools) shows everything.
+		live := i == len(m.blocks)-1 && m.status == statusRunning
+		shown := lines
+		hint := ""
+		if !m.expandTools {
+			switch {
+			case live && len(lines) > 2:
+				shown = lines[len(lines)-2:]
+			case !live && len(lines) > 2:
+				shown = lines[:2]
+				hint = fmt.Sprintf("... (%d more lines, ctrl+o to expand)", len(lines)-2)
+			}
+		}
+		text := "Thinking: " + strings.Join(shown, "\n")
+		if hint != "" {
+			text += "\n" + hint
+		}
+		logical = strings.Split(text, "\n")
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#666")).Italic(true).Width(cw).
-			Render("Thinking: " + b.text)
+			Render(text)
 	case blockSystem:
 		logical = strings.Split(b.text, "\n")
 		b.cache = lipgloss.NewStyle().Foreground(lipgloss.Color("#666")).Italic(true).Width(cw).
@@ -493,18 +538,28 @@ func (m *Model) renderBlock(i int) {
 		// re-wraps it and the frame grows a row.
 		label := truncateCells(b.text, max(0, cw-9-stateW))
 		head := ui.SelectedStyle.Render("▸ tool: "+label) + " " + state
+		lines := []string{head}
+		args := ""
+		if b.args != "" {
+			args = truncateCells(strings.Join(strings.Fields(b.args), " "), max(0, cw))
+			lines = append(lines, ui.DimStyle.Render(args))
+		}
 		out := strings.TrimRight(b.output, "\n")
 		if out == "" {
-			b.cache = head
+			b.cache = strings.Join(lines, "\n")
 			break
 		}
 		if m.expandTools {
-			b.cache = head + "\n" + ui.DimStyle.Width(cw).Render(out)
-			logical = append([]string{ansi.Strip(head)}, strings.Split(out, "\n")...)
+			b.cache = strings.Join(append(lines, ui.DimStyle.Width(cw).Render(out)), "\n")
+			logical = []string{ansi.Strip(head)}
+			if args != "" {
+				logical = append(logical, args)
+			}
+			logical = append(logical, strings.Split(out, "\n")...)
 			break
 		}
-		lines := strings.Split(out, "\n")
-		preview := lines
+		outLines := strings.Split(out, "\n")
+		preview := outLines
 		if len(preview) > 3 {
 			preview = preview[:3]
 		}
@@ -512,10 +567,10 @@ func (m *Model) renderBlock(i int) {
 			preview[i] = truncateCells(l, max(0, cw))
 		}
 		summary := strings.Join(preview, "\n")
-		if len(lines) > 3 {
-			summary += fmt.Sprintf("\n... (%d more lines, ctrl+o to expand)", len(lines)-3)
+		if len(outLines) > 3 {
+			summary += fmt.Sprintf("\n... (%d more lines, ctrl+o to expand)", len(outLines)-3)
 		}
-		b.cache = head + "\n" + ui.DimStyle.Render(summary)
+		b.cache = strings.Join(append(lines, ui.DimStyle.Render(summary)), "\n")
 	case blockAssistant:
 		final := b.final || m.status != statusRunning
 		out := m.md.render(b.text, final)
@@ -582,7 +637,10 @@ func (m *Model) rebuild() {
 // line and column: the viewport starts below border+title+blank (row 3)
 // and right of border+padding (col 2).
 func (m *Model) contentPoint(x, y int) (line, col int) {
-	_, _, _, vh := m.layout()
+	vh := m.viewport.Height()
+	if vh < 1 {
+		vh = 1
+	}
 	row := y - 3
 	if row < 0 {
 		row = 0
@@ -619,7 +677,7 @@ func (m *Model) queueSelectionAutoScroll() tea.Cmd {
 // direction and extends the caret to the new edge line. False means the
 // viewport cannot scroll further.
 func (m *Model) scrollSelectionOnce() bool {
-	_, _, _, vh := m.layout()
+	vh := m.viewport.Height()
 	switch m.selAutoScroll.Dir {
 	case -1:
 		if m.viewport.YOffset() <= 0 {
@@ -729,7 +787,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sel.Dragging {
 			m.sel.Move(m.contentPoint(msg.X, msg.Y))
 			m.rebuild()
-			_, _, _, vh := m.layout()
+			vh := m.viewport.Height()
 			vy := min(max(msg.Y-3, 0), vh-1)
 			if m.selAutoScroll.Update(vy, vh) {
 				return m, m.queueSelectionAutoScroll()
@@ -763,6 +821,8 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeChat {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			m.slashMenuOff = false
+			m.slashCursor = 0
 			return m, cmd
 		}
 		return m, nil
@@ -785,6 +845,37 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if matches := m.slashMatches(); len(matches) > 0 {
+		if m.slashCursor >= len(matches) {
+			m.slashCursor = len(matches) - 1
+		}
+		switch msg.String() {
+		case "up":
+			if m.slashCursor > 0 {
+				m.slashCursor--
+			}
+			return m, nil
+		case "down":
+			if m.slashCursor < len(matches)-1 {
+				m.slashCursor++
+			}
+			return m, nil
+		case "tab", "right":
+			m.input.SetValue(matches[m.slashCursor].name)
+			m.slashCursor = 0
+			return m, nil
+		case "enter":
+			// A full command submits; anything else completes first.
+			if strings.TrimSpace(m.input.Value()) != matches[m.slashCursor].name {
+				m.input.SetValue(matches[m.slashCursor].name)
+				m.slashCursor = 0
+				return m, nil
+			}
+		case "esc":
+			m.slashMenuOff = true
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		m.sel = textselection.Selection{}
@@ -821,7 +912,7 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+o":
 		m.expandTools = !m.expandTools
 		for i := range m.blocks {
-			if m.blocks[i].kind == blockTool {
+			if m.blocks[i].kind == blockTool || m.blocks[i].kind == blockThinking {
 				m.renderBlock(i)
 			}
 		}
@@ -839,7 +930,13 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	old := m.input.Value()
 	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != old {
+		// Any edit re-arms the slash menu and resets its cursor.
+		m.slashMenuOff = false
+		m.slashCursor = 0
+	}
 	return m, cmd
 }
 
@@ -890,30 +987,15 @@ func humanizeTokens(n int) string {
 }
 
 func (m *Model) chatView() (string, *tea.Cursor) {
+	m.syncViewportHeight()
 	cw := m.contentWidth()
-	ctx := ""
-	if cu, ok := m.runner.(interface{ ContextUsage() (int, int) }); ok {
-		if used, max := cu.ContextUsage(); max > 0 {
-			ctx = fmt.Sprintf(" · context: %d%% (%s/%s)", used*100/max, humanizeTokens(used), humanizeTokens(max))
-		}
-	}
+
+	// Title: name, voice recording indicator, copy toast. The model/context
+	// summary lives at the bottom-right corner instead.
 	title := ui.TitleStyle.Render("AI Assistant")
-	if m.store != nil && m.store.Active() != "" {
-		// "AI Assistant"(12) + " · "(3) + spinner(2) + REC(4) + ctx must fit in cw.
-		budget := 18
-		if m.voiceActive {
-			budget += 4
-		}
-		label := truncateCells(m.store.Active(), max(0, cw-budget-len(ctx)))
-		title += ui.DimStyle.Render(" · " + label)
-	}
-	if m.status == statusRunning {
-		title += " " + m.spinner.View()
-	}
 	if m.voiceActive {
 		title += " " + ui.ErrorStyle.Render("REC")
 	}
-	title += ui.DimStyle.Render(ctx)
 	if m.toast != "" {
 		t := ui.SuccessStyle.Render(m.toast)
 		if gap := cw - lipgloss.Width(title) - lipgloss.Width(t); gap > 0 {
@@ -921,13 +1003,30 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 		}
 	}
 
-	hintText := truncateCells("enter send · /help · esc close", max(0, cw))
-	hint := ui.DimStyle.Render(hintText)
-	// The error takes the blank row above the hint so it never adds a row.
+	// The last row carries the error (left) and the model/context summary
+	// (right, dim); it never adds a row.
+	right := ""
+	if m.store != nil && m.store.Active() != "" {
+		right = m.store.Active()
+	}
+	if cu, ok := m.runner.(interface{ ContextUsage() (int, int) }); ok {
+		if used, max := cu.ContextUsage(); max > 0 {
+			if right != "" {
+				right += " · "
+			}
+			right += fmt.Sprintf("context: %d%% (%s/%s)", used*100/max, humanizeTokens(used), humanizeTokens(max))
+		}
+	}
+	right = ui.DimStyle.Render(truncateCells(right, max(0, cw)))
+	rightW := lipgloss.Width(right)
 	errLine := ""
 	if m.errMsg != "" {
 		collapsed := strings.Join(strings.Fields(m.errMsg), " ")
-		errLine = ui.ErrorStyle.Render(truncateCells("error: "+collapsed, max(0, cw)))
+		errLine = ui.ErrorStyle.Render(truncateCells("error: "+collapsed, max(0, cw-rightW-1)))
+	}
+	lastRow := errLine
+	if gap := cw - lipgloss.Width(errLine) - rightW; rightW > 0 && gap >= 0 {
+		lastRow = errLine + strings.Repeat(" ", gap) + right
 	}
 
 	body := m.viewport.View()
@@ -942,22 +1041,55 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 		Width(m.contentWidth() - 2).
 		Render(m.input.View())
 
+	// The slash menu sits between the conversation and the input box; its
+	// rows come out of the viewport height, so the frame size is unchanged.
+	menu := m.slashMenuView()
+	menuRows := 0
+	if menu != "" {
+		menuRows = strings.Count(menu, "\n") + 1
+	}
+
+	// The running indicator reuses the blank row above the input box.
+	statusRow := ""
+	if m.status == statusRunning {
+		statusRow = m.spinner.View()
+	}
+
 	// Real cursor at the textarea caret: outer border(1)+padding(1), then
-	// title+blank+body+blank above the input box, then its border(1)+padding(1).
+	// title+blank+body+menu+status above the input box, then its border(1)+padding(1).
 	var cursor *tea.Cursor
 	if c := m.input.Cursor(); c != nil {
 		c.X += 4
-		c.Y += lipgloss.Height(body) + 5
+		c.Y += lipgloss.Height(body) + menuRows + 5
 		cursor = c
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		"",
-		body,
-		"",
-		inputBox,
-		errLine,
-		hint,
-	), cursor
+	rows := []string{title, "", body}
+	if menu != "" {
+		rows = append(rows, menu)
+	}
+	rows = append(rows, statusRow, inputBox, lastRow)
+	return lipgloss.JoinVertical(lipgloss.Left, rows...), cursor
+}
+
+// syncViewportHeight sizes the conversation viewport to the layout height
+// minus the slash menu rows currently shown. A shrink while scrolled to the
+// bottom keeps the latest content in view.
+func (m *Model) syncViewportHeight() {
+	if m.viewport.Width() == 0 {
+		return
+	}
+	_, _, _, vh := m.layout()
+	h := vh - len(m.slashMatches())
+	if h < 1 {
+		h = 1
+	}
+	if h == m.viewport.Height() {
+		return
+	}
+	atBottom := m.viewport.AtBottom()
+	m.viewport.SetHeight(h)
+	if atBottom {
+		m.viewport.GotoBottom()
+	}
 }

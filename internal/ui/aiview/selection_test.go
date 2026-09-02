@@ -116,7 +116,7 @@ func TestCtrlLDoesNotClear(t *testing.T) {
 }
 
 func TestSelectionFollowsScrollOffset(t *testing.T) {
-	m := newTestModel(nil) // 100x32, viewH=20
+	m := newTestModel(nil) // 100x32, viewH=21
 	for i := 0; i < 30; i++ {
 		m.blocks = append(m.blocks, block{kind: blockSystem, text: "note"})
 	}
@@ -126,9 +126,9 @@ func TestSelectionFollowsScrollOffset(t *testing.T) {
 	if off == 0 {
 		t.Fatal("expected scrolled viewport")
 	}
-	m.Update(tea.MouseClickMsg(mouse(2, 4))) // second visible row: first row is a blank separator
-	m.Update(tea.MouseMotionMsg(mouse(6, 4)))
-	m.Update(tea.MouseReleaseMsg(mouse(6, 4)))
+	m.Update(tea.MouseClickMsg(mouse(2, 3))) // first visible row
+	m.Update(tea.MouseMotionMsg(mouse(6, 3)))
+	m.Update(tea.MouseReleaseMsg(mouse(6, 3)))
 	text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
 	if text != "note" {
 		t.Fatalf("selected text = %q, want %q", text, "note")
@@ -136,9 +136,9 @@ func TestSelectionFollowsScrollOffset(t *testing.T) {
 }
 
 // newTallSelectionModel loads enough one-line blocks to make the conversation
-// scrollable: 30 blocks -> 59 content lines against a 20-row viewport.
+// scrollable: 30 blocks -> 59 content lines against a 21-row viewport.
 func newTallSelectionModel() *Model {
-	m := newTestModel(nil) // 100x32, viewH=20, viewport rows y=3..22
+	m := newTestModel(nil) // 100x32, viewH=21, viewport rows y=3..23
 	for i := 0; i < 30; i++ {
 		m.blocks = append(m.blocks, block{kind: blockSystem, text: fmt.Sprintf("note%02d", i)})
 	}
