@@ -352,6 +352,10 @@ body { display: flex; flex-direction: column; }
   var swipeX = null;
   var swipeY = null;
   var swiping = false;
+  // Sub-line pixel remainder: per-event deltas are often below the 20px
+  // line height, so rounding each event on its own would never scroll a
+  // slow drag. Accumulate and scroll only whole lines.
+  var swipeRem = 0;
   termEl.addEventListener("touchstart", function (e) {
     if (e.touches.length !== 1) {
       swipeY = null;
@@ -360,6 +364,7 @@ body { display: flex; flex-direction: column; }
     swipeX = e.touches[0].clientX;
     swipeY = e.touches[0].clientY;
     swiping = false;
+    swipeRem = 0;
   }, { passive: true });
   termEl.addEventListener("touchmove", function (e) {
     if (swipeY === null || e.touches.length !== 1) return;
@@ -369,7 +374,10 @@ body { display: flex; flex-direction: column; }
       if (Math.abs(dy) <= 10 || Math.abs(dy) <= Math.abs(swipeX - e.touches[0].clientX)) return;
       swiping = true;
     }
-    term.scrollLines(Math.round((swipeY - y) / 20));
+    var px = swipeY - y + swipeRem;
+    var lines = Math.trunc(px / 20);
+    if (lines !== 0) term.scrollLines(lines);
+    swipeRem = px - lines * 20;
     swipeY = y;
     e.preventDefault();
     e.stopPropagation();
@@ -377,6 +385,7 @@ body { display: flex; flex-direction: column; }
   function endSwipe() {
     swipeY = null;
     swiping = false;
+    swipeRem = 0;
   }
   termEl.addEventListener("touchend", endSwipe);
   termEl.addEventListener("touchcancel", endSwipe);
