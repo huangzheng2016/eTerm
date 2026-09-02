@@ -148,6 +148,25 @@ func (a *Agent) ClearQueue() {
 	}
 }
 
+// DequeueLast removes and returns the most recently queued (not yet
+// injected) steer message; ok is false when the queue is empty. It takes the
+// queue mutex, so a dequeued message can no longer be picked up by the steer
+// middleware's step-boundary drain.
+func (a *Agent) DequeueLast() (string, bool) {
+	if a.queue == nil {
+		return "", false
+	}
+	a.queue.mu.Lock()
+	defer a.queue.mu.Unlock()
+	n := len(a.queue.msgs)
+	if n == 0 {
+		return "", false
+	}
+	text := a.queue.msgs[n-1]
+	a.queue.msgs = a.queue.msgs[:n-1]
+	return text, true
+}
+
 // Clear resets the conversation history.
 func (a *Agent) Clear() {
 	a.mu.Lock()

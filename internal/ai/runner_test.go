@@ -97,6 +97,60 @@ func TestAgentRunEmitsEventsAndHistory(t *testing.T) {
 	}
 }
 
+func TestDequeueLast(t *testing.T) {
+	a := &Agent{queue: &steerQueue{}}
+
+	if text, ok := a.DequeueLast(); ok || text != "" {
+		t.Fatalf("empty queue: got (%q, %v), want (\"\", false)", text, ok)
+	}
+
+	a.Enqueue("first")
+	a.Enqueue("second")
+	a.Enqueue("third")
+	for _, want := range []string{"third", "second", "first"} {
+		text, ok := a.DequeueLast()
+		if !ok || text != want {
+			t.Fatalf("got (%q, %v), want (%q, true)", text, ok, want)
+		}
+	}
+	if _, ok := a.DequeueLast(); ok {
+		t.Fatal("queue must be empty after popping all")
+	}
+
+	// Agents without a steer queue (sub-agents) must not panic.
+	nilAgent := &Agent{}
+	if _, ok := nilAgent.DequeueLast(); ok {
+		t.Fatal("nil queue must report ok=false")
+	}
+}
+
+// A recalled message must not be injected by the steer middleware's
+// step-boundary drain.
+func TestDequeueLastPreventsInjection(t *testing.T) {
+	ctx := context.Background()
+	m := &steerToolModel{release: make(chan struct{}), entered: make(chan struct{})}
+	queue := &steerQueue{}
+	a := newSteerAgent(t, m, queue)
+
+	done := drainRun(a, ctx, "list tabs")
+	<-m.entered // first model call in flight, turn is running
+	a.Enqueue("keep")
+	a.Enqueue("recall me")
+	text, ok := a.DequeueLast()
+	if !ok || text != "recall me" {
+		t.Fatalf("DequeueLast: got (%q, %v), want (\"recall me\", true)", text, ok)
+	}
+	close(m.release)
+	r := <-done
+
+	if r.sawErr || !r.sawDone {
+		t.Fatalf("done=%v err=%v", r.sawDone, r.sawErr)
+	}
+	if len(r.steers) != 1 || r.steers[0] != "keep" {
+		t.Fatalf("steer events: %v", r.steers)
+	}
+}
+
 func joinStrings(parts []string) string {
 	s := ""
 	for _, p := range parts {
