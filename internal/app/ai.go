@@ -278,6 +278,47 @@ func (b *aiBridge) ClearQueue() {
 	}
 }
 
+// DequeueLast implements aiview.AgentRunner (queue recall). Agents predating
+// the method report ok=false and the panel falls back to input history; the
+// assertion mirrors ContextUsage so the aiAgent seam stays unchanged.
+func (b *aiBridge) DequeueLast() (string, bool) {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if d, ok := agent.(interface{ DequeueLast() (string, bool) }); ok {
+		return d.DequeueLast()
+	}
+	return "", false
+}
+
+// Compact implements aiview.AgentRunner by forwarding to the active agent.
+func (b *aiBridge) Compact(ctx context.Context) (aiview.CompactStats, error) {
+	p, model, maxCtx, err := b.store.Resolve()
+	if err != nil {
+		return aiview.CompactStats{}, err
+	}
+	agent, err := b.agentFor(p, model, maxCtx)
+	if err != nil {
+		return aiview.CompactStats{}, err
+	}
+	c, ok := agent.(interface {
+		Compact(context.Context) (ai.CompactStats, error)
+	})
+	if !ok {
+		return aiview.CompactStats{}, errors.New("compact not supported by this agent")
+	}
+	stats, err := c.Compact(ctx)
+	if err != nil {
+		return aiview.CompactStats{}, err
+	}
+	return aiview.CompactStats{
+		MessagesBefore: stats.MessagesBefore,
+		MessagesAfter:  stats.MessagesAfter,
+		TokensBefore:   stats.TokensBefore,
+		TokensAfter:    stats.TokensAfter,
+	}, nil
+}
+
 // Tasks exposes the active agent's background tasks to the panel's /tasks
 // view. Nil without an agent (no runs yet).
 func (b *aiBridge) Tasks() []aiview.TaskEntry {

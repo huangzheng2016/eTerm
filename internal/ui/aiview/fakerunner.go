@@ -20,6 +20,12 @@ type FakeRunner struct {
 	Queued     []string
 	EnqueueErr error
 
+	// CompactResult/CompactErr stub the runner's compaction; CompactCalls
+	// counts invocations.
+	CompactResult CompactStats
+	CompactErr    error
+	CompactCalls  int
+
 	// In-memory SessionStore: History stands in for the agent's exported
 	// history; sessions is ordered most-recent-first like the SQL query.
 	History   []byte
@@ -110,6 +116,24 @@ func (f *FakeRunner) ClearQueue() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Queued = nil
+}
+
+// DequeueLast removes the newest queued message (queue recall).
+func (f *FakeRunner) DequeueLast() (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := len(f.Queued)
+	if n == 0 {
+		return "", false
+	}
+	text := f.Queued[n-1]
+	f.Queued = f.Queued[:n-1]
+	return text, true
+}
+
+func (f *FakeRunner) Compact(ctx context.Context) (CompactStats, error) {
+	f.CompactCalls++
+	return f.CompactResult, f.CompactErr
 }
 
 func demoEvents(prompt string) []AgentEvent {

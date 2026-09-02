@@ -113,6 +113,14 @@ type Model struct {
 	saveSeq     int
 	sessionList []SessionEntry
 	sCursor     int
+	sFilter     string
+
+	// history holds submitted inputs for up/down recall; histIdx is the
+	// browse position (-1 = not browsing) and histDraft preserves the input
+	// the user was typing when browsing started.
+	history   []string
+	histIdx   int
+	histDraft string
 
 	taskList     []TaskEntry
 	tCursor      int
@@ -152,6 +160,7 @@ func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model 
 		input:    in,
 		spinner:  sp,
 		status:   statusIdle,
+		histIdx:  -1,
 	}
 }
 
@@ -242,10 +251,12 @@ func (m *Model) send() tea.Cmd {
 		return nil
 	}
 	if strings.HasPrefix(prompt, "/") {
+		m.pushHistory(prompt)
 		return m.runSlashCommand(prompt)
 	}
 	cmd, ok := m.queueOrRun(prompt)
 	if ok {
+		m.pushHistory(prompt)
 		m.input.Reset()
 	}
 	return cmd
@@ -662,6 +673,14 @@ type toastClearMsg struct{ seq int }
 
 const toastDuration = 3 * time.Second
 
+// setToast shows a transient confirmation at the title row's right edge.
+func (m *Model) setToast(text string) tea.Cmd {
+	m.toast = text
+	m.toastSeq++
+	seq := m.toastSeq
+	return tea.Tick(toastDuration, func(time.Time) tea.Msg { return toastClearMsg{seq: seq} })
+}
+
 func (m *Model) queueSelectionAutoScroll() tea.Cmd {
 	if m.selAutoScroll.Queued || m.selAutoScroll.Dir == 0 {
 		return nil
@@ -757,6 +776,25 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 		}
 		return m, nil
+	case editorDoneMsg:
+		if msg.err != nil {
+			m.slashError("editor: " + msg.err.Error())
+			return m, nil
+		}
+		m.input.SetValue(msg.text)
+		return m, nil
+	case compactDoneMsg:
+		if msg.err != nil {
+			m.slashError("compact: " + msg.err.Error())
+			return m, nil
+		}
+		m.blocks = append(m.blocks, block{kind: blockSystem, text: fmt.Sprintf("Compaction complete (%d → %d tokens, %d → %d messages)",
+			msg.stats.TokensBefore, msg.stats.TokensAfter, msg.stats.MessagesBefore, msg.stats.MessagesAfter)})
+		m.renderBlock(len(m.blocks) - 1)
+		m.rebuild()
+		// Persist the compacted history like /undo does: SaveSession exports
+		// the agent's live history, so quitting now would lose the compaction.
+		return m, m.scheduleSave()
 	case spinner.TickMsg:
 		if m.status == statusRunning {
 			var cmd tea.Cmd
@@ -804,12 +842,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if text != "" {
 					// Toast inside the panel: the app-level toast renders
 					// behind the fullscreen overlay.
-					m.toast = fmt.Sprintf("Copied %d chars", len([]rune(text)))
-					m.toastSeq++
-					seq := m.toastSeq
 					return m, tea.Batch(
 						tea.SetClipboard(text),
-						tea.Tick(toastDuration, func(time.Time) tea.Msg { return toastClearMsg{seq: seq} }),
+						m.setToast(fmt.Sprintf("Copied %d chars", len([]rune(text)))),
 					)
 				}
 				return m, nil
@@ -845,6 +880,18 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// History browsing owns up/down (a recalled "/..." must not open the
+	// slash menu).
+	if m.histIdx >= 0 {
+		switch msg.String() {
+		case "up":
+			m.recallUp()
+			return m, nil
+		case "down":
+			m.recallDown()
+			return m, nil
+		}
+	}
 	if matches := m.slashMatches(); len(matches) > 0 {
 		if m.slashCursor >= len(matches) {
 			m.slashCursor = len(matches) - 1
@@ -908,6 +955,8 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.scheduleSave()
 		}
 		m.input.SetValue("")
+		m.histIdx = -1
+		m.histDraft = ""
 		return m, nil
 	case "ctrl+o":
 		m.expandTools = !m.expandTools
@@ -920,8 +969,15 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+p":
 		return m, m.openProviders()
+	case "ctrl+g":
+		return m, m.openEditor()
 	case "enter":
 		return m, m.send()
+	case "up":
+		if strings.TrimSpace(m.input.Value()) == "" {
+			m.recallUp()
+			return m, nil
+		}
 	case "pgup":
 		m.viewport.PageUp()
 		return m, nil
