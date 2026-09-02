@@ -284,7 +284,9 @@ func (e *LocalEngine) handshakeLocked() error {
 
 func (e *LocalEngine) sendVADLocked() error {
 	p := e.vad
-	cmd := helperCommand{Cmd: "set_vad_params"}
+	// no_speech_timeout always goes out: 0 disables the helper-side cancel,
+	// while the other zero fields keep helper defaults.
+	cmd := helperCommand{Cmd: "set_vad_params", NoSpeechTimeout: &p.NoSpeechTimeout}
 	set := func(dst **float64, v float64) {
 		if v != 0 {
 			*dst = &v
@@ -295,7 +297,6 @@ func (e *LocalEngine) sendVADLocked() error {
 	set(&cmd.MinSpeech, p.MinSpeech)
 	set(&cmd.TrailingSilence, p.TrailingSilence)
 	set(&cmd.MaxSegment, p.MaxSegment)
-	set(&cmd.NoSpeechTimeout, p.NoSpeechTimeout)
 	return e.sendLocked(cmd)
 }
 

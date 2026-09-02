@@ -49,7 +49,8 @@ Events (stdout):
 VAD behavior: a trigger finalizes after trailing_silence (default 1.0s) of
 silence after speech, so multiple sentences fit in one trigger. Speech is
 force-finalized at max_segment (default 30s). If no speech is detected within
-no_speech_timeout (default 5s) of a trigger, the session cancels to idle.
+no_speech_timeout (default 5s; 0 disables) of a trigger, the session cancels
+to idle.
 
 ## Models
 

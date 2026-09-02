@@ -14,6 +14,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/voice"
 )
@@ -27,11 +28,15 @@ const (
 	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
 	voiceModelSettingKey       = "voice_model"
-	voiceModelInt8SettingKey   = "voice_model_int8"      // "1"/"0": run the quantized SenseVoice weights
-	voiceCustomModelSettingKey = "voice_custom_model"    // absolute dir, local engine
+	voiceModelInt8SettingKey   = "voice_model_int8"   // "1"/"0": run the quantized SenseVoice weights
+	voiceCustomModelSettingKey = "voice_custom_model" // absolute dir, local engine
 	voiceVerifiedSettingKey    = "voice_verified"
 	voiceParamsSettingPrefix   = "voice_params_" // + engine id: encrypted JSON params blob
 	voiceVolcanoSettingKey     = "voice_volcano" // legacy: migrated into voice_params_volcano
+
+	// voiceTestNoSpeechSecs bounds the settings-panel test recording when no
+	// speech arrives; dictation itself never auto-stops on silence.
+	voiceTestNoSpeechSecs = 5.0
 )
 
 // voiceSettings holds the voice input configuration. VADThreshold 0 keeps the
@@ -551,6 +556,9 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	a.voiceBusy = true
 	a.voiceStartedAt = time.Now()
 	a.voiceTickSeq++
+	// re-assert dictation VAD params: a test recording may have left a
+	// no-speech timeout on the shared engine
+	_ = a.voiceEngine.SetVAD(a.voiceCfg.vadParams())
 	cmds = append(cmds, voiceStartCmd(a.voiceEngine), voiceTick(a.voiceTickSeq))
 	return a, tea.Batch(cmds...)
 }
@@ -683,6 +691,10 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	if a.voiceSettingsView != nil {
 		a.voiceSettingsView.testStarted()
 	}
+	// the test keeps the no-speech timeout so a silent mic reports promptly
+	p := a.voiceCfg.vadParams()
+	p.NoSpeechTimeout = voiceTestNoSpeechSecs
+	_ = a.voiceEngine.SetVAD(p)
 	cmds = append(cmds, voiceStartCmd(a.voiceEngine), voiceTestTick(a.voiceTestSeq))
 	return a, tea.Batch(cmds...)
 }
@@ -772,20 +784,10 @@ func (a App) deliverVoiceText(text string) tea.Cmd {
 	return nil
 }
 
-// withVoiceStatusHint prepends the recording indicator and partial preview.
+// withVoiceStatusHint prepends the recording indicator.
 func (a App) withVoiceStatusHint(hint string) string {
 	if !a.voiceRec {
 		return hint
 	}
-	rec := fmt.Sprintf("REC %ds", int(time.Since(a.voiceStartedAt).Seconds()))
-	if a.voiceName != "" {
-		rec += " " + a.voiceName
-	}
-	if p := strings.Join(strings.Fields(a.voicePartial), " "); p != "" {
-		if r := []rune(p); len(r) > 30 {
-			p = string(r[:30]) + "..."
-		}
-		rec += " · " + p
-	}
-	return rec + " · " + hint
+	return ui.ErrorStyle.Render("REC") + " · " + hint
 }

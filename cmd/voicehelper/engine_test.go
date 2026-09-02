@@ -13,6 +13,25 @@ import (
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 )
 
+// An explicit no_speech_timeout of 0 disables the cancel (dictation runs
+// until the app stops it); a positive value overrides the default.
+func TestSetVADParamsNoSpeechTimeout(t *testing.T) {
+	var buf bytes.Buffer
+	ev := newEventWriter(&buf)
+	eng := newASREngine(ev, t.TempDir())
+
+	zero := 0.0
+	eng.setVADParams(Command{NoSpeechTimeout: &zero})
+	if eng.params.noSpeechTimeout != 0 {
+		t.Fatalf("explicit 0 not applied: %v", eng.params.noSpeechTimeout)
+	}
+	five := 5.0
+	eng.setVADParams(Command{NoSpeechTimeout: &five})
+	if eng.params.noSpeechTimeout != 5 {
+		t.Fatalf("explicit 5 not applied: %v", eng.params.noSpeechTimeout)
+	}
+}
+
 func TestSetModelValidatesKind(t *testing.T) {
 	var buf bytes.Buffer
 	ev := newEventWriter(&buf)
