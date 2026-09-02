@@ -306,9 +306,15 @@ func TestCompact(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("/compact returned no cmd")
 	}
-	m.Update(cmd())
+	_, save := m.Update(cmd())
 	if fake.CompactCalls != 1 {
 		t.Fatalf("compact calls = %d", fake.CompactCalls)
+	}
+	if save == nil {
+		t.Fatal("compact success must schedule a session save")
+	}
+	if m.saveSeq != 1 {
+		t.Fatalf("saveSeq = %d, want 1 (save scheduled after compaction)", m.saveSeq)
 	}
 	last := m.blocks[len(m.blocks)-1]
 	if last.kind != blockSystem {

@@ -792,7 +792,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.stats.TokensBefore, msg.stats.TokensAfter, msg.stats.MessagesBefore, msg.stats.MessagesAfter)})
 		m.renderBlock(len(m.blocks) - 1)
 		m.rebuild()
-		return m, nil
+		// Persist the compacted history like /undo does: SaveSession exports
+		// the agent's live history, so quitting now would lose the compaction.
+		return m, m.scheduleSave()
 	case spinner.TickMsg:
 		if m.status == statusRunning {
 			var cmd tea.Cmd
