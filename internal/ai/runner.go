@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -38,7 +39,10 @@ type Event struct {
 
 type Agent struct {
 	agent *adk.ChatModelAgent
-	mu    sync.Mutex // serializes runs
+	// chatModel is the provider-configured model from NewChatModel, reused
+	// for tool-free requests like Compact.
+	chatModel model.ChatModel
+	mu        sync.Mutex // serializes runs
 	// histMu guards history alone, so Usage can read it mid-run without
 	// waiting for the whole turn to finish.
 	histMu  sync.Mutex
@@ -106,6 +110,7 @@ func NewAgent(ctx context.Context, cfg Config) (*Agent, error) {
 	}
 	return &Agent{
 		agent:         adkAgent,
+		chatModel:     chatModel,
 		historyBudget: int64(float64(contextWindow) * historyBudgetRatio),
 		contextWindow: contextWindow,
 		tasks:         tm,
