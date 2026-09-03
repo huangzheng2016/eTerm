@@ -136,7 +136,13 @@ jobs:
           tags=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
           echo "Existing release tags:"
           echo "$tags"
-          for tag in $tags; do
+          highest=$(printf '%s\n%s\n' "$tags" "$current" | sort -V | tail -n1)
+          if [ "$highest" != "$current" ]; then
+            echo "Current tag $current is not the highest version (highest: $highest); skip cleanup"
+            exit 0
+          fi
+          echo "$tags" | while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
             if [ "$tag" = "$current" ]; then
               echo "Skip current tag: $tag"
             else
