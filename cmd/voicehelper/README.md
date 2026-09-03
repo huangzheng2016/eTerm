@@ -64,8 +64,9 @@ On first `start` the helper downloads into the model dir (`-model-dir`, default
 ## Build / CI
 
 Release assets are built by `.github/workflows/voicehelper.yml`: on `v*`
-tags it runs the recipe below for darwin-arm64 and linux-amd64 and uploads
-`voicehelper-<os>-<arch>.tar.gz` plus a `.sha256` sidecar to the GitHub
+tags it runs the recipe below for darwin-amd64, darwin-arm64, linux-amd64
+and linux-arm64, and uploads `voicehelper-<os>-<arch>.tar.gz` plus a
+`.sha256` sidecar to the GitHub
 release. `workflow_dispatch` runs the same build without publishing (assets
 land as workflow artifacts).
 
