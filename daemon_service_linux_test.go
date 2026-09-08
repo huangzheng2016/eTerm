@@ -87,6 +87,20 @@ func TestDaemonServiceUnitContents(t *testing.T) {
 	}
 }
 
+func TestDaemonServiceUnitQuotesAndEscapesArgs(t *testing.T) {
+	unit := daemonServiceUnit([]string{"/opt/my apps/eterm", "daemon", "run", "-c", "/tmp/my db/e.db", "-name", "100% box"})
+	want := "ExecStart=\"/opt/my apps/eterm\" daemon run -c \"/tmp/my db/e.db\" -name \"100%% box\""
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "ExecStart=") {
+			if line != want {
+				t.Fatalf("line = %q, want %q", line, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("no ExecStart line in %q", unit)
+}
+
 func TestDaemonServiceUnitPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

@@ -30,12 +30,24 @@ func daemonServiceUnitPath() (string, error) {
 	return filepath.Join(configHome, "systemd", "user", daemonServiceUnitName), nil
 }
 
+func systemdQuoteArg(s string) string {
+	s = strings.ReplaceAll(s, "%", "%%")
+	if strings.ContainsAny(s, " \t") {
+		return "\"" + s + "\""
+	}
+	return s
+}
+
 func daemonServiceUnit(programArgs []string) string {
+	quoted := make([]string, len(programArgs))
+	for i, arg := range programArgs {
+		quoted[i] = systemdQuoteArg(arg)
+	}
 	return "[Unit]\n" +
 		"Description=eTerm sync daemon\n" +
 		"\n" +
 		"[Service]\n" +
-		"ExecStart=" + strings.Join(programArgs, " ") + "\n" +
+		"ExecStart=" + strings.Join(quoted, " ") + "\n" +
 		"Restart=on-failure\n" +
 		"RestartSec=2\n" +
 		"\n" +
