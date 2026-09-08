@@ -125,6 +125,32 @@ func TestDaemonServiceDisableDeletesTask(t *testing.T) {
 	}
 }
 
+func TestDaemonServiceDisableToleratesMissingTask(t *testing.T) {
+	for _, out := range []string{
+		"ERROR: The system cannot find the file specified.",
+		"错误: 找不到指定的文件。",
+	} {
+		restore := stubSchtasks(t, func(args ...string) ([]byte, error) {
+			return []byte(out), errors.New("exit status 1")
+		})
+		if err := daemonServiceDisable(); err != nil {
+			t.Fatalf("output %q: err = %v", out, err)
+		}
+		restore()
+	}
+}
+
+func TestDaemonServiceDisableReportsOtherFailures(t *testing.T) {
+	restore := stubSchtasks(t, func(args ...string) ([]byte, error) {
+		return []byte("ERROR: Access is denied."), errors.New("exit status 1")
+	})
+	defer restore()
+	err := daemonServiceDisable()
+	if err == nil || !strings.Contains(err.Error(), "Access is denied") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestDaemonServiceStatusParsesQueryCSV(t *testing.T) {
 	restore := stubSchtasks(t, func(args ...string) ([]byte, error) {
 		if !reflect.DeepEqual(args, []string{"/Query", "/TN", "eTermDaemon", "/FO", "CSV", "/NH"}) {

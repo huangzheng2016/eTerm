@@ -32,9 +32,16 @@ func daemonServiceEnable(opts daemonOptions) error {
 func daemonServiceDisable() error {
 	out, err := schtasksRun("/Delete", "/TN", windowsTaskName, "/F")
 	if err != nil {
+		if windowsTaskNotFound(string(out)) {
+			return nil
+		}
 		return fmt.Errorf("schtasks /Delete: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func windowsTaskNotFound(out string) bool {
+	return strings.Contains(out, "cannot find the file specified") || strings.Contains(out, "找不到指定的文件")
 }
 
 func daemonServiceStatus() (bool, string) {
