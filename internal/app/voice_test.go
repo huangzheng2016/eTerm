@@ -196,13 +196,9 @@ func TestVoiceStatusHintShowsRecording(t *testing.T) {
 	if got, want := a.withVoiceStatusHint("hint"), ui.ErrorStyle.Render("REC")+" · hint"; got != want {
 		t.Fatalf("recording hint = %q, want %q", got, want)
 	}
-	a.voicePartial = "hello wor"
-	if got, want := a.withVoiceStatusHint("hint"), ui.ErrorStyle.Render("REC")+" hello wor · hint"; got != want {
-		t.Fatalf("partial hint = %q, want %q", got, want)
-	}
 	bar := components.NewStatusBar().SetWidth(60).SetText(a.withVoiceStatusHint("hint")).View()
-	if !strings.Contains(bar, ui.ErrorStyle.Render("REC")) || !strings.Contains(bar, "hello wor") {
-		t.Fatalf("status bar missing REC preview: %q", bar)
+	if !strings.Contains(bar, ui.ErrorStyle.Render("REC")) {
+		t.Fatalf("status bar missing REC: %q", bar)
 	}
 }
 
@@ -217,9 +213,6 @@ func TestVoicePartialNeverReachesTerminal(t *testing.T) {
 
 	upd, _ := a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "hel"}})
 	a = upd.(App)
-	if a.voicePartial != "hel" {
-		t.Fatalf("partial = %q", a.voicePartial)
-	}
 	time.Sleep(50 * time.Millisecond)
 	if sink.String() != "" {
 		t.Fatalf("partial reached pty: %q", sink.String())
@@ -1514,9 +1507,6 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	if a.voiceSettingsView.testText != "ni hao" {
 		t.Fatalf("partial = %q", a.voiceSettingsView.testText)
 	}
-	if a.voicePartial != "" {
-		t.Fatal("partial leaked to recording state")
-	}
 
 	sink := &syncWriteCloser{}
 	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
@@ -1804,9 +1794,6 @@ func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "dictating"}})
 	a = upd.(App)
-	if a.voicePartial != "dictating" {
-		t.Fatalf("dictation partial hijacked: %q", a.voicePartial)
-	}
 	if a.voiceSettingsView.testText != "" {
 		t.Fatal("partial leaked into the panel")
 	}

@@ -1165,7 +1165,6 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case voiceStartFailedMsg:
 		a.voiceBusy = false
 		a.voiceRec = false
-		a.voicePartial = ""
 		if a.aiView != nil {
 			a.aiView.SetVoiceActive(false)
 		}
@@ -1239,7 +1238,6 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.voiceEngine = nil
 		a.voiceRec = false
 		a.voiceBusy = false
-		a.voicePartial = ""
 		if a.aiView != nil {
 			a.aiView.SetVoiceActive(false)
 		}

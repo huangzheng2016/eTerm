@@ -486,9 +486,7 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	if a.aiView != nil {
 		a.aiView.SetVoiceActive(a.voiceRec)
 	}
-	if !a.voiceRec {
-		a.voicePartial = ""
-	} else {
+	if a.voiceRec {
 		a.voiceDropNotified = false
 	}
 	if a.voiceBusy {
@@ -522,7 +520,6 @@ func (a App) stopVoice() (App, tea.Cmd) {
 		return a, nil
 	}
 	a.voiceRec = false
-	a.voicePartial = ""
 	if a.aiView != nil {
 		a.aiView.SetVoiceActive(false)
 	}
@@ -537,15 +534,10 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.ev.Type {
 	case voice.EventPartial:
-		if a.voiceTest {
-			if a.voiceSettingsView != nil {
-				a.voiceSettingsView.testPartial(msg.ev.Text)
-			}
-		} else {
-			a.voicePartial = msg.ev.Text
+		if a.voiceTest && a.voiceSettingsView != nil {
+			a.voiceSettingsView.testPartial(msg.ev.Text)
 		}
 	case voice.EventFinal:
-		a.voicePartial = ""
 		if a.voiceTest {
 			a.voiceTest = false
 			a.voiceTestSeq++
@@ -730,9 +722,5 @@ func (a App) withVoiceStatusHint(hint string) string {
 	if !a.voiceRec {
 		return hint
 	}
-	rec := ui.ErrorStyle.Render("REC")
-	if a.voicePartial != "" {
-		rec += " " + a.voicePartial
-	}
-	return rec + " · " + hint
+	return ui.ErrorStyle.Render("REC") + " · " + hint
 }
