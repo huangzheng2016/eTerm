@@ -33,6 +33,28 @@ func TestDaemonCommandParsesSubcommandAndFlags(t *testing.T) {
 	}
 }
 
+func TestDaemonCommandParsesEnableAndDisable(t *testing.T) {
+	for _, want := range []string{"enable", "disable"} {
+		cmd, _, err := parseDaemonArgs([]string{want})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd != want {
+			t.Fatalf("cmd = %q, want %q", cmd, want)
+		}
+	}
+}
+
+func TestDaemonEnableParsesDBPath(t *testing.T) {
+	cmd, opts, err := parseDaemonArgs([]string{"enable", "-c", "test.db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != "enable" || opts.DBPath != "test.db" {
+		t.Fatalf("cmd = %q, opts = %#v", cmd, opts)
+	}
+}
+
 func TestDaemonStatusReportsStoppedForMissingPid(t *testing.T) {
 	ctl := daemonController{
 		pidPath: filepath.Join(t.TempDir(), "daemon.pid"),

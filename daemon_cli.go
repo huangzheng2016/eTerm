@@ -65,7 +65,22 @@ func runDaemon(args []string) {
 	case "stop":
 		os.Exit(ctl.stop(os.Stdout))
 	case "status":
-		os.Exit(ctl.status(os.Stdout))
+		code := ctl.status(os.Stdout)
+		_, detail := daemonServiceStatus()
+		fmt.Fprintf(os.Stdout, "service: %s\n", detail)
+		os.Exit(code)
+	case "enable":
+		if err := daemonServiceEnable(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "eterm daemon enable: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stdout, "service enabled")
+	case "disable":
+		if err := daemonServiceDisable(); err != nil {
+			fmt.Fprintf(os.Stderr, "eterm daemon disable: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stdout, "service disabled")
 	default:
 		fmt.Fprintf(os.Stderr, "unknown daemon command %q\n", cmd)
 		os.Exit(2)
@@ -76,7 +91,7 @@ func parseDaemonArgs(args []string) (string, daemonOptions, error) {
 	cmd := "start"
 	if len(args) > 0 {
 		switch args[0] {
-		case "start", "stop", "status", "run":
+		case "start", "stop", "status", "run", "enable", "disable":
 			cmd = args[0]
 			args = args[1:]
 		case "-h", "--help":
