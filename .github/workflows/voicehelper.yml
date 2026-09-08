@@ -142,10 +142,14 @@ jobs:
         with:
           go-version: '1.26'
           cache-dependency-path: cmd/voicehelper/go.sum
-      - uses: egor-tensin/setup-mingw@v2
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
       - name: Build and stage
         shell: bash
         run: |
+          export PATH="/c/msys64/ucrt64/bin:$PATH"
           cd cmd/voicehelper
           CGO_ENABLED=1 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o dist/voicehelper.exe .
           SHERPA_LIB="$(go env GOMODCACHE)/github.com/k2-fsa/sherpa-onnx-go-windows@v1.13.3/lib/x86_64-pc-windows-gnu"
