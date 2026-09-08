@@ -12,11 +12,13 @@ import (
 )
 
 type Model struct {
-	sessions []types.TmuxSession
-	cursor   int
-	page     int
-	loading  bool
-	err      string
+	sessions  []types.TmuxSession
+	cursor    int
+	page      int
+	loading   bool
+	err       string
+	hostID    uint
+	hostLabel string
 }
 
 const pageSize = 8
@@ -24,6 +26,12 @@ const pageSize = 8
 func New(sessions []types.TmuxSession) *Model {
 	return &Model{sessions: sessions}
 }
+
+func NewSSH(hostID uint, hostLabel string) *Model {
+	return &Model{hostID: hostID, hostLabel: hostLabel}
+}
+
+func (m *Model) HostID() uint { return m.hostID }
 
 func (m *Model) SetSessions(s []types.TmuxSession) {
 	m.sessions = s
@@ -59,17 +67,17 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 	case "enter":
 		if m.cursor == 0 {
-			return true, func() tea.Msg { return types.TmuxOpenMsg{New: true} }
+			return true, func() tea.Msg { return types.TmuxOpenMsg{HostID: m.hostID, New: true} }
 		}
 		name := m.sessions[m.cursor-1].Name
-		return true, func() tea.Msg { return types.TmuxOpenMsg{Name: name} }
+		return true, func() tea.Msg { return types.TmuxOpenMsg{HostID: m.hostID, Name: name} }
 	case "r":
-		if m.cursor > 0 {
+		if m.hostID == 0 && m.cursor > 0 {
 			name := m.sessions[m.cursor-1].Name
 			return false, func() tea.Msg { return types.TmuxRenameRequestMsg{Name: name} }
 		}
 	case "d", "delete":
-		if m.cursor > 0 {
+		if m.hostID == 0 && m.cursor > 0 {
 			name := m.sessions[m.cursor-1].Name
 			return false, func() tea.Msg { return types.TmuxKillRequestMsg{Name: name} }
 		}
@@ -78,14 +86,22 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 	if msg.Text == "R" {
 		m.SetLoading(true)
-		return false, func() tea.Msg { return types.TmuxMenuMsg{} }
+		return false, func() tea.Msg { return types.TmuxMenuMsg{HostID: m.hostID} }
 	}
 	return false, nil
 }
 
 func (m *Model) View() string {
-	rows := []string{ui.TitleStyle.Render("tmux"), ""}
-	rows = append(rows, m.row(0, "+ New session", "start a local tmux session"))
+	title := "tmux"
+	newDesc := "start a local tmux session"
+	hints := "up/down navigate · enter open · r rename · d kill · R refresh · esc close"
+	if m.hostID != 0 {
+		title = "tmux @ " + m.hostLabel
+		newDesc = "start a remote tmux session"
+		hints = "up/down navigate · enter open · R refresh · esc close"
+	}
+	rows := []string{ui.TitleStyle.Render(title), ""}
+	rows = append(rows, m.row(0, "+ New session", newDesc))
 	if m.loading {
 		rows = append(rows, ui.DimStyle.Render("Loading tmux sessions..."))
 	} else if m.err != "" {
@@ -105,7 +121,7 @@ func (m *Model) View() string {
 			rows = append(rows, "", ui.DimStyle.Render(fmt.Sprintf("page %d/%d", m.page+1, (len(m.sessions)+pageSize-1)/pageSize)))
 		}
 	}
-	rows = append(rows, "", ui.DimStyle.Render("up/down navigate · enter open · r rename · d kill · R refresh · esc close"))
+	rows = append(rows, "", ui.DimStyle.Render(hints))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).

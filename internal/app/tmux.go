@@ -40,6 +40,9 @@ func (a App) loadTmuxSessions() tea.Cmd {
 }
 
 func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
+	if msg.HostID != 0 {
+		return a.openSSHTmux(msg)
+	}
 	cols, rows := ptyFromAppSizeForTab(a, LocalTab)
 	return a, func() tea.Msg {
 		configFile, err := a.resolveTmuxConfig()

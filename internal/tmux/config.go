@@ -12,7 +12,7 @@ import (
 
 const SettingConfigFile = "tmux_config_file"
 
-const managedConfig = `set -g mouse on
+const ManagedConfig = `set -g mouse on
 set -g mode-keys vi
 set -g set-clipboard on
 set -as terminal-features ',*:clipboard'
@@ -42,7 +42,7 @@ func ResolveConfig(database *gorm.DB, configDir, homeDir string) (string, error)
 	}
 	path := filepath.Join(configDir, "tmux.conf")
 	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm() == 0600 {
-		if content, err := os.ReadFile(path); err == nil && string(content) == managedConfig {
+		if content, err := os.ReadFile(path); err == nil && string(content) == ManagedConfig {
 			return path, nil
 		}
 	}
@@ -56,7 +56,7 @@ func ResolveConfig(database *gorm.DB, configDir, homeDir string) (string, error)
 		tmp.Close()
 		return "", err
 	}
-	if _, err := tmp.WriteString(managedConfig); err != nil {
+	if _, err := tmp.WriteString(ManagedConfig); err != nil {
 		tmp.Close()
 		return "", err
 	}

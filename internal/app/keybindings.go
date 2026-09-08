@@ -57,6 +57,7 @@ type KeyBindingConfig struct {
 	BatchTag       []string `json:"batch_tag"`
 	BatchActions   []string `json:"batch_actions"`
 	TmuxMenu       []string `json:"tmux_menu"`
+	SSHTmux        []string `json:"ssh_tmux"`
 
 	SFTPUpload      []string `json:"sftp_upload"`
 	SFTPDownload    []string `json:"sftp_download"`
@@ -131,8 +132,9 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		SessionHistory: []string{"ctrl+shift+h"},
 		ToggleSelect:   []string{"ctrl+space"},
 		BatchTag:       []string{"ctrl+shift+g"},
-		BatchActions:   []string{"ctrl+shift+m"},
-		TmuxMenu:       []string{"m"},
+		BatchActions:   []string{"ctrl+shift+a"},
+		TmuxMenu:       []string{"ctrl+shift+m"},
+		SSHTmux:        []string{"m"},
 
 		SFTPUpload:      []string{"u"},
 		SFTPDownload:    []string{"d"},
@@ -174,7 +176,8 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		cfg.SnippetPicker = []string{"alt+shift+s"}
 		cfg.SessionHistory = []string{"alt+shift+h"}
 		cfg.BatchTag = []string{"alt+shift+g"}
-		cfg.BatchActions = []string{"alt+shift+m"}
+		cfg.BatchActions = []string{"alt+shift+a"}
+		cfg.TmuxMenu = []string{"alt+shift+m"}
 		cfg.SSHSnippetPicker = []string{"alt+shift+s"}
 	}
 	return cfg
@@ -188,6 +191,10 @@ func LoadKeyBindingConfig(database *gorm.DB) KeyBindingConfig {
 	}
 	_ = json.Unmarshal([]byte(val), &cfg)
 	migrateAIKeyBindings(&cfg, runtime.GOOS)
+	migrateTmuxKeyBindings(&cfg, runtime.GOOS)
+	if len(cfg.SSHTmux) == 0 {
+		cfg.SSHTmux = defaultKeyBindingConfig(runtime.GOOS).SSHTmux
+	}
 	return cfg
 }
 
@@ -198,6 +205,21 @@ func migrateAIKeyBindings(cfg *KeyBindingConfig, goos string) {
 	if slices.Contains(cfg.CommandPalette, "ctrl+p") && slices.Contains(cfg.ForwardTab, "ctrl+p") {
 		cfg.ForwardTab = defaultKeyBindingConfig(goos).ForwardTab
 	}
+}
+
+func migrateTmuxKeyBindings(cfg *KeyBindingConfig, goos string) {
+	if !slices.Contains(cfg.TmuxMenu, "m") {
+		return
+	}
+	def := defaultKeyBindingConfig(goos)
+	old := []string{"ctrl+shift+m"}
+	if goos == "windows" {
+		old = []string{"alt+shift+m"}
+	}
+	if slices.Equal(cfg.BatchActions, old) {
+		cfg.BatchActions = def.BatchActions
+	}
+	cfg.TmuxMenu = def.TmuxMenu
 }
 
 func SaveKeyBindingConfig(database *gorm.DB, cfg KeyBindingConfig) error {
@@ -386,7 +408,7 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 	return home.HomeKeyConfig{
 		KmCfg: BuildKeymatchConfig(cfg),
 		Keys: home.BuildListKeyMap(cfg.SSHConnect, cfg.SFTPOpen, cfg.NewHost, cfg.EditHost,
-			cfg.DeleteHost, cfg.CopySSH, cfg.CloneHost, cfg.Search, cfg.ToggleView, cfg.TmuxMenu),
+			cfg.DeleteHost, cfg.CopySSH, cfg.CloneHost, cfg.Search, cfg.ToggleView, cfg.TmuxMenu, cfg.SSHTmux),
 		Help:           cfg.Help,
 		QuickConnect:   cfg.QuickConnect,
 		ShowHidden:     cfg.ShowHidden,
@@ -396,6 +418,7 @@ func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 		BatchTag:       cfg.BatchTag,
 		BatchActions:   cfg.BatchActions,
 		Tmux:           cfg.TmuxMenu,
+		LocalTerminal:  cfg.LocalTerminal,
 	}
 }
 

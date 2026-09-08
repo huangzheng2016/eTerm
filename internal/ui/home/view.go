@@ -83,6 +83,8 @@ func (m Model) centeredEmptyHint(primary, hint string) string {
 func (m Model) emptyHint() string {
 	return homeBindingLabel(m.keys.ToggleView.Help().Key, "t") + ": tags · " +
 		homeBindingLabel(m.keys.NewHost.Help().Key, "n") + ": new host · " +
+		homeBindingLabel(m.keys.SSHTmux.Help().Key, "m") + ": ssh tmux · " +
+		homeBindingLabel(viewkeys.HelpLabel(m.localTerminalKeys), "C-S-t") + ": local shell · " +
 		homeBindingLabel(viewkeys.HelpLabel(m.helpKeys), "?") + ": all keys"
 }
 

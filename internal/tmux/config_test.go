@@ -24,7 +24,7 @@ func TestResolveConfigCreatesManagedDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != managedConfig {
+	if string(b) != ManagedConfig {
 		t.Fatalf("content = %q", b)
 	}
 	info, err := os.Stat(path)
@@ -48,7 +48,7 @@ func TestResolveConfigRefreshesManagedDefault(t *testing.T) {
 	}
 	b, _ := os.ReadFile(path)
 	info, _ := os.Stat(path)
-	if string(b) != managedConfig || info.Mode().Perm() != 0600 {
+	if string(b) != ManagedConfig || info.Mode().Perm() != 0600 {
 		t.Fatalf("content = %q mode = %o", b, info.Mode().Perm())
 	}
 }

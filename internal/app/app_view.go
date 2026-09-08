@@ -186,7 +186,7 @@ func (a App) View() tea.View {
 }
 
 func tabDetaches(tab Tab) bool {
-	if tab.Type == LocalTab && tab.TmuxSession != "" {
+	if tab.TmuxSession != "" {
 		return true
 	}
 	if sm, ok := tab.Model.(*sshview.Model); ok {

@@ -138,11 +138,58 @@ func TestHomeShortcut_NewHost(t *testing.T) {
 func TestHomeShortcut_TmuxMenu(t *testing.T) {
 	m, _ := loadedModel(t)
 
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModCtrl | tea.ModShift}))
+	_ = out
+	msg := firstMsg(cmd)
+	tm, ok := msg.(types.TmuxMenuMsg)
+	if !ok {
+		t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
+	}
+	if tm.HostID != 0 {
+		t.Fatalf("HostID: got %d want 0 (local tmux menu)", tm.HostID)
+	}
+}
+
+func TestHomeShortcut_SSHTmux(t *testing.T) {
+	m, h := loadedModel(t)
+
 	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}))
 	_ = out
 	msg := firstMsg(cmd)
-	if _, ok := msg.(types.TmuxMenuMsg); !ok {
+	tm, ok := msg.(types.TmuxMenuMsg)
+	if !ok {
 		t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
+	}
+	if tm.HostID != h.ID {
+		t.Fatalf("HostID: got %d want %d", tm.HostID, h.ID)
+	}
+}
+
+func TestHomeShortcut_SSHTmuxPeerOpensPeerMenu(t *testing.T) {
+	m, _ := loadedModel(t)
+	out, _ := m.Update(types.RemoteDaemonLoadedMsg{Peers: []types.RemotePeer{{ID: "peer-1", Name: "daemon"}}})
+	m = out.(Model)
+	m.gridCursor = 0
+
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}))
+	_ = out
+	msg := firstMsg(cmd)
+	pm, ok := msg.(types.RemotePeerMenuMsg)
+	if !ok {
+		t.Fatalf("want RemotePeerMenuMsg, got %T %#v", msg, msg)
+	}
+	if pm.Peer.ID != "peer-1" {
+		t.Fatalf("Peer.ID: got %q want peer-1", pm.Peer.ID)
+	}
+}
+
+func TestHomeShortcut_LocalTerminalFallsThrough(t *testing.T) {
+	m, _ := loadedModel(t)
+
+	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 't', Mod: tea.ModCtrl | tea.ModShift}))
+	_ = out
+	if msg := firstMsg(cmd); msg != nil {
+		t.Fatalf("ctrl+shift+t must not be handled by home, got %T %#v", msg, msg)
 	}
 }
 

@@ -181,6 +181,23 @@ func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		logKeyDispatch("TmuxMenu")
 		return m, func() tea.Msg { return types.TmuxMenuMsg{} }, true
 
+	case key.Matches(msg, m.keys.SSHTmux):
+		logKeyDispatch("SSHTmuxMenu")
+		if p := m.SelectedPeer(); p != nil {
+			peer := *p
+			hosts := append([]types.RemoteHost(nil), m.remoteHosts...)
+			return m, func() tea.Msg {
+				return types.RemotePeerMenuMsg{Peer: peer, Hosts: hosts}
+			}, true
+		}
+		if h := m.SelectedHost(); h != nil {
+			id := h.ID
+			return m, func() tea.Msg { return types.TmuxMenuMsg{HostID: id} }, true
+		}
+		return m, func() tea.Msg {
+			return types.ErrorMsg{Err: fmt.Errorf("m: no host (items=%d loaded=%v)", len(m.list.Items()), m.loaded)}
+		}, true
+
 	case m.kmCfg.MatchConnect(msg) || key.Matches(msg, m.keys.SSHConnect):
 		logKeyDispatch("SSHConnect")
 		if p := m.SelectedPeer(); p != nil {

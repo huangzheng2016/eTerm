@@ -14,6 +14,8 @@ type openSSHUITabMsg struct {
 	historyID       uint
 	initialCommands []string
 	replaceTabAt    int
+	tmuxSession     string
+	configWarn      bool
 }
 
 type sftpOpenedMsg struct {
