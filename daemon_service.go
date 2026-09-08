@@ -27,6 +27,12 @@ func daemonServiceProgramArguments(opts daemonOptions) ([]string, error) {
 	if opts.DBPath != "" {
 		args = append(args, "-c", opts.DBPath)
 	}
+	if opts.Name != "" {
+		args = append(args, "-name", opts.Name)
+	}
+	if opts.PProfAddr != "" {
+		args = append(args, "-pprof", opts.PProfAddr)
+	}
 	return args, nil
 }
 

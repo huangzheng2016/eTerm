@@ -8,7 +8,7 @@ import (
 )
 
 func TestDaemonLaunchdPlistContents(t *testing.T) {
-	plist := daemonLaunchdPlist([]string{"/usr/local/bin/eterm", "daemon", "run", "-c", "/tmp/e&t.db"}, "/Users/u/.config/eterm/daemon.log")
+	plist := daemonLaunchdPlist([]string{"/usr/local/bin/eterm", "daemon", "run", "-c", "/tmp/e&t.db", "-name", "box", "-pprof", "127.0.0.1:6061"}, "/Users/u/.config/eterm/daemon.log")
 	for _, want := range []string{
 		"<key>Label</key>\n\t<string>com.huangzheng2016.eterm.daemon</string>",
 		"<key>ProgramArguments</key>",
@@ -17,6 +17,10 @@ func TestDaemonLaunchdPlistContents(t *testing.T) {
 		"<string>run</string>",
 		"<string>-c</string>",
 		"<string>/tmp/e&amp;t.db</string>",
+		"<string>-name</string>",
+		"<string>box</string>",
+		"<string>-pprof</string>",
+		"<string>127.0.0.1:6061</string>",
 		"<key>RunAtLoad</key>\n\t<true/>",
 		"<key>KeepAlive</key>\n\t<true/>",
 		"<key>StandardOutPath</key>\n\t<string>/Users/u/.config/eterm/daemon.log</string>",

@@ -77,6 +77,7 @@ func daemonServiceEnable(opts daemonOptions) error {
 	if err := os.WriteFile(plistPath, []byte(daemonLaunchdPlist(args, daemonServiceLogPath())), 0644); err != nil {
 		return err
 	}
+	_ = exec.Command("launchctl", "bootout", daemonLaunchdDomain(), plistPath).Run()
 	if err := exec.Command("launchctl", "bootstrap", daemonLaunchdDomain(), plistPath).Run(); err != nil {
 		if loadErr := exec.Command("launchctl", "load", "-w", plistPath).Run(); loadErr != nil {
 			return fmt.Errorf("launchctl bootstrap failed: %v; fallback load -w failed: %v", err, loadErr)
