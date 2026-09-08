@@ -38,7 +38,6 @@ func (s *volcanoServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close(websocket.StatusNormalClosure, "done")
 	ctx := context.Background()
 
-	// full client request
 	_, data, err := conn.Read(ctx)
 	if err != nil {
 		s.t.Errorf("read config: %v", err)
@@ -65,13 +64,11 @@ func (s *volcanoServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.t.Errorf("config audio: %v", value["audio"])
 	}
 
-	// initial response: empty result, seq 1
 	if err := conn.Write(ctx, websocket.MessageBinary, serverFrame(s.t, 1, []byte(`{"result":{"text":""}}`))); err != nil {
 		s.t.Errorf("write initial: %v", err)
 		return
 	}
 
-	// one audio frame
 	_, data, err = conn.Read(ctx)
 	if err != nil {
 		s.t.Errorf("read audio: %v", err)
@@ -83,10 +80,8 @@ func (s *volcanoServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	seq := int32(binary.BigEndian.Uint32(data[4:]))
 	s.sawAudio <- seq
 
-	// partial
 	conn.Write(ctx, websocket.MessageBinary, serverFrame(s.t, seq, []byte(`{"result":{"text":"hel"}}`)))
 
-	// final audio frame (negative seq)
 	_, data, err = conn.Read(ctx)
 	if err != nil {
 		s.t.Errorf("read final: %v", err)
@@ -98,7 +93,6 @@ func (s *volcanoServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sawFinal <- finalSeq
 
-	// final transcript
 	conn.Write(ctx, websocket.MessageBinary, serverFrame(s.t, -abs32(finalSeq), []byte(`{"result":{"text":"hello"}}`)))
 	time.Sleep(100 * time.Millisecond)
 }
@@ -165,7 +159,6 @@ func TestVolcanoEngineLifecycle(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// drain buffered events; the channel must end up closed
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
@@ -251,7 +244,7 @@ func TestVolcanoEngineConnDropEmitsError(t *testing.T) {
 		conn.Read(ctx)
 		conn.Write(ctx, websocket.MessageBinary, serverFrame(t, 1, []byte(`{"result":{"text":""}}`)))
 		time.Sleep(50 * time.Millisecond)
-		conn.CloseNow() // abrupt mid-session drop
+		conn.CloseNow()
 		time.Sleep(100 * time.Millisecond)
 	}))
 	defer httpSrv.Close()

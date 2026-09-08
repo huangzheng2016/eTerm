@@ -501,7 +501,6 @@ func waitProgress(ch <-chan sftp.TransferProgress) tea.Cmd {
 	}
 }
 
-// remoteJoin joins a remote directory path with a file name, avoiding double slashes.
 func remoteJoin(dir, name string) string {
 	if dir == "/" {
 		return "/" + name

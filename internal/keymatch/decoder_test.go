@@ -3,12 +3,10 @@ package keymatch
 import (
 	"testing"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// Regression: bytes from the terminal decoder should still match list shortcuts
-// (same path bubbletea uses for KeyPressMsg).
 func TestMatchConnect_decoderCarriageReturn(t *testing.T) {
 	var dec uv.EventDecoder
 	n, ev := dec.Decode([]byte{'\r'})

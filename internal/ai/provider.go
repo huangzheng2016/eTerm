@@ -11,11 +11,11 @@ const SourceKimi = "kimi"
 
 type Provider struct {
 	Name         string `json:"name"`
-	Type         string `json:"type"` // openai | claude
+	Type         string `json:"type"`
 	APIKey       string `json:"api_key"`
 	BaseURL      string `json:"base_url,omitempty"`
 	DefaultModel string `json:"default_model,omitempty"`
-	Source       string `json:"source,omitempty"` // "kimi" when imported from kimi-code config, empty for user-added
+	Source       string `json:"source,omitempty"`
 }
 
 type ModelAlias struct {
@@ -58,8 +58,6 @@ func (s *Store) SetActive(provider, model string) error {
 	return nil
 }
 
-// Resolve returns the effective provider, model id and max context size.
-// ActiveModel may name a [models] alias or a raw model id.
 func (s *Store) Resolve() (*Provider, string, int, error) {
 	for _, m := range s.Models {
 		if m.Alias == s.ActiveModel && s.ActiveModel != "" {

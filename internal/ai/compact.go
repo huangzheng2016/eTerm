@@ -10,7 +10,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// compactKeepTurns is how many recent turns stay verbatim after compaction.
 const compactKeepTurns = 4
 
 const compactSystemPrompt = `You are compacting the conversation between a user and an AI terminal assistant so it can continue within a limited context window.
@@ -28,7 +27,6 @@ const compactTranscriptPrefix = "Summarize this earlier part of the conversation
 
 const compactSummaryPrefix = "[Earlier conversation compacted into this summary; the most recent turns follow verbatim.]\n\n"
 
-// CompactStats reports the compaction effect for display.
 type CompactStats struct {
 	MessagesBefore int
 	MessagesAfter  int
@@ -36,10 +34,6 @@ type CompactStats struct {
 	TokensAfter    int
 }
 
-// Compact summarizes all but the last compactKeepTurns turns with the chat
-// model and replaces the history with the summary plus those turns. It blocks
-// on the run mutex, so it only takes effect between runs. On any model error
-// the history is left untouched and the error is returned as-is.
 func (a *Agent) Compact(ctx context.Context) (CompactStats, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -54,7 +48,6 @@ func (a *Agent) Compact(ctx context.Context) (CompactStats, error) {
 	}
 	start := lastTurnsStart(history, compactKeepTurns)
 	if start == 0 {
-		// Fewer turns than we keep verbatim: nothing to compact away.
 		stats.MessagesAfter = stats.MessagesBefore
 		stats.TokensAfter = stats.TokensBefore
 		return stats, nil
@@ -88,8 +81,6 @@ func (a *Agent) Compact(ctx context.Context) (CompactStats, error) {
 	return stats, nil
 }
 
-// lastTurnsStart returns the index where the last keep turns begin, or 0 when
-// the history holds no more than keep turns (nothing before them to compact).
 func lastTurnsStart(msgs []*schema.Message, keep int) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == schema.User {

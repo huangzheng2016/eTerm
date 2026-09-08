@@ -8,7 +8,7 @@ import (
 
 func TestSleepClampsAndSleeps(t *testing.T) {
 	start := time.Now()
-	out, err := sleep(context.Background(), &SleepInput{Seconds: 0}) // clamped to 1
+	out, err := sleep(context.Background(), &SleepInput{Seconds: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestSleepReturnsOnCancel(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		cancel()
 	}()
-	out, err := sleep(ctx, &SleepInput{Seconds: 10000}) // clamped to 600, canceled early
+	out, err := sleep(ctx, &SleepInput{Seconds: 10000})
 	if err != nil {
 		t.Fatal(err)
 	}

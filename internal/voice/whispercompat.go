@@ -49,12 +49,8 @@ const (
 	whisperCompatFinalTimeout   = 30 * time.Second
 )
 
-// whisperCompatHTTPClient bounds one transcription POST; a hung endpoint
-// must not stall the single transcription queue until Close.
 var whisperCompatHTTPClient = &http.Client{Timeout: whisperCompatFinalTimeout}
 
-// whisperCompatLocalhost reports whether base points at a local server, in
-// which case no API key is required. Empty means the default (remote) URL.
 func whisperCompatLocalhost(base string) bool {
 	if base == "" {
 		return false
@@ -70,30 +66,25 @@ func whisperCompatLocalhost(base string) bool {
 	return false
 }
 
-// WhisperCompatConfig configures an OpenAI-compatible transcription endpoint
-// (OpenAI /v1, Groq, SiliconFlow, or a custom server).
 type WhisperCompatConfig struct {
-	BaseURL string // default defaultWhisperCompatBaseURL
-	APIKey  string // optional for localhost endpoints
-	Model   string // default whisper-1
+	BaseURL string
+	APIKey  string
+	Model   string
 }
 
-// WhisperCompatFeedEngine buffers helper passthrough PCM per utterance and
-// posts it to {base_url}/audio/transcriptions as a WAV multipart form; the
-// JSON text field becomes the final transcript.
 type WhisperCompatFeedEngine struct {
 	cfg  WhisperCompatConfig
 	hcfg LocalConfig
 
 	mu      sync.Mutex
 	helper  *LocalEngine
-	buf     []byte // current utterance PCM
+	buf     []byte
 	started bool
 	closed  bool
 	idleCh  chan struct{}
 	pumped  bool
 
-	pending sync.WaitGroup // in-flight transcriptions, drained by Stop
+	pending sync.WaitGroup
 	queue   chan []byte
 
 	ctx    context.Context
@@ -148,7 +139,6 @@ func (e *WhisperCompatFeedEngine) Start(ctx context.Context) error {
 	}
 
 	if !e.pumped {
-		// the helper persists across sessions, so pump it once
 		e.pumped = true
 		e.wg.Add(1)
 		go e.pumpHelper(e.helper.Events())
@@ -156,8 +146,6 @@ func (e *WhisperCompatFeedEngine) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the session: the helper flushes its tail audio, the buffered
-// utterance is queued, and in-flight transcriptions drain.
 func (e *WhisperCompatFeedEngine) Stop() error {
 	e.mu.Lock()
 	if !e.started {
@@ -171,7 +159,6 @@ func (e *WhisperCompatFeedEngine) Stop() error {
 
 	if helper != nil {
 		_ = helper.Stop()
-		// wait for the stop flush (tail audio + state idle)
 		select {
 		case <-idleCh:
 		default:
@@ -198,7 +185,6 @@ func (e *WhisperCompatFeedEngine) Stop() error {
 	return nil
 }
 
-// flush queues any buffered tail audio for transcription.
 func (e *WhisperCompatFeedEngine) flush() {
 	e.mu.Lock()
 	pcm := e.buf
@@ -223,7 +209,6 @@ func (e *WhisperCompatFeedEngine) SetVAD(p VADParams) error {
 	return helper.SetVAD(p)
 }
 
-// SetModel is a no-op: the passthrough helper does no local ASR.
 func (e *WhisperCompatFeedEngine) SetModel(string, string) error { return nil }
 
 func (e *WhisperCompatFeedEngine) Close() error {
@@ -238,7 +223,7 @@ func (e *WhisperCompatFeedEngine) Close() error {
 	e.mu.Unlock()
 
 	close(e.done)
-	e.cancel() // abort in-flight transcriptions
+	e.cancel()
 	if helper != nil {
 		helper.Close()
 	}
@@ -247,8 +232,6 @@ func (e *WhisperCompatFeedEngine) Close() error {
 	return nil
 }
 
-// onAudio appends one helper PCM chunk to the current utterance buffer. Runs
-// on the helper read loop, serialized with onUtteranceEnd.
 func (e *WhisperCompatFeedEngine) onAudio(pcm []byte) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -258,7 +241,6 @@ func (e *WhisperCompatFeedEngine) onAudio(pcm []byte) {
 	e.buf = append(e.buf, pcm...)
 }
 
-// onUtteranceEnd queues the buffered utterance for transcription.
 func (e *WhisperCompatFeedEngine) onUtteranceEnd() {
 	e.mu.Lock()
 	if !e.started || e.closed {
@@ -283,7 +265,6 @@ func (e *WhisperCompatFeedEngine) emit(ev Event) {
 	}
 }
 
-// work transcribes queued utterances one at a time, keeping finals ordered.
 func (e *WhisperCompatFeedEngine) work() {
 	defer e.wg.Done()
 	for {
@@ -302,8 +283,6 @@ func (e *WhisperCompatFeedEngine) work() {
 	}
 }
 
-// pumpHelper forwards helper events and signals the idle that ends a stop
-// flush (and any mid-session cancel).
 func (e *WhisperCompatFeedEngine) pumpHelper(ch <-chan Event) {
 	defer e.wg.Done()
 	for ev := range ch {
@@ -327,8 +306,6 @@ func (e *WhisperCompatFeedEngine) signalIdle() {
 	}
 }
 
-// whisperCompatTranscribe posts one utterance of 16kHz mono S16LE PCM as a
-// WAV file to an OpenAI-compatible transcription endpoint.
 func whisperCompatTranscribe(ctx context.Context, cfg WhisperCompatConfig, pcm []byte) (string, error) {
 	base := cfg.BaseURL
 	if base == "" {
@@ -393,20 +370,19 @@ func whisperCompatTranscribe(ctx context.Context, cfg WhisperCompatConfig, pcm [
 	return strings.TrimSpace(out.Text), nil
 }
 
-// wavWrap wraps 16kHz mono S16LE PCM in a RIFF/WAVE header.
 func wavWrap(pcm []byte) []byte {
 	buf := make([]byte, 44+len(pcm))
 	copy(buf[0:], "RIFF")
 	binary.LittleEndian.PutUint32(buf[4:], uint32(36+len(pcm)))
 	copy(buf[8:], "WAVE")
 	copy(buf[12:], "fmt ")
-	binary.LittleEndian.PutUint32(buf[16:], 16)    // fmt chunk size
-	binary.LittleEndian.PutUint16(buf[20:], 1)     // PCM format
-	binary.LittleEndian.PutUint16(buf[22:], 1)     // mono
-	binary.LittleEndian.PutUint32(buf[24:], 16000) // sample rate
-	binary.LittleEndian.PutUint32(buf[28:], 32000) // byte rate
-	binary.LittleEndian.PutUint16(buf[32:], 2)     // block align
-	binary.LittleEndian.PutUint16(buf[34:], 16)    // bits per sample
+	binary.LittleEndian.PutUint32(buf[16:], 16)
+	binary.LittleEndian.PutUint16(buf[20:], 1)
+	binary.LittleEndian.PutUint16(buf[22:], 1)
+	binary.LittleEndian.PutUint32(buf[24:], 16000)
+	binary.LittleEndian.PutUint32(buf[28:], 32000)
+	binary.LittleEndian.PutUint16(buf[32:], 2)
+	binary.LittleEndian.PutUint16(buf[34:], 16)
 	copy(buf[36:], "data")
 	binary.LittleEndian.PutUint32(buf[40:], uint32(len(pcm)))
 	copy(buf[44:], pcm)

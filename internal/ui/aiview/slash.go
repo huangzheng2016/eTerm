@@ -19,7 +19,6 @@ const saveDebounce = 2 * time.Second
 const slashHelpText = "Commands: /model pick model · /tasks background agents · /new new session · /resume restore session · /fork fork session · /undo rewind one turn · /copy copy last reply · /export export markdown · /compact compact history · /help this help" +
 	"\nKeys: enter send · ctrl+c stop · ctrl+o expand · ctrl+p models · ctrl+g editor · up/down history · pgup/pgdn scroll · drag copy · esc close"
 
-// slashCommand is one menu entry: the command and its one-line description.
 type slashCommand struct {
 	name string
 	desc string
@@ -38,10 +37,6 @@ var slashCommands = []slashCommand{
 	{"/help", "this help"},
 }
 
-// slashMatches returns the menu entries for the current input: the prefix
-// matches when it starts with "/". Nil when the menu is hidden (input empty
-// or not a command, dismissed with esc, outside chat mode, browsing input
-// history, or no matches).
 func (m *Model) slashMatches() []slashCommand {
 	if m.mode != modeChat || m.slashMenuOff || m.histIdx >= 0 {
 		return nil
@@ -59,8 +54,6 @@ func (m *Model) slashMatches() []slashCommand {
 	return out
 }
 
-// slashMenuView renders the completion menu above the input box; "" when
-// the menu is hidden.
 func (m *Model) slashMenuView() string {
 	matches := m.slashMatches()
 	if len(matches) == 0 {
@@ -83,15 +76,11 @@ func (m *Model) slashMenuView() string {
 	return strings.Join(lines, "\n")
 }
 
-// historyMessage is the panel's read view of exported agent history JSON
-// (eino schema.Message); only user/assistant text turns rebuild into blocks.
 type historyMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-// runSlashCommand handles input starting with "/"; it is never sent to the
-// agent. Unknown commands keep the input and show an inline error.
 func (m *Model) runSlashCommand(input string) tea.Cmd {
 	cmd := strings.Fields(input)[0]
 	switch cmd {
@@ -99,8 +88,6 @@ func (m *Model) runSlashCommand(input string) tea.Cmd {
 	default:
 		return m.slashError("unknown command " + cmd + " - try /help")
 	}
-	// Mid-run only read-only commands stay available (/copy, /export, ...);
-	// /compact and the other session-changing commands are refused.
 	if m.status == statusRunning && cmd != "/help" && cmd != "/model" && cmd != "/tasks" && cmd != "/copy" && cmd != "/export" {
 		return m.slashError("run in progress - ctrl+c to stop")
 	}
@@ -160,7 +147,7 @@ func (m *Model) openProviders() tea.Cmd {
 }
 
 func (m *Model) newSession() {
-	m.saveNow() // flush a pending autosave before abandoning the session
+	m.saveNow()
 	m.clearSession()
 	if m.sessions != nil {
 		m.sessions.ResetHistory()
@@ -176,7 +163,7 @@ func (m *Model) forkSession() {
 		m.slashError("nothing to fork yet")
 		return
 	}
-	m.saveNow() // flush a pending autosave so the parent keeps its last turn
+	m.saveNow()
 	newID := newSessionID()
 	m.sessions.SaveSession(newID, title, m.sessionID)
 	m.sessionID = newID
@@ -210,7 +197,7 @@ func (m *Model) openSessions() {
 }
 
 func (m *Model) loadSession(e SessionEntry) {
-	m.saveNow() // flush a pending autosave before switching sessions
+	m.saveNow()
 	data, ok := m.sessions.LoadSession(e.ID)
 	if !ok {
 		m.mode = modeChat
@@ -237,8 +224,6 @@ func (m *Model) loadSession(e SessionEntry) {
 	m.renderAll()
 }
 
-// filteredSessions applies the /resume filter: a case-insensitive substring
-// match on the session title.
 func (m *Model) filteredSessions() []SessionEntry {
 	if m.sFilter == "" {
 		return m.sessionList
@@ -319,9 +304,6 @@ func (m *Model) sessionsView() string {
 	return strings.Join(rows, "\n")
 }
 
-// saveNow persists the current session via the bridge. The session id is
-// allocated lazily on first save; conversations without a user turn are not
-// persisted, but an existing row is always updated (e.g. emptied by /undo).
 func (m *Model) saveNow() {
 	if m.sessions == nil {
 		return
@@ -336,7 +318,6 @@ func (m *Model) saveNow() {
 	m.sessions.SaveSession(m.sessionID, title, "")
 }
 
-// scheduleSave debounces autosave to 2s after the latest run end.
 func (m *Model) scheduleSave() tea.Cmd {
 	if m.sessions == nil {
 		return nil

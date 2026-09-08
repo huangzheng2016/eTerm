@@ -47,8 +47,6 @@ func KimiConfigPath() string {
 	return ""
 }
 
-// LoadKimiConfig parses the kimi-code config.toml. A missing file is not an
-// error: it returns an empty config.
 func LoadKimiConfig(path string) (*KimiConfig, error) {
 	cfg := &KimiConfig{}
 	if path == "" {
@@ -67,10 +65,6 @@ func LoadKimiConfig(path string) (*KimiConfig, error) {
 	return cfg, nil
 }
 
-// ImportKimi merges kimi-code providers and model aliases into the store.
-// Only providers with a plaintext api_key and a supported type are imported;
-// oauth-based and unsupported-type providers are skipped. Existing entries
-// (user-added) win on name conflict.
 func (s *Store) ImportKimi(cfg *KimiConfig) {
 	for name, kp := range cfg.Providers {
 		if kp.APIKey == "" {
@@ -103,8 +97,6 @@ func (s *Store) ImportKimi(cfg *KimiConfig) {
 	if s.ActiveProvider != "" {
 		return
 	}
-	// default_provider may be absent; default_model then implies the provider
-	// through its model alias (or its "provider/model" prefix).
 	provider := cfg.DefaultProvider
 	if provider == "" && cfg.DefaultModel != "" {
 		if m := s.modelAlias(cfg.DefaultModel); m != nil {
@@ -128,7 +120,6 @@ func (s *Store) modelAlias(alias string) *ModelAlias {
 	return nil
 }
 
-// normalizeProviderType maps kimi-code provider types to eTerm provider types.
 func normalizeProviderType(t string) (string, bool) {
 	switch t {
 	case "kimi", "openai":

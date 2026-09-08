@@ -3,8 +3,8 @@ package components
 import (
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 )
 
@@ -39,7 +39,6 @@ func (s StatusBar) View() string {
 		left = "🔒 " + left
 	}
 
-	// Single-line bar: truncate if the shortcut line exceeds width.
 	const right = ""
 	maxLeft := s.width
 	if right != "" {

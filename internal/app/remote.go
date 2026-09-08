@@ -31,9 +31,6 @@ var (
 	syncshareCreate                   = syncshare.CreateShare
 )
 
-// syncHTTPBase returns the base URL for sync HTTP APIs. In SSH mode it opens
-// a tunnel; the caller either closes it (short-lived calls) or attaches it to
-// the session via AddCloser (long-lived relay sessions).
 func (a App) syncHTTPBase(cfg esync.Config) (string, *esync.Tunnel, error) {
 	return syncHTTPBaseFor(a.db, a.masterKey, cfg)
 }
@@ -175,8 +172,6 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		resumed := false
 		if err == nil {
 			if canResume {
-				// Try to resume the relay stream first: the daemon replays
-				// retained output from resumeSeq and the tab keeps scrollback.
 				op := relay.OpenRequest{PeerID: spec.Peer.ID, Target: spec.Target, HostSyncID: spec.HostSyncID, SessionID: spec.SessionID, Rows: rows, Cols: cols}
 				ris, rerr := remoteResumeOpenWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, op, relayStreamID, resumeSeq, func(stage remote.OpenStage) {
 					progress(connectStageText(prefix, string(stage)))

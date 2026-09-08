@@ -62,8 +62,6 @@ func TestSelectionRenderKeepsHyperlinks(t *testing.T) {
 		Data:     []byte(linkSeqOpen + "CLICK" + linkSeqClose),
 	})
 
-	// Select the middle of the link so both the styled-selection and the
-	// plain cell branches run inside the same linked run.
 	sbLen := m.emu.ScrollbackLen()
 	m.sel = selection{active: true, anchor: selPoint{line: sbLen, col: 1}, caret: selPoint{line: sbLen, col: 3}}
 	got := m.renderWithSelection()

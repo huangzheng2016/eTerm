@@ -15,7 +15,7 @@ type TabsModel struct {
 	items     []TabItem
 	activeIdx int
 	width     int
-	scrollIdx int // index of first visible tab
+	scrollIdx int
 }
 
 func NewTabs(items []TabItem) TabsModel {
@@ -41,8 +41,6 @@ func (t TabsModel) SetItems(items []TabItem) TabsModel {
 	return t
 }
 
-// TabStrip renders the tab row for the app chrome. activeIdx is clamped to items.
-// width is the terminal width (pass 0 for natural width without full-width padding).
 func TabStrip(items []TabItem, activeIdx int, width int) string {
 	if len(items) == 0 {
 		return ""
@@ -102,9 +100,6 @@ func (t TabsModel) PrevTab() TabsModel {
 }
 
 func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
-	// Do NOT call ensureActiveVisible here — the user may have scrolled
-	// the tab bar away from the active tab via mouse wheel; we must
-	// compute hit regions based on the current scrollIdx.
 
 	layout := t.layout()
 	lastVisible := t.scrollIdx - 1
@@ -112,7 +107,6 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 		lastVisible = layout.visible[len(layout.visible)-1]
 	}
 
-	// Click on left arrow "< " → scroll left
 	if layout.hasLeft && x >= tabBarPadLeft && x < tabBarPadLeft+arrowWidth {
 		t.scrollIdx--
 		if t.scrollIdx < 0 {
@@ -121,14 +115,11 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 		return t, false
 	}
 
-	// Click on right arrow " >" → scroll right
 	if layout.hasRight {
-		// Right arrow is at the end of the visible row
 		rightStart := tabBarPadLeft + layout.used
 		if layout.hasLeft {
 			rightStart += arrowWidth
 		}
-		// Add gaps between visible tabs
 		if x >= rightStart && x < rightStart+arrowWidth {
 			t.scrollIdx++
 			if t.scrollIdx >= len(t.items) {
@@ -138,7 +129,6 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 		}
 	}
 
-	// Click on a tab
 	offset := tabBarPadLeft
 	if layout.hasLeft {
 		offset += arrowWidth
@@ -162,7 +152,6 @@ func (t TabsModel) HandleClick(x int) (TabsModel, bool) {
 	return t, false
 }
 
-// ScrollLeft scrolls the tab bar one position to the left.
 func (t TabsModel) ScrollLeft() TabsModel {
 	if t.scrollIdx > 0 {
 		t.scrollIdx--
@@ -170,7 +159,6 @@ func (t TabsModel) ScrollLeft() TabsModel {
 	return t
 }
 
-// ScrollRight scrolls the tab bar one position to the right.
 func (t TabsModel) ScrollRight() TabsModel {
 	if t.layout().hasRight {
 		t.scrollIdx++

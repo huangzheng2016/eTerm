@@ -37,12 +37,9 @@ func TestAssemblyAIDescriptor(t *testing.T) {
 	eng.Close()
 }
 
-// assemblyAIServer is a fake AssemblyAI realtime endpoint. Each connection
-// reads binary audio frames until a terminate_session message, answers with
-// final transcripts and SessionTerminated, and closes.
 type assemblyAIServer struct {
 	t         *testing.T
-	connN     int32 // atomic
+	connN     int32
 	audio     chan []byte
 	terminate chan struct{}
 	conn2     chan struct{}
@@ -169,9 +166,6 @@ func TestAssemblyAIEngineRequiresKey(t *testing.T) {
 	eng.Close()
 }
 
-// Passthrough flow: fake helper audio lands as assemblyai audio frames,
-// utterance_end sends terminate_session, the final transcript surfaces, and
-// the next utterance gets a fresh connection.
 func TestAssemblyAIFeedRoutesPassthrough(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")

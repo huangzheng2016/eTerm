@@ -15,10 +15,10 @@ const ShareDefaultMaxHours = 4
 var ErrShareNotFound = errors.New("share not found")
 
 type ShareEntry struct {
-	ID        string    `gorm:"primaryKey"`
-	Tenant    string    `gorm:"index;not null;default:''"`
-	Token     string    `gorm:"uniqueIndex;not null"`
-	PeerID    string    `gorm:"not null"`
+	ID        string `gorm:"primaryKey"`
+	Tenant    string `gorm:"index;not null;default:''"`
+	Token     string `gorm:"uniqueIndex;not null"`
+	PeerID    string `gorm:"not null"`
 	Name      string
 	Target    string `gorm:"not null;default:'local'"`
 	SessionID string

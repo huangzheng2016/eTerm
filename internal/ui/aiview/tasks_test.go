@@ -78,7 +78,6 @@ func TestTasksViewNavigateInspectCancel(t *testing.T) {
 		t.Fatalf("cursor = %d, want 0", m.tCursor)
 	}
 
-	// x on a finished task is a no-op; on a running one it cancels.
 	m.Update(keyMsg('j', 0))
 	m.Update(keyMsg('x', 0))
 	if len(fake.cancelledTasks) != 0 {
@@ -93,7 +92,6 @@ func TestTasksViewNavigateInspectCancel(t *testing.T) {
 		t.Fatalf("status = %q, want cancelled", m.taskList[0].Status)
 	}
 
-	// Inspect the activity tail.
 	m.Update(keyMsg(tea.KeyEnter, 0))
 	if m.mode != modeTaskDetail {
 		t.Fatalf("mode = %v, want modeTaskDetail", m.mode)
@@ -128,7 +126,6 @@ func TestTasksTickRefreshesWhileOpen(t *testing.T) {
 		t.Fatalf("status = %q, want refreshed to done", m.taskList[0].Status)
 	}
 
-	// Stale and post-exit ticks end the chain.
 	if cmd := m.tasksTick(seq + 1); cmd != nil {
 		t.Fatal("stale tick must not reschedule")
 	}

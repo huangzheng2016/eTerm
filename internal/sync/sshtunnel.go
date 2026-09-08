@@ -9,15 +9,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// Tunnel is an SSH local port forward to a remote etermsyncd HTTP listener.
 type Tunnel struct {
 	conn    *internalssh.ConnectResult
 	fwd     *internalssh.PortForwardCloser
 	baseURL string
 }
 
-// OpenTunnel connects to the sync SSH host and forwards a random local port
-// to 127.0.0.1:remotePort on the remote, where etermsyncd must be listening.
 func OpenTunnel(database *gorm.DB, mk *security.MasterKeyManager, hostID uint, remotePort int) (*Tunnel, error) {
 	var host db.Host
 	if err := database.Preload("Key").First(&host, hostID).Error; err != nil {

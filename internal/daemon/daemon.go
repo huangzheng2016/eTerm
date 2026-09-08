@@ -178,7 +178,7 @@ func runLoop(ctx context.Context, rt *runtimeConfig) error {
 			log.Printf("eterm daemon relay disconnected: %v", err)
 		}
 		if time.Since(start) > 30*time.Second {
-			delay = 2 * time.Second // connection lived; not a connect failure
+			delay = 2 * time.Second
 		}
 		log.Printf("eterm daemon relay reconnecting in %s", delay)
 		select {
@@ -288,15 +288,12 @@ func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *
 		}
 	case relay.FrameClose:
 		if string(f.Payload) == relay.CloseClientDisconnected {
-			// The client connection dropped; keep the PTY for a later resume.
 			if sr := mgr.get(f.StreamID); sr != nil {
 				sr.markDetached()
 			}
 			return
 		}
 		if mgr.isPersistent(f.StreamID) {
-			// Daemon-hosted named session: closing the tab detaches, the
-			// shell keeps running until an explicit kill.
 			if sr := mgr.get(f.StreamID); sr != nil {
 				sr.markDetached()
 			}
@@ -318,10 +315,6 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		return
 	}
 	if sr := mgr.get(f.StreamID); sr != nil {
-		// Reconnect on an existing stream: replay retained output from the
-		// client's last consumed offset. OpenOK must reach the client before
-		// any replayed data, so attachForOpen holds the stream lock while
-		// queueing it.
 		openOK := relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}
 		if err := sr.attachForOpen(req.ResumeFromSeq, sender, openOK); err != nil {
 			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(resumeUnavailableErr)})
@@ -350,7 +343,6 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 	openErr := func(err error) {
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 	}
-	// startStream registers the session, replies OpenOK, then starts the pump.
 	startStream := func(is *internalssh.InteractiveSession, okPayload []byte) {
 		sr := newStreamRelay(is)
 		mgr.add(f.StreamID, sr)
@@ -494,8 +486,6 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 			}
 		}
 	}
-	// The daemon cannot prompt, so an unknown host key is never trusted here;
-	// the user must confirm it once via a direct TUI connection.
 	unknownFingerprint := false
 	res, err := internalssh.Connect(internalssh.ConnectConfig{
 		Host:      &host,

@@ -34,8 +34,6 @@ func (a App) activeTabIsSettings() bool {
 	return a.tabs[a.activeTab].Type == SettingsTab
 }
 
-// nextTabOfType returns the index of the next tab of the given type after activeTab (wrapping).
-// Returns -1 if no tab of that type exists.
 func (a App) nextTabOfType(t TabType) int {
 	n := len(a.tabs)
 	for i := 1; i <= n; i++ {

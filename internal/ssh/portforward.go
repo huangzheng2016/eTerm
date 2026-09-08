@@ -9,15 +9,12 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// PortForwardCloser can stop a running port forward.
 type PortForwardCloser struct {
 	listener net.Listener
 	done     chan struct{}
 	once     sync.Once
 }
 
-// LocalPort returns the actual port the listener is bound to
-// (useful when StartLocalForward was called with port 0).
 func (p *PortForwardCloser) LocalPort() int {
 	if p.listener == nil {
 		return 0
@@ -36,7 +33,6 @@ func (p *PortForwardCloser) Close() error {
 	return nil
 }
 
-// StartLocalForward listens on localPort and forwards connections to remoteHost:remotePort via the SSH client.
 func StartLocalForward(client *ssh.Client, localPort int, remoteHost string, remotePort int) (*PortForwardCloser, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
@@ -73,7 +69,6 @@ func StartLocalForward(client *ssh.Client, localPort int, remoteHost string, rem
 	return pfc, nil
 }
 
-// StartRemoteForward requests the SSH server to listen on remotePort and forwards to localHost:localPort.
 func StartRemoteForward(client *ssh.Client, remotePort int, localHost string, localPort int) (*PortForwardCloser, error) {
 	listener, err := client.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", remotePort))
 	if err != nil {
@@ -120,7 +115,6 @@ func copyBidi(a, b net.Conn, done <-chan struct{}) {
 	go cp(a, b)
 	go cp(b, a)
 
-	// Wait for either copy to finish or done signal
 	ch := make(chan struct{})
 	go func() { wg.Wait(); close(ch) }()
 	select {

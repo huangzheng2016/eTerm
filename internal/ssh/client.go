@@ -35,10 +35,9 @@ const (
 	ConnectStageHandshake     ConnectStage = "handshake"
 )
 
-// ConnectResult holds the SSH client and resources that must be closed when done.
 type ConnectResult struct {
 	Client  *ssh.Client
-	Closers []io.Closer // agent conns, jump client, etc.
+	Closers []io.Closer
 }
 
 func Connect(cfg ConnectConfig) (*ConnectResult, error) {
@@ -118,7 +117,6 @@ func Connect(cfg ConnectConfig) (*ConnectResult, error) {
 			return nil, fmt.Errorf("failed to create client connection through jump host: %w", err)
 		}
 
-		// jumpClient must be closed when the session ends
 		closers = append(closers, jumpClient)
 		return &ConnectResult{
 			Client:  ssh.NewClient(ncc, chans, reqs),
@@ -162,7 +160,6 @@ func closeAll(closers []io.Closer) {
 	}
 }
 
-// Close releases the SSH client and associated resources (jump host, agent, etc.).
 func (r *ConnectResult) Close() {
 	if r == nil {
 		return

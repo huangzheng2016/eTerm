@@ -68,7 +68,6 @@ func (t *httpTransport) Pull(sinceRev int64) ([]SyncRecord, int64, error) {
 	return result.Records, result.Revision, nil
 }
 
-// maxPushBatchBytes stays below the server's 16 MiB request limit.
 const maxPushBatchBytes = 8 << 20
 
 func (t *httpTransport) Push(records []SyncRecord) error {

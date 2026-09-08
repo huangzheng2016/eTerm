@@ -13,11 +13,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
-// laneQueue is a per-direction send queue. Control frames (open/close/resize/
-// ack/input) drain before bulk daemon output, and a full queue blocks the
-// forwarding read loop, applying backpressure instead of killing the session.
-// done is closed when the owning connection tears down, so forwarders blocked
-// on a dead peer's full queue wake up instead of stalling their own read loop.
 type laneQueue struct {
 	ctrl chan relay.Frame
 	bulk chan relay.Frame
@@ -34,13 +29,8 @@ func newLaneQueue() *laneQueue {
 	}
 }
 
-// close wakes forwarders blocked in send; called once by the owning
-// connection's teardown.
 func (q *laneQueue) close() { close(q.done) }
 
-// send blocks until the frame is queued, ctx is done, or the queue's owner
-// connection closed; a full queue pauses the caller's read loop, which is the
-// relay backpressure mechanism.
 func (q *laneQueue) send(ctx context.Context, f relay.Frame, bulk bool) bool {
 	ch := q.ctrl
 	if bulk {
@@ -56,7 +46,6 @@ func (q *laneQueue) send(ctx context.Context, f relay.Frame, bulk bool) bool {
 	}
 }
 
-// sendCtl best-effort queues a control frame during teardown.
 func (q *laneQueue) sendCtl(f relay.Frame) {
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -112,9 +101,6 @@ func (h *RelayHub) closeSession(id uint32) {
 	delete(h.sessions, id)
 }
 
-// closeClientSessions drops the client's stream mappings and tells the daemon
-// side the client went away; the daemon keeps the PTY alive and buffers
-// output so the client can resume the stream after reconnecting.
 func (h *RelayHub) closeClientSessions(client *laneQueue) {
 	h.mu.Lock()
 	var daemons []*laneQueue
@@ -205,15 +191,12 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if s, ok := h.session(f.StreamID); ok {
 			if s.daemon != send {
-				// Frame from a connection that does not own this stream.
 				continue
 			}
-			// Daemon -> client: FrameData is bulk output, everything else is control.
 			if !s.client.send(ctx, f, f.Type == relay.FrameData) {
 				if ctx.Err() != nil {
 					return
 				}
-				// Client connection is gone; drop the mapping and keep going.
 				h.closeSession(f.StreamID)
 				continue
 			}
@@ -294,15 +277,12 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if s, ok := h.session(f.StreamID); ok {
 			if s.client != send {
-				// Frame from a connection that does not own this stream.
 				continue
 			}
-			// Client -> daemon: input and control frames are all interactive priority.
 			if !s.daemon.send(ctx, f, false) {
 				if ctx.Err() != nil {
 					return
 				}
-				// Daemon connection is gone; drop the mapping and keep going.
 				h.closeSession(f.StreamID)
 				continue
 			}
@@ -337,7 +317,6 @@ func writeWS(ctx context.Context, c *websocket.Conn, q *laneQueue, stop <-chan s
 			case f = <-q.ctrl:
 			case f = <-q.bulk:
 			case <-stop:
-				// Flush queued control frames (e.g. HelloErr, Close) before exit.
 				for {
 					select {
 					case f := <-q.ctrl:

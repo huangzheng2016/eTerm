@@ -48,7 +48,7 @@ func TestInputHistoryRecall(t *testing.T) {
 	if got := m.input.Value(); got != "first" {
 		t.Fatalf("up = %q, want %q", got, "first")
 	}
-	m.chatKey(keyMsg(tea.KeyUp, 0)) // oldest entry sticks
+	m.chatKey(keyMsg(tea.KeyUp, 0))
 	if got := m.input.Value(); got != "first" {
 		t.Fatalf("up at oldest = %q, want %q", got, "first")
 	}
@@ -64,15 +64,12 @@ func TestInputHistoryRecall(t *testing.T) {
 		t.Fatal("browsing did not end past the newest entry")
 	}
 
-	// A non-empty, non-browsing input keeps up for textarea line navigation.
 	m.input.SetValue("draft")
 	m.chatKey(keyMsg(tea.KeyUp, 0))
 	if got := m.input.Value(); got != "draft" {
 		t.Fatalf("up with non-empty input = %q, want untouched draft", got)
 	}
 
-	// Edits to a recalled entry stick to it; the pre-browse draft returns
-	// past the newest entry.
 	m.input.SetValue("")
 	m.chatKey(keyMsg(tea.KeyUp, 0))
 	m.input.SetValue("second edited")
@@ -189,7 +186,6 @@ func TestSessionsFilter(t *testing.T) {
 		t.Fatalf("filtered view wrong:\n%s", out)
 	}
 
-	// Enter restores the filtered entry under the cursor.
 	m.Update(keyMsg(tea.KeyEnter, 0))
 	if m.mode != modeChat {
 		t.Fatal("enter did not leave the picker")
@@ -198,7 +194,6 @@ func TestSessionsFilter(t *testing.T) {
 		t.Fatalf("restored session = %q, want s1", m.sessionID)
 	}
 
-	// Esc clears the filter first, then closes.
 	sendSlash(t, m, "/resume")
 	for _, r := range []rune("zzx") {
 		m.Update(keyMsg(r, 0))
@@ -349,7 +344,6 @@ func TestCompactBlockedWhileRunning(t *testing.T) {
 	if !strings.Contains(m.errMsg, "run in progress") {
 		t.Fatalf("/compact must be refused mid-run, got %q", m.errMsg)
 	}
-	// /copy and /export stay available: they only read state.
 	sendSlash(t, m, "/copy")
 	if strings.Contains(m.errMsg, "run in progress") {
 		t.Fatal("/copy must stay available mid-run")

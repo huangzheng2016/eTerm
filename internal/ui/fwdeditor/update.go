@@ -29,8 +29,6 @@ func (m Model) loadHosts() tea.Cmd {
 	}
 }
 
-// PLACEHOLDER_UPDATE
-
 func (m *Model) blurAll() {
 	for i := range m.inputs {
 		m.inputs[i].Blur()
@@ -64,7 +62,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.hostOptions = msg.hosts
-			// If editing, find the host index
 			if m.ruleID > 0 {
 				var rule db.PortForward
 				if err := m.db.First(&rule, m.ruleID).Error; err == nil {
@@ -130,7 +127,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 		}
 
-		// Forward to focused textinput
 		idx := inputIndexForField(field)
 		if idx >= 0 {
 			var cmd tea.Cmd

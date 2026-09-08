@@ -31,8 +31,6 @@ func TestAppViewOffsetsTabCursorByChrome(t *testing.T) {
 	}
 }
 
-// The AI overlay is fullscreen at the frame origin: its cursor must reach
-// the app view unchanged (no chrome offset, not dropped).
 func TestAppViewPropagatesAICursor(t *testing.T) {
 	fake := aiview.NewFakeRunner()
 	fake.Delay = 0

@@ -21,8 +21,6 @@ func (a App) View() tea.View {
 			view = tea.NewView("")
 		}
 	case MainView:
-		// Render tabs from a.tabs (source of truth). The cached a.tabBar can lag and
-		// would otherwise show a blank tab row after unlock / single-tab List view.
 		layoutW := a.width
 		if layoutW <= 0 {
 			layoutW = 80
@@ -47,9 +45,6 @@ func (a App) View() tea.View {
 			}
 		}
 
-		// Ensure contentView fills exactly the allocated height so status bar
-		// lands on the last terminal line. TrimRight trailing \n first, then
-		// pad or truncate to the exact allocated height.
 		allocH := 0
 		topH := 0
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
@@ -92,12 +87,11 @@ func (a App) View() tea.View {
 
 		var parts []string
 		parts = append(parts, strings.TrimRight(tabChrome, "\n"))
-		parts = append(parts, contentView) // already padded to exact allocH; do not trim
+		parts = append(parts, contentView)
 		parts = append(parts, strings.TrimRight(statusView, "\n"))
 		main := strings.Join(parts, "\n")
 		mainNoOverlay := main
 
-		// Overlay: confirm dialog, quick connect, or snippet picker
 		if a.confirm.IsActive() {
 			overlay := a.confirm.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
@@ -111,7 +105,6 @@ func (a App) View() tea.View {
 			overlay := a.commandPalette.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.aiVisible && a.aiView != nil {
-			// AI panel is fullscreen: it replaces the whole frame.
 			av := a.aiView.View()
 			main = av.Content
 			aiCursor = av.Cursor
@@ -155,7 +148,6 @@ func (a App) View() tea.View {
 			overlay := a.voiceSettingsView.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.helpOverlay {
-			// Keep tab chrome + status bar fixed like SSH/SFTP; only the content band shows the dialog.
 			layoutH := a.height
 			if layoutH <= 0 {
 				layoutH = 24
@@ -179,11 +171,6 @@ func (a App) View() tea.View {
 		}
 
 		view = tea.NewView(main)
-		// Propagate the tab's cursor to the frame, offset by the tab chrome,
-		// so the outer terminal's hardware cursor (and the OS IME candidate
-		// window) anchors at the inner app's cursor cell. Overlays replace
-		// the frame, so the tab cursor no longer applies. The AI overlay is
-		// fullscreen at the frame origin, so its cursor needs no offset.
 		if tabCursor != nil && main == mainNoOverlay {
 			view.Cursor = tea.NewCursor(tabCursor.X, tabCursor.Y+topH)
 		} else if aiCursor != nil {
@@ -193,8 +180,6 @@ func (a App) View() tea.View {
 		view = tea.NewView("")
 	}
 
-	// Alternate screen keeps the frame at terminal size; inline mode would grow with
-	// content and bubbletea drops overflow from the top, hiding the tab bar.
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	return view
@@ -223,7 +208,6 @@ func (a App) handleHelpOverlayKey(msg tea.KeyPressMsg) (App, tea.Cmd) {
 	return a, nil
 }
 
-// helpOverlayPanel fills only the middle band (between tab chrome and status bar) with a centered dialog.
 func (a App) helpOverlayPanel(layoutW, midH int) string {
 	hmap := a.contextualHelpKeyMap()
 	innerW := layoutW - 10

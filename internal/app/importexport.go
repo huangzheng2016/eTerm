@@ -305,7 +305,6 @@ func importComparableHost(h db.Host) comparableImportHost {
 	}
 }
 
-// CountImportConflicts returns how many parsed host blocks match an existing DB row.
 func CountImportConflicts(database *gorm.DB) (int, error) {
 	parsed, err := parseSSHConfigForImport()
 	if err != nil {
@@ -315,7 +314,6 @@ func CountImportConflicts(database *gorm.DB) (int, error) {
 		return 0, nil
 	}
 
-	// Batch: collect all aliases for a single IN query
 	aliases := make([]string, len(parsed))
 	for i, ph := range parsed {
 		aliases[i] = ph.Alias
@@ -333,7 +331,6 @@ func CountImportConflicts(database *gorm.DB) (int, error) {
 			n++
 			continue
 		}
-		// Fallback: check by endpoint (less common, still per-row but only for non-alias matches)
 		var count int64
 		database.Model(&db.Host{}).Where("hostname = ? AND port = ? AND username = ?",
 			ph.Hostname, ph.Port, ph.Username).Count(&count)
@@ -344,7 +341,6 @@ func CountImportConflicts(database *gorm.DB) (int, error) {
 	return n, nil
 }
 
-// findHostByParsed loads an existing host matching the SSH config block (alias or same endpoint).
 func findHostByParsed(database *gorm.DB, ph sshconfig.ParsedHost) (db.Host, bool) {
 	var h db.Host
 	if err := database.Where("alias = ?", ph.Alias).First(&h).Error; err == nil {

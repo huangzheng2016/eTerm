@@ -18,38 +18,28 @@ import (
 )
 
 const (
-	aiProvidersSettingKey = "ai_providers" // encrypted JSON []ai.Provider (user-added only)
-	aiActiveSettingKey    = "ai_active"    // plain JSON {provider, model}
+	aiProvidersSettingKey = "ai_providers"
+	aiActiveSettingKey    = "ai_active"
 )
 
-// aiBridge adapts ai.Agent + ai.Store to the aiview interfaces. It also
-// persists user-added providers (encrypted) and the active selection.
 type aiBridge struct {
 	store *ai.Store
 	db    *gorm.DB
 	mk    *security.MasterKeyManager
 	exec  ai.Executor
 
-	mu       sync.Mutex
-	agent    aiAgent
-	agentKey string
-	cancel   context.CancelFunc
-	// running reports a run is in flight (guarded by mu, runGen defeats a
-	// stale pump goroutine clearing a newer run's flag).
-	running bool
-	runGen  int
-	// pendingHistory holds a resumed session's history until the first agent
-	// exists (no runs yet in this process).
+	mu             sync.Mutex
+	agent          aiAgent
+	agentKey       string
+	cancel         context.CancelFunc
+	running        bool
+	runGen         int
 	pendingHistory []byte
-	// cron schedules wake-ups for the panel's session; it outlives agent
-	// rebuilds. cronSession tracks the panel session id ("" before the first
-	// save), fireCh carries fires into the UI loop.
-	cron        *ai.CronScheduler
-	cronSession string
-	fireCh      chan<- aiToolRequest
+	cron           *ai.CronScheduler
+	cronSession    string
+	fireCh         chan<- aiToolRequest
 }
 
-// aiAgent is the part of ai.Agent the bridge uses; a seam for tests.
 type aiAgent interface {
 	Run(ctx context.Context, input string) <-chan ai.Event
 	Clear()
@@ -72,8 +62,6 @@ func newAIBridge(database *gorm.DB, mk *security.MasterKeyManager, exec ai.Execu
 	return b
 }
 
-// deliverCron posts a cron fire into the UI loop via the tool-request pump:
-// the aiToolCronFire handler routes it through the panel's normal send path.
 func (b *aiBridge) deliverCron(text string) {
 	if b.fireCh == nil {
 		return
@@ -81,8 +69,6 @@ func (b *aiBridge) deliverCron(text string) {
 	b.fireCh <- aiToolRequest{op: aiToolCronFire, arg: text}
 }
 
-// setCronSession points the scheduler at the panel's session; the scheduler
-// re-homes pre-save ("") jobs to the first real id atomically.
 func (b *aiBridge) setCronSession(id string) {
 	if b.cron == nil {
 		return
@@ -117,8 +103,6 @@ func loadAIStore(database *gorm.DB, mk *security.MasterKeyManager) *ai.Store {
 			store.ActiveModel = act.Model
 		}
 	}
-	// User-added providers and the saved selection load first; kimi imports
-	// only fill gaps (existing names win).
 	if kimiCfg, err := ai.LoadKimiConfig(ai.KimiConfigPath()); err == nil {
 		store.ImportKimi(kimiCfg)
 	}
@@ -159,7 +143,6 @@ func (b *aiBridge) persistActive() {
 	_ = db.SetSetting(b.db, aiActiveSettingKey, string(data))
 }
 
-// Run implements aiview.AgentRunner.
 func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentEvent, error) {
 	p, model, maxCtx, err := b.store.Resolve()
 	if err != nil {
@@ -225,9 +208,6 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 	if err != nil {
 		return nil, err
 	}
-	// Keep the conversation across the swap: a resumed session waiting for
-	// the first agent, or the replaced agent's history on a provider/model
-	// switch (the panel keeps its blocks, so the agent keeps its context).
 	if b.pendingHistory != nil {
 		_ = agent.ImportHistory(b.pendingHistory)
 		b.pendingHistory = nil
@@ -236,8 +216,6 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 			_ = agent.ImportHistory(data)
 		}
 	}
-	// Close is not on the aiAgent seam; it cancels background tasks so a
-	// replaced agent does not leak them.
 	if old, ok := b.agent.(interface{ Close() }); ok {
 		old.Close()
 	}
@@ -246,9 +224,6 @@ func (b *aiBridge) agentFor(p *ai.Provider, model string, maxCtx int) (aiAgent, 
 	return agent, nil
 }
 
-// Enqueue implements aiview.AgentRunner: input submitted mid-run is queued on
-// the agent, which injects it at the next step boundary. It fails rather than
-// dropping the message silently when there is no run to steer.
 func (b *aiBridge) Enqueue(text string) error {
 	p, model, maxCtx, err := b.store.Resolve()
 	if err != nil {
@@ -268,7 +243,6 @@ func (b *aiBridge) Enqueue(text string) error {
 	return nil
 }
 
-// ClearQueue implements aiview.AgentRunner.
 func (b *aiBridge) ClearQueue() {
 	b.mu.Lock()
 	agent := b.agent
@@ -278,9 +252,6 @@ func (b *aiBridge) ClearQueue() {
 	}
 }
 
-// DequeueLast implements aiview.AgentRunner (queue recall). Agents predating
-// the method report ok=false and the panel falls back to input history; the
-// assertion mirrors ContextUsage so the aiAgent seam stays unchanged.
 func (b *aiBridge) DequeueLast() (string, bool) {
 	b.mu.Lock()
 	agent := b.agent
@@ -291,7 +262,6 @@ func (b *aiBridge) DequeueLast() (string, bool) {
 	return "", false
 }
 
-// Compact implements aiview.AgentRunner by forwarding to the active agent.
 func (b *aiBridge) Compact(ctx context.Context) (aiview.CompactStats, error) {
 	p, model, maxCtx, err := b.store.Resolve()
 	if err != nil {
@@ -319,8 +289,6 @@ func (b *aiBridge) Compact(ctx context.Context) (aiview.CompactStats, error) {
 	}, nil
 }
 
-// Tasks exposes the active agent's background tasks to the panel's /tasks
-// view. Nil without an agent (no runs yet).
 func (b *aiBridge) Tasks() []aiview.TaskEntry {
 	b.mu.Lock()
 	agent := b.agent
@@ -346,8 +314,6 @@ func (b *aiBridge) Tasks() []aiview.TaskEntry {
 	return out
 }
 
-// CancelTask cancels one running background task of the active agent (wired
-// to the /tasks view's x key).
 func (b *aiBridge) CancelTask(id string) {
 	b.mu.Lock()
 	agent := b.agent
@@ -357,7 +323,6 @@ func (b *aiBridge) CancelTask(id string) {
 	}
 }
 
-// CancelRun aborts the in-flight run, if any (used on lock).
 func (b *aiBridge) CancelRun() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -371,9 +336,6 @@ func (b *aiBridge) CancelRun() {
 	}
 }
 
-// ContextUsage reports the active agent's context token usage (aiview title
-// bar). Zero values when no agent exists yet; Usage is not on the aiAgent
-// seam, hence the assertion.
 func (b *aiBridge) ContextUsage() (used, max int) {
 	b.mu.Lock()
 	agent := b.agent
@@ -419,8 +381,6 @@ func toolCallLabel(name, args string) string {
 	return name + " " + args
 }
 
-// Models implements aiview.ProviderStore: one entry per model alias, plus one
-// per provider not covered by any alias (user-added).
 func (b *aiBridge) Models() []aiview.ModelEntry {
 	aliased := map[string]bool{}
 	out := make([]aiview.ModelEntry, 0, len(b.store.Models)+len(b.store.Providers))
@@ -441,8 +401,6 @@ func (b *aiBridge) Models() []aiview.ModelEntry {
 	return out
 }
 
-// Active implements aiview.ProviderStore: the active alias when ActiveModel
-// names one, else the active provider name.
 func (b *aiBridge) Active() string {
 	for _, m := range b.store.Models {
 		if m.Alias == b.store.ActiveModel && m.Alias != "" {
@@ -452,7 +410,6 @@ func (b *aiBridge) Active() string {
 	return b.store.ActiveProvider
 }
 
-// Switch implements aiview.ProviderStore.
 func (b *aiBridge) Switch(provider, model string) {
 	if b.store.ActiveProvider == provider && b.store.ActiveModel == model {
 		return
@@ -460,12 +417,10 @@ func (b *aiBridge) Switch(provider, model string) {
 	if err := b.store.SetActive(provider, model); err != nil {
 		return
 	}
-	// A switch mid-run strands the old agent's turn on the old provider.
 	b.CancelRun()
 	b.persistActive()
 }
 
-// Add implements aiview.ProviderStore.
 func (b *aiBridge) Add(pv aiview.Provider) {
 	name := strings.TrimSpace(pv.Name)
 	if name == "" {
@@ -481,9 +436,6 @@ func (b *aiBridge) Add(pv aiview.Provider) {
 	b.persistProviders()
 }
 
-// ensureAI builds the AI overlay once per process (it persists across page
-// switches and lock/unlock). Returns the tool-request pump command on first
-// creation.
 func (a App) ensureAI() (App, tea.Cmd) {
 	if a.aiView != nil {
 		return a, nil
@@ -505,7 +457,6 @@ func (a App) openAIOverlay() (App, tea.Cmd) {
 	return a, a.aiView.Init()
 }
 
-// updateAIView routes a message into the overlay model.
 func (a *App) updateAIView(msg tea.Msg) tea.Cmd {
 	updated, cmd := a.aiView.Update(msg)
 	if av, ok := updated.(*aiview.Model); ok {
@@ -514,9 +465,6 @@ func (a *App) updateAIView(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// aiSkipForward reports messages the blanket forward to the overlay must not
-// carry: interactive input is delivered through the interception chain when
-// the overlay is visible, and dropped for it when hidden.
 func aiSkipForward(msg tea.Msg) bool {
 	switch msg.(type) {
 	case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg:
@@ -525,8 +473,6 @@ func aiSkipForward(msg tea.Msg) bool {
 	return false
 }
 
-// withAIStatusHint adds a small indicator while an agent run is active and
-// the overlay is hidden.
 func (a App) withAIStatusHint(hint string) string {
 	if a.aiView == nil || a.aiVisible || !a.aiView.Running() {
 		return hint

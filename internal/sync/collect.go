@@ -11,12 +11,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// CollectDirty gathers locally modified records that need to be pushed.
-// Collects records where updated_at > lastSyncTime (or all if lastSyncTime is zero).
 func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, deviceID string, lastSyncTime time.Time) ([]SyncRecord, error) {
 	var records []SyncRecord
 
-	// SSHKeys (skip file mode)
 	var keys []db.SSHKey
 	if err := database.Unscoped().Where("(storage_mode = ? OR storage_mode = ?) AND updated_at > ?", "database", "", lastSyncTime).Find(&keys).Error; err != nil {
 		return nil, err
@@ -29,7 +26,6 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 		records = append(records, r)
 	}
 
-	// Hosts
 	var hosts []db.Host
 	if err := database.Unscoped().Where("updated_at > ?", lastSyncTime).Find(&hosts).Error; err != nil {
 		return nil, err
@@ -42,7 +38,6 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 		records = append(records, r)
 	}
 
-	// PortForwards
 	var fwds []db.PortForward
 	if err := database.Unscoped().Where("updated_at > ?", lastSyncTime).Find(&fwds).Error; err != nil {
 		return nil, err
@@ -55,7 +50,6 @@ func CollectDirty(database *gorm.DB, mk *security.MasterKeyManager, passphrase, 
 		records = append(records, r)
 	}
 
-	// Snippets
 	var snippets []db.Snippet
 	if err := database.Unscoped().Where("updated_at > ?", lastSyncTime).Find(&snippets).Error; err != nil {
 		return nil, err
@@ -152,7 +146,6 @@ func buildHostRecord(h db.Host, database *gorm.DB, mk *security.MasterKeyManager
 			UpdatedAt: h.UpdatedAt,
 		}, nil
 	}
-	// Resolve FK sync IDs
 	var keySyncID, jumpSyncID string
 	if h.KeyID != nil {
 		var key db.SSHKey

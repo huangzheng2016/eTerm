@@ -19,7 +19,6 @@ var httpChecksumClient = updateHTTPClient(120 * time.Second)
 
 var ErrChecksumsUnavailable = errors.New("SHA256SUMS not in release")
 
-// ParseChecksumsFile parses SHA256SUMS lines: "<hex>  <filename>" (GNU sha256sum).
 func ParseChecksumsFile(content []byte) map[string]string {
 	out := make(map[string]string)
 	s := bufio.NewScanner(bytes.NewReader(content))

@@ -101,13 +101,12 @@ func (m Model) save() tea.Cmd {
 		}
 	}
 
-	// GSSAPI fields
 	gssapiSource := ""
 	krbPrincipal := ""
 	gssapiKeytab := ""
 	if authMethod == "gssapi" {
 		gssapiSource = gssapiSourceOptions[m.gssapiSourceIdx]
-		if m.gssapiSourceIdx == 1 { // keytab
+		if m.gssapiSourceIdx == 1 {
 			krbPrincipal = strings.TrimSpace(m.inputs[inputIndexForField(krbPrincipalField)].Value())
 			if krbPrincipal == "" {
 				m.err = "Kerberos principal is required for keytab mode"
@@ -121,7 +120,6 @@ func (m Model) save() tea.Cmd {
 		}
 	}
 
-	// ProxyCommand (mutually exclusive with proxy type)
 	proxyCommand := ""
 	if m.proxyTypeIdx == 0 {
 		proxyCommand = strings.TrimSpace(m.inputs[inputIndexForField(proxyCommandField)].Value())

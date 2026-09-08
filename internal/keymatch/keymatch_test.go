@@ -54,7 +54,6 @@ func TestMatchSFTP_plainS(t *testing.T) {
 
 func TestMatchSFTP_ctrlSNo(t *testing.T) {
 	k := tea.Key{Code: 's', Mod: tea.ModCtrl, Text: "s"}
-	// Keystroke for ctrl+s should be ctrl+s
 	if MatchSFTP(press(k)) {
 		t.Fatalf("Ctrl+S should not map to SFTP")
 	}

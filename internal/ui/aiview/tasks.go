@@ -14,7 +14,6 @@ const tasksRefreshInterval = time.Second
 
 type tasksTickMsg struct{ seq int }
 
-// openTasks switches to the tasks browser and starts the refresh tick.
 func (m *Model) openTasks() tea.Cmd {
 	m.refreshTasks()
 	m.tCursor = 0
@@ -24,8 +23,6 @@ func (m *Model) openTasks() tea.Cmd {
 	return tea.Tick(tasksRefreshInterval, func(time.Time) tea.Msg { return tasksTickMsg{seq: seq} })
 }
 
-// tasksTick refreshes the list while the browser is open; the tick chain ends
-// when the user leaves the view or reopens it (new seq).
 func (m *Model) tasksTick(seq int) tea.Cmd {
 	if seq != m.tasksSeq || (m.mode != modeTasks && m.mode != modeTaskDetail) {
 		return nil
@@ -103,8 +100,6 @@ func (m *Model) updateTaskDetail(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// activityText renders one tail entry; tool calls keep their prefix so they
-// stand out from plain text snippets.
 func activityText(a TaskActivity) string {
 	if a.Kind == "tool" {
 		return "tool: " + a.Text
@@ -119,8 +114,6 @@ func (m *Model) tasksView() string {
 	if len(m.taskList) == 0 {
 		rows = append(rows, ui.DimStyle.Render("No background tasks."))
 	} else {
-		// Two rows per task; keep a window around the cursor so the list fits
-		// the box (title+blank above, blank+hint below, inside the border).
 		visible := max(1, (boxH-6)/2)
 		start := 0
 		if m.tCursor >= start+visible {
@@ -167,7 +160,6 @@ func (m *Model) taskDetailView() string {
 		if len(lines) == 0 {
 			lines = append(lines, ui.DimStyle.Render("no activity yet"))
 		}
-		// Title+blank+task+blank above, blank+hint below, inside the border.
 		visible := max(1, boxH-8)
 		maxOff := max(0, len(lines)-visible)
 		if m.dOffset > maxOff {

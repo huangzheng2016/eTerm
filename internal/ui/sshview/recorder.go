@@ -125,8 +125,6 @@ func (r *Recorder) Close() ([]byte, time.Duration, bool) {
 	return r.buf.Bytes(), r.last, r.stopped
 }
 
-// Discard releases the recorder without harvesting data; used when the
-// recording will not be persisted (e.g. missing history row).
 func (r *Recorder) Discard() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -23,8 +23,6 @@ const (
 	historyBudgetRatio    = 0.50
 )
 
-// steer, when non-nil, adds the steer middleware first so queued user
-// messages join the turn before the other middlewares see the state.
 func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.BaseTool, instruction string, maxIterations, contextWindow int, steer *steerQueue) (*adk.ChatModelAgent, error) {
 	patchMw, err := patchtoolcalls.New(ctx, nil)
 	if err != nil {
@@ -80,7 +78,6 @@ func buildADKAgent(ctx context.Context, model einomodel.ChatModel, tools []tool.
 	return agent, nil
 }
 
-// estimateTokens: ASCII text ~ 4 chars/token, CJK text ~ 1.5 chars/token.
 func estimateTokens(s string) int64 {
 	var ascii, nonAscii int
 	for _, r := range s {

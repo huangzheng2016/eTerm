@@ -11,7 +11,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 )
 
-// HostStatus represents the online status of a host.
 type HostStatus int
 
 const (
@@ -31,13 +30,11 @@ type probeResult struct {
 	status HostStatus
 }
 
-// probeResultMsg carries a single probe result plus the channel to continue reading.
 type probeResultMsg struct {
 	probeResult
 	ch <-chan probeResult
 }
 
-// probeHosts returns a tea.Cmd that streams probe results one at a time.
 func probeHosts(hosts []db.Host) tea.Cmd {
 	if len(hosts) == 0 {
 		return nil

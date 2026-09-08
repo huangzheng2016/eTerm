@@ -36,10 +36,9 @@ const (
 	assemblyAIFinalTimeout = 8 * time.Second
 )
 
-// AssemblyAIConfig configures the AssemblyAI realtime ASR engine.
 type AssemblyAIConfig struct {
 	APIKey string
-	URL    string // default defaultAssemblyAIURL
+	URL    string
 }
 
 func (c AssemblyAIConfig) wsURL() string {
@@ -50,9 +49,6 @@ func (c AssemblyAIConfig) wsURL() string {
 	return base + "?sample_rate=16000"
 }
 
-// AssemblyAIEngine is one AssemblyAI realtime stream: 16kHz mono S16LE PCM
-// in via WriteAudio, partial transcripts out as partials, the final
-// transcript emitted on Stop (terminate_session).
 type AssemblyAIEngine struct {
 	cfg AssemblyAIConfig
 
@@ -62,13 +58,13 @@ type AssemblyAIEngine struct {
 	closed    bool
 	stopping  bool
 	sentAudio bool
-	finals    []string // FinalTranscript segments
-	interim   string   // last PartialTranscript text
+	finals    []string
+	interim   string
 
 	events  chan Event
 	done    chan struct{}
 	wg      sync.WaitGroup
-	finalCh chan struct{} // closed when the stream drains during Stop
+	finalCh chan struct{}
 }
 
 func NewAssemblyAIEngine(cfg AssemblyAIConfig) *AssemblyAIEngine {
@@ -131,8 +127,6 @@ func (e *AssemblyAIEngine) WriteAudio(pcm []byte) error {
 	return nil
 }
 
-// Stop sends terminate_session and waits for the stream to drain; the final
-// transcript surfaces as a final event from the read loop.
 func (e *AssemblyAIEngine) Stop() error {
 	e.mu.Lock()
 	if !e.started {
@@ -165,7 +159,6 @@ func (e *AssemblyAIEngine) Stop() error {
 }
 
 func (e *AssemblyAIEngine) SetVAD(VADParams) error {
-	// Endpointing is client-side (helper VAD); nothing to apply.
 	return nil
 }
 
@@ -238,14 +231,11 @@ func (e *AssemblyAIEngine) readLoop(conn *websocket.Conn, finalCh chan struct{})
 			e.finals = append(e.finals, msg.Text)
 			e.mu.Unlock()
 		case "SessionTerminated":
-			// graceful drain after terminate_session
 			return
 		}
 	}
 }
 
-// finish emits the drained final transcript once the stream ends during Stop
-// and releases the Stop wait.
 func (e *AssemblyAIEngine) finish(finalCh chan struct{}, once *sync.Once) {
 	once.Do(func() {
 		e.mu.Lock()

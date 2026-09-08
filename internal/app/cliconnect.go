@@ -11,7 +11,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
-// CLIConnectInfo holds parsed CLI direct-connect arguments.
 type CLIConnectInfo struct {
 	Hostname string
 	Port     int
@@ -39,11 +38,9 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 
 	dial := func() tea.Msg {
 		defer close(progressCh)
-		// Try to find existing host by hostname + port
 		var host db.Host
 		err := database.Where("hostname = ? AND port = ?", msg.Hostname, msg.Port).First(&host).Error
 		if err != nil {
-			// Not found — create new host
 			host = db.Host{
 				Alias:      fmt.Sprintf("%s@%s", msg.Username, msg.Hostname),
 				Hostname:   msg.Hostname,
@@ -56,13 +53,11 @@ func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 			}
 		}
 
-		// Fingerprint pre-check
 		progress(connectStageText(prefix, "verify"))
 		if bm := hostFingerprintDialBlock(database, host.ID, host.Hostname, host.Port, "ssh", 0, 0); bm != nil {
 			return bm
 		}
 
-		// Load key if needed
 		if host.KeyID != nil {
 			database.Preload("Key").First(&host, host.ID)
 		}

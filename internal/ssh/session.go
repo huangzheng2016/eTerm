@@ -40,8 +40,6 @@ func (s *SSHSession) SetStderr(w io.Writer) {
 	s.stderr = w
 }
 
-// SetPtySize sets the PTY size in terminal cells (cols x rows). Call before Run.
-// If unset, defaults to 80x24.
 func (s *SSHSession) SetPtySize(cols, rows int) {
 	rows, cols = NormalizePTYSize(rows, cols)
 	s.ptyCols, s.ptyRows = cols, rows
@@ -61,7 +59,6 @@ func (s *SSHSession) Run() error {
 
 	setTerminalEnv(s.session)
 
-	// RequestPty(term, height, width, …) — height is rows, width is columns.
 	if err := s.session.RequestPty(terminalTerm, rows, cols, modes); err != nil {
 		s.session.Close()
 		return err

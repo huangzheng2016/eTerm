@@ -11,8 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// fakeAgent mimics ai.Agent: Run streams until ctx ends (then closes, like
-// the real runner), and Clear blocks while a run holds the agent mutex.
 type fakeAgent struct {
 	clearRelease   chan struct{}
 	queued         []string
@@ -70,7 +68,7 @@ func TestBridgeCancelRun(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("event pump did not stop after CancelRun")
 	}
-	bridge.CancelRun() // no panic when idle
+	bridge.CancelRun()
 }
 
 func TestBridgeEnqueueRoutesToAgent(t *testing.T) {
@@ -183,7 +181,7 @@ func TestBridgeTasksAndCancel(t *testing.T) {
 	if bridge.Tasks() != nil {
 		t.Fatal("tasks without an agent must be nil")
 	}
-	bridge.CancelTask("task-1") // no agent: no-op, no panic
+	bridge.CancelTask("task-1")
 
 	agent := &fakeAgent{snaps: []ai.TaskSnapshot{
 		{ID: "task-1", Task: "watch the build", Status: ai.TaskRunning, StartedSecAgo: 3, Tail: []ai.TaskActivity{

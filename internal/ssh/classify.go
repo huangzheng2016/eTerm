@@ -21,7 +21,6 @@ const (
 	ErrKindLocked
 )
 
-// Short returns a one-word label for compact UI (e.g. batch result rows).
 func (k ErrorKind) Short() string {
 	switch k {
 	case ErrKindAuth:
@@ -43,7 +42,6 @@ func (k ErrorKind) Short() string {
 	}
 }
 
-// ConnectError wraps a connection failure with a user-facing classification.
 type ConnectError struct {
 	Kind    ErrorKind
 	Summary string
@@ -54,7 +52,6 @@ type ConnectError struct {
 func (e *ConnectError) Error() string { return e.Err.Error() }
 func (e *ConnectError) Unwrap() error { return e.Err }
 
-// Classify maps a low-level connection error to a ConnectError. Returns nil for nil.
 func Classify(err error) *ConnectError {
 	if err == nil {
 		return nil

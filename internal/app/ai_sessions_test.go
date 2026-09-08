@@ -11,7 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// historyAgent is a fakeAgent with a stateful history for session tests.
 type historyAgent struct {
 	fakeAgent
 	history []byte
@@ -57,7 +56,7 @@ func TestBridgeSessionSaveListLoad(t *testing.T) {
 		t.Fatalf("entry = %+v", e)
 	}
 
-	agent.history = nil // simulate a fresh agent
+	agent.history = nil
 	data, ok := bridge.LoadSession("s1")
 	if !ok {
 		t.Fatal("load failed")
@@ -69,7 +68,6 @@ func TestBridgeSessionSaveListLoad(t *testing.T) {
 		t.Fatal("unknown session must not load")
 	}
 
-	// Update keeps the row and refreshes the title.
 	agent.history = []byte(`[{"role":"user","content":"hi"},{"role":"assistant","content":"yo"}]`)
 	bridge.SaveSession("s1", "", "")
 	if list = bridge.Sessions(); len(list) != 1 || list[0].Title != "hi there" {
@@ -93,7 +91,6 @@ func TestBridgeSaveSessionSkipsEmptyHistory(t *testing.T) {
 		t.Fatalf("empty history created a row: %d", n)
 	}
 
-	// An existing row is still updated (e.g. emptied by /undo).
 	agent.history = []byte(`[{"role":"user","content":"hi"}]`)
 	bridge.SaveSession("s2", "t", "")
 	agent.history = nil
@@ -155,7 +152,6 @@ func TestBridgeUndoLastTurn(t *testing.T) {
 		t.Fatal("agent undo not called")
 	}
 
-	// Without an agent, the stashed history is truncated instead.
 	bridge.agent = nil
 	bridge.pendingHistory = []byte(`[{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"c"}]`)
 	bridge.UndoLastTurn()
@@ -222,7 +218,6 @@ func TestBridgeCronPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("job session = %q", job.SessionID)
 	}
 
-	// Restart: a fresh bridge on the same db reloads the session's jobs.
 	bridge2 := testCronBridge(t)
 	bridge2.db = bridge.db
 	bridge2.setCronSession("s1")
@@ -230,7 +225,6 @@ func TestBridgeCronPersistenceRoundTrip(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].ID != job.ID || jobs[0].Prompt != "watch the build" || jobs[0].IntervalMinutes != 5 {
 		t.Fatalf("reloaded jobs: %+v", jobs)
 	}
-	// Other sessions see nothing.
 	bridge2.setCronSession("s2")
 	if n := len(bridge2.cron.List()); n != 0 {
 		t.Fatalf("jobs leaked into s2: %d", n)
@@ -239,7 +233,6 @@ func TestBridgeCronPersistenceRoundTrip(t *testing.T) {
 
 func TestBridgeCronAdoptsUnsavedJobs(t *testing.T) {
 	bridge := testCronBridge(t)
-	// Job created during a conversation that has no session id yet.
 	if _, err := bridge.cron.Create("check back", 5, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -277,15 +270,12 @@ func TestBridgeCronOverdueFiresOnLoad(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("overdue job did not fire after session load")
 	}
-	// The recurring job was rescheduled, not deleted.
 	jobs := bridge.cron.List()
 	if len(jobs) != 1 || !jobs[0].NextFireAt.After(time.Now()) {
 		t.Fatalf("job not rescheduled: %+v", jobs)
 	}
 }
 
-// /new: the current session's jobs are wiped from the scheduler and the db;
-// other sessions are untouched.
 func TestBridgeResetHistoryWipesCronJobs(t *testing.T) {
 	bridge := testCronBridge(t)
 	bridge.setCronSession("s1")
@@ -311,8 +301,6 @@ func TestBridgeResetHistoryWipesCronJobs(t *testing.T) {
 	}
 }
 
-// /resume: the previous session's jobs are wiped and the target session's
-// persisted jobs load into the scheduler.
 func TestBridgeLoadSessionCronLifecycle(t *testing.T) {
 	bridge := testCronBridge(t)
 	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
@@ -345,7 +333,6 @@ func TestBridgeLoadSessionCronLifecycle(t *testing.T) {
 	}
 }
 
-// /resume of the session already active in the panel keeps its cron jobs.
 func TestBridgeLoadSameSessionKeepsCronJobs(t *testing.T) {
 	bridge := testCronBridge(t)
 	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
@@ -367,13 +354,11 @@ func TestBridgeLoadSameSessionKeepsCronJobs(t *testing.T) {
 	}
 }
 
-// An unsaved conversation's jobs are still abandoned on /resume: the panel
-// has no session id (""), which never matches the loaded id.
 func TestBridgeLoadSessionWipesUnsavedJobs(t *testing.T) {
 	bridge := testCronBridge(t)
 	bridge.agent = &historyAgent{history: []byte(`[{"role":"user","content":"hi"}]`)}
 	bridge.SaveSession("s1", "one", "")
-	bridge.ResetHistory() // /new: the panel conversation is unsaved again
+	bridge.ResetHistory()
 	if _, err := bridge.cron.Create("unsaved watch", 5, 0); err != nil {
 		t.Fatal(err)
 	}

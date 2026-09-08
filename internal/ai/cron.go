@@ -19,11 +19,8 @@ const (
 	minCronMinutes = 1
 )
 
-// cronTickInterval bounds fire latency; var so tests can shrink it.
 var cronTickInterval = time.Second
 
-// CronJob is one scheduled wake. IntervalMinutes > 0 means recurring; 0 is a
-// one-shot that auto-deletes after firing.
 type CronJob struct {
 	ID              string
 	SessionID       string
@@ -33,25 +30,14 @@ type CronJob struct {
 	CreatedAt       time.Time
 }
 
-// CronStore persists cron jobs (implemented by the app bridge via gorm).
 type CronStore interface {
 	LoadCronJobs(sessionID string) ([]CronJob, error)
 	UpsertCronJob(job CronJob) error
 	DeleteCronJob(id string) error
-	// DeleteSessionCronJobs wipes every job of a session (the conversation
-	// is abandoned on /new or a switch to another session).
 	DeleteSessionCronJobs(sessionID string) error
-	// MoveCronJobs re-homes jobs from one session to another (first save of
-	// a previously unsaved conversation).
 	MoveCronJobs(fromSession, toSession string) error
 }
 
-// CronScheduler fires due jobs of the active session, delivering each fire as
-// composed wake text. Every change is persisted, so jobs survive restarts;
-// jobs due while their session was inactive fire once (missed fires
-// coalesced) after the session loads again. now is fixed at construction
-// (tests build the struct directly); the ticker goroutine lives for the
-// process (the bridge is created once).
 type CronScheduler struct {
 	mu      sync.Mutex
 	jobs    map[string]*CronJob
@@ -80,9 +66,6 @@ func (s *CronScheduler) loop() {
 	}
 }
 
-// AbandonSession wipes the current session's jobs and detaches from it: used
-// on /new and when switching to another session, since cron jobs die with
-// their conversation. The "" pre-save jobs are wiped too.
 func (s *CronScheduler) AbandonSession() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -93,11 +76,6 @@ func (s *CronScheduler) AbandonSession() {
 	s.jobs = map[string]*CronJob{}
 }
 
-// SetSession switches the active session: the previous session's jobs stay
-// persisted but stop firing; the new session's jobs load from the store and
-// overdue ones fire on the next tick. Jobs of the unnamed pre-save session
-// ("") are re-homed to the first real id; the move and the reload happen
-// under the same lock so a concurrent Create lands in the right session.
 func (s *CronScheduler) SetSession(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,8 +144,6 @@ func (s *CronScheduler) List() []CronJob {
 		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
 			return c
 		}
-		// Same-timestamp jobs (fake clocks, fast successive creates) need a
-		// stable tie-break: map iteration order is random.
 		return strings.Compare(a.ID, b.ID)
 	})
 	return out
@@ -186,7 +162,6 @@ func (s *CronScheduler) Delete(id string) bool {
 	return true
 }
 
-// newID: caller holds mu.
 func (s *CronScheduler) newID() string {
 	var b [4]byte
 	for {
@@ -230,8 +205,6 @@ func (s *CronScheduler) fireDue() {
 	}
 }
 
-// cronWakeText marks the fire as a scheduled wake so the agent does not
-// mistake it for live user input.
 func cronWakeText(job CronJob, coalesced int) string {
 	sched := "one-shot"
 	if job.IntervalMinutes > 0 {
@@ -252,7 +225,7 @@ type CronCreateInput struct {
 
 type CronCreateOutput struct {
 	ID         string `json:"id,omitempty"`
-	Kind       string `json:"kind,omitempty"` // once | interval
+	Kind       string `json:"kind,omitempty"`
 	NextFireAt string `json:"next_fire_at,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -262,7 +235,7 @@ type CronListInput struct{}
 type CronListJob struct {
 	ID              string `json:"id"`
 	Prompt          string `json:"prompt"`
-	IntervalMinutes int    `json:"interval_minutes,omitempty"` // 0 = one-shot
+	IntervalMinutes int    `json:"interval_minutes,omitempty"`
 	NextFireInSec   int    `json:"next_fire_in_sec"`
 }
 

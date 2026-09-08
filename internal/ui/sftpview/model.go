@@ -20,7 +20,6 @@ const (
 	rightPanel panelSide = 1
 )
 
-// fileItem is rendered by fileDelegate (fixed columns: name | size | date).
 type fileItem struct {
 	info sftp.FileInfo
 }
@@ -41,16 +40,15 @@ type Model struct {
 	focusedPanel    panelSide
 	width           int
 	height          int
-	listInnerH      int // list viewport height passed to bubbles list (for mouse hit-testing)
+	listInnerH      int
 	transferring    bool
 	progress        sftp.TransferProgress
 	progressCh      chan sftp.TransferProgress
 	err             string
 	hostAlias       string
 
-	// Confirmation state for delete/rename
-	confirmMsg        string         // non-empty = waiting for y/n
-	pendingAction     func() tea.Cmd // action to run on 'y'
+	confirmMsg        string
+	pendingAction     func() tea.Cmd
 	chmodInput        textinput.Model
 	chmodPath         string
 	chmodActive       bool
@@ -59,13 +57,11 @@ type Model struct {
 	namePromptOldName string
 	namePromptActive  bool
 
-	// Configurable keybindings
 	vk viewkeys.SFTPKeys
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SFTPKeys) { m.vk = vk }
 
-// Close releases the SFTP session and the underlying SSH connection.
 func (m Model) Close() error {
 	if m.sftpClient == nil {
 		return nil
@@ -135,13 +131,12 @@ func (m *Model) SetSize(w, h int) {
 	if panelWidth < 0 {
 		panelWidth = 0
 	}
-	// Footer is always one line (file counts or progress bar); help is always one line.
 	helpH := lipgloss.Height(m.composeHelpLine())
 	if helpH < 1 {
 		helpH = 1
 	}
-	footerH := 1 // composeFooter always returns at least one line now
-	pageH := 1   // pagination indicator line
+	footerH := 1
+	pageH := 1
 	panelOuter := h - helpH - footerH - pageH
 	if panelOuter < 1 {
 		panelOuter = 1

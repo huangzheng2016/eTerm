@@ -31,7 +31,6 @@ func makeTarBz2(t *testing.T, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-// bzip2Compress compresses via the system bzip2 (stdlib has no bzip2 writer).
 func bzip2Compress(t *testing.T, raw []byte) []byte {
 	t.Helper()
 	cmd := exec.Command("bzip2", "-c")
@@ -76,7 +75,6 @@ func TestAsrModelPathsByKind(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "model.onnx"), []byte("fp32"), 0o644)
 	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("i8"), 0o644)
 
-	// sensevoice-int8 requires the quantized file even when fp32 exists
 	model, _, err := asrModelPaths(dir, "sensevoice-int8")
 	if err != nil || filepath.Base(model) != "model.int8.onnx" {
 		t.Fatalf("sensevoice-int8: %s %v", model, err)
@@ -86,7 +84,6 @@ func TestAsrModelPathsByKind(t *testing.T) {
 		t.Fatal("sensevoice-int8 must not fall back to fp32")
 	}
 
-	// paraformer prefers int8, tolerates fp32-only dirs
 	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("i8"), 0o644)
 	model, _, err = asrModelPaths(dir, "paraformer")
 	if err != nil || filepath.Base(model) != "model.int8.onnx" {
@@ -138,10 +135,6 @@ func TestDownloadToHTTPError(t *testing.T) {
 }
 
 func TestUntarBz2(t *testing.T) {
-	// build a tar.bz2 via the system bzip2 through compress/bzip2's inverse:
-	// no stdlib bzip2 writer, so shell out is avoided; instead craft with tar
-	// and compress with an external step is fragile in tests. Use a fixed
-	// pre-compressed fixture produced by: tar -cjf fixture.tar.bz2 files
 	fixture := filepath.Join(t.TempDir(), "fixture.tar.bz2")
 	raw := makeTarBz2(t, map[string]string{
 		"modeldir/tokens.txt":    "tok",

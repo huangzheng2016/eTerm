@@ -25,23 +25,17 @@ import (
 
 const aiSendKeysTailBytes = 2048
 
-// Bounds for the send_keys completion wait (OSC 133;D). Vars so tests can shrink them.
 var (
 	aiSendKeysMaxWait      = 10 * time.Second
 	aiSendKeysPollInterval = 100 * time.Millisecond
 )
 
-// Bounds for the open_* tab wait: how often to re-list tabs and how long to
-// wait for the new tab to appear (SSH dials can be slow). Vars so tests can
-// shrink them.
 var (
 	aiOpenPollInterval = 250 * time.Millisecond
 	aiOpenTabTimeout   = 15 * time.Second
 	aiOpenSSHTimeout   = 60 * time.Second
 )
 
-// aiSharedState is read from the agent goroutine and written on the UI
-// goroutine; the mutex guards the daemon peer list.
 type aiSharedState struct {
 	mu    sync.RWMutex
 	peers []types.RemotePeer
@@ -88,24 +82,18 @@ const (
 	aiToolOpenTmux
 	aiToolPollTab
 	aiToolNotify
-	// aiToolCronFire is not a tool call: the cron scheduler posts a scheduled
-	// wake through the same pump (app.go/app_update.go carry no cron case).
 	aiToolCronFire
 )
 
-// aiToolRequest is posted by the executor (agent goroutine) and answered on
-// the UI goroutine: terminal/tab state is only safe to touch there.
 type aiToolRequest struct {
-	op       aiToolOp
-	ctx      context.Context
-	id       string // tab id or daemon name
-	arg      string // keys / session name / old name
-	arg2     string // new name (rename)
-	maxBytes int
-	skip     int
-	waitMs   int
-	// beforeIDs lists tab ids to exclude (aiToolPollTab: the snapshot taken
-	// when the open was issued).
+	op        aiToolOp
+	ctx       context.Context
+	id        string
+	arg       string
+	arg2      string
+	maxBytes  int
+	skip      int
+	waitMs    int
 	beforeIDs []string
 	resp      chan aiToolResult
 }
@@ -118,14 +106,11 @@ type aiToolResult struct {
 }
 
 func (req aiToolRequest) respond(r aiToolResult) {
-	// Buffered per-call channel: never blocks, even after the caller gave up.
 	req.resp <- r
 }
 
 type aiToolRequestMsg struct{ req aiToolRequest }
 
-// aiToolSendKeysDoneMsg fires after the minimum wait and on each later poll:
-// before is the OSC 133;D count at send time, deadline bounds the total wait.
 type aiToolSendKeysDoneMsg struct {
 	req      aiToolRequest
 	before   int
@@ -137,8 +122,6 @@ type aiToolRenameDoneMsg struct {
 	err  error
 }
 
-// waitAIToolRequest pumps one executor request into the Update loop; the
-// handler re-arms it (pattern: sshview.waitChunk).
 func waitAIToolRequest(ch <-chan aiToolRequest) tea.Cmd {
 	return func() tea.Msg {
 		req, ok := <-ch
@@ -149,17 +132,11 @@ func waitAIToolRequest(ch <-chan aiToolRequest) tea.Cmd {
 	}
 }
 
-// aiExecutor implements ai.Executor. Tab ops round-trip to the UI goroutine;
-// daemon list/session ops are plain network calls and run on the caller's
-// goroutine.
 type aiExecutor struct {
 	db     *gorm.DB
 	mk     *security.MasterKeyManager
 	reqCh  chan<- aiToolRequest
 	shared *aiSharedState
-	// openMu serializes open_* waits across the main agent and its
-	// sub-agents (they all share this executor), so a tab landing mid-wait
-	// is attributable to the in-flight request.
 	openMu sync.Mutex
 }
 
@@ -209,17 +186,6 @@ func (e *aiExecutor) RenameSession(ctx context.Context, daemon, oldName, newName
 	return err
 }
 
-// openAndWaitTab issues an open request and polls until the new tab appears.
-// The poll matches on creation-time identity (SSH host id, tmux session name,
-// local-shell kind) rather than the tab title: a remote OSC 0/2 or a local
-// PROMPT_COMMAND can retitle the tab right after creation, before the poll
-// sees it. Opens are serialized (openMu), so a tab landing mid-wait belongs
-// to the in-flight request; the before-snapshot captured atomically by the
-// UI handler excludes pre-existing tabs of the same host/session. A failed
-// open (unknown session, dial error) never lands a tab, so it surfaces as a
-// wait timeout. One accepted gap: a local shell tab opened by the user in the
-// same sub-second window is indistinguishable from ours (local tabs carry no
-// host/session identity).
 func (e *aiExecutor) openAndWaitTab(ctx context.Context, req aiToolRequest, timeout time.Duration) (string, error) {
 	e.openMu.Lock()
 	defer e.openMu.Unlock()
@@ -323,9 +289,6 @@ func (e *aiExecutor) ListDaemons(ctx context.Context) ([]ai.DaemonInfo, error) {
 	return e.shared.daemonInfos(), nil
 }
 
-// hasDaemons reports whether any remote daemon is currently registered; the
-// bridge keys its agent cache on this so the daemon tools appear and disappear
-// with the peer list.
 func (e *aiExecutor) hasDaemons() bool {
 	e.shared.mu.RLock()
 	defer e.shared.mu.RUnlock()
@@ -381,8 +344,6 @@ func (e *aiExecutor) KillSession(ctx context.Context, daemon, name string) error
 	return remoteKillTmuxSession(ctx, base, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, name)
 }
 
-// --- UI-goroutine side (called from App.Update) ---
-
 func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 	switch req.op {
 	case aiToolListTabs:
@@ -409,9 +370,6 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 		if waitMs <= 0 {
 			waitMs = 300
 		}
-		// Answer after the wait so the screen tail reflects the command
-		// output; the UI loop keeps processing chunks meanwhile. The done
-		// handler keeps polling for command completion (OSC 133;D).
 		done := aiToolSendKeysDoneMsg{
 			req:      req,
 			before:   m.CommandCount(),
@@ -462,8 +420,6 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 			return aiToolRenameDoneMsg{req: req, peer: peer, err: err}
 		}
 	case aiToolOpenLocal:
-		// Respond before the tab exists: the answer carries the tab snapshot
-		// and the poll matcher; the executor polls for the fresh tab id.
 		before := a.aiTabInfos()
 		var cmd tea.Cmd
 		a, cmd = a.openLocalTerminal()
@@ -499,9 +455,6 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 		req.respond(aiToolResult{})
 		return a, tea.Raw(sshview.OSC9Sequence(req.arg))
 	case aiToolCronFire:
-		// One-way (no respond): the panel's injection channel delivers the
-		// wake without touching the user's draft (running turn: dim Queued
-		// marker; idle: new run; picker mode: buffered until chat returns).
 		if a.aiView != nil {
 			return a, a.aiView.InjectUserMessage(req.arg)
 		}
@@ -509,8 +462,6 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 	return a, nil
 }
 
-// findHostsByName resolves a list_hosts name (alias, user@host, or hostname -
-// the same display name the command palette shows) to all matching DB rows.
 func findHostsByName(database *gorm.DB, name string) []db.Host {
 	var hosts []db.Host
 	if err := database.Order("alias, hostname").Find(&hosts).Error; err != nil {
@@ -525,10 +476,6 @@ func findHostsByName(database *gorm.DB, name string) []db.Host {
 	return out
 }
 
-// findFreshAITab returns the stream-id string of a tab created after the
-// before snapshot, matched by creation-time identity (immune to OSC
-// retitling): ssh = sshview host id, tmux = Tab.TmuxSession, local = a local
-// tab without a tmux session.
 func (a App) findFreshAITab(kind, arg string, before []string) string {
 	skip := make(map[string]bool, len(before))
 	for _, id := range before {
@@ -570,7 +517,6 @@ func (a App) aiTabInfos() []ai.TabInfo {
 		if m, ok := tab.Model.(*sshview.Model); ok {
 			info.ID = strconv.FormatUint(m.StreamID(), 10)
 		} else {
-			// Placeholder id; read/send on non-terminal tabs reports an error.
 			info.ID = fmt.Sprintf("tab-%d", i)
 		}
 		out = append(out, info)
@@ -594,12 +540,6 @@ func (a App) sshViewByAITabID(id string) *sshview.Model {
 	return nil
 }
 
-// handleAIToolSendKeysDone answers a send_keys request once the command
-// finished (the OSC 133;D count passed the snapshot taken at send time), the
-// max wait expired, or the request context was cancelled. The wait only
-// extends past the minimum while a command is actually in flight (133;C seen,
-// 133;D pending); a stale count from an earlier 133-capable shell or a shell
-// that never emits OSC 133 answers right after the minimum wait.
 func (a App) handleAIToolSendKeysDone(msg aiToolSendKeysDoneMsg) (App, tea.Cmd) {
 	req := msg.req
 	m := a.sshViewByAITabID(req.id)
@@ -618,10 +558,6 @@ func (a App) handleAIToolSendKeysDone(msg aiToolSendKeysDoneMsg) (App, tea.Cmd) 
 	return a, nil
 }
 
-// decodeSendKeys decodes escape sequences in an AI-provided keys string
-// before it is written to the pty: \\ -> \, \n -> LF, \r -> CR, \t -> TAB,
-// \xHH -> raw byte. Unknown escapes, incomplete hex and raw control bytes
-// pass through unchanged.
 func decodeSendKeys(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s
@@ -675,8 +611,6 @@ func hexVal(s string, i int) (byte, bool) {
 	return 0, false
 }
 
-// windowTranscript slices a tail-biased window out of the full transcript:
-// up to maxBytes ending skipFromEnd bytes before the tail.
 func windowTranscript(full string, maxBytes, skipFromEnd int) (string, int) {
 	total := len(full)
 	if maxBytes <= 0 {
@@ -702,7 +636,6 @@ func windowTranscript(full string, maxBytes, skipFromEnd int) (string, int) {
 	return full[start:end], total
 }
 
-// transcriptTail returns the last maxBytes of full, rune-aligned.
 func transcriptTail(full string, maxBytes int) string {
 	if len(full) <= maxBytes {
 		return full

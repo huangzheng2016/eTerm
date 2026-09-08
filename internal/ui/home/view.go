@@ -22,7 +22,6 @@ func (m Model) View() tea.View {
 
 	if m.mode == tagView {
 		if m.selectedTag == "" {
-			// Show tag picker list
 			if len(m.allTags) == 0 {
 				return tea.NewView(m.centeredEmptyHint(
 					"No tags found. Add tags to hosts via '"+homeBindingLabel(m.keys.EditHost.Help().Key, "e")+"' (edit).",
@@ -31,7 +30,6 @@ func (m Model) View() tea.View {
 			}
 			return tea.NewView(m.tagList.View())
 		}
-		// Show filtered host list with tag badge
 		badge := tagBadgeStyle.Render(fmt.Sprintf(" %s ", m.selectedTag))
 		hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render("  bksp:back  " + homeBindingLabel(m.keys.ToggleView.Help().Key, "t") + ":group view")
 		header := badge + hint
@@ -49,11 +47,10 @@ func (m Model) View() tea.View {
 				CenterBody: true,
 			}.Render())
 		}
-		// In search mode, show bubbles list (has search input UI)
 		if m.list.FilterState() != 0 {
 			return tea.NewView(header + "\n" + m.list.View())
 		}
-		gridH := m.height - 1 // subtract header line
+		gridH := m.height - 1
 		if gridH < cardOuterH {
 			gridH = cardOuterH
 		}
@@ -61,7 +58,6 @@ func (m Model) View() tea.View {
 		return tea.NewView(header + "\n" + renderGrid(hosts, m.gridCursor, gl, m.width, m.hostStatus, m.selectedHosts, m.gridStatusWords))
 	}
 
-	// Group view (default)
 	entries := m.gridEntries()
 	if len(entries) == 0 {
 		return tea.NewView(m.centeredEmptyHint(
@@ -70,7 +66,6 @@ func (m Model) View() tea.View {
 		))
 	}
 
-	// In search mode, show bubbles list (has search input UI)
 	if m.list.FilterState() != 0 {
 		return tea.NewView(m.list.View())
 	}
@@ -78,7 +73,6 @@ func (m Model) View() tea.View {
 	return tea.NewView(renderGridEntries(entries, m.gridCursor, m.gridLayout, m.width, m.hostStatus, m.selectedHosts, m.gridStatusWords))
 }
 
-// centeredEmptyHint adds an optional muted shortcut line under the primary text, then centers the block.
 func (m Model) centeredEmptyHint(primary, hint string) string {
 	if hint != "" {
 		return components.EmptyState(m.width, m.height, primary, hint)

@@ -31,23 +31,12 @@ type HostInfo struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Tags    string `json:"tags,omitempty"`
-	// ID is the database row id, so duplicate display names stay
-	// distinguishable in list_hosts output.
-	ID uint `json:"id"`
+	ID      uint   `json:"id"`
 }
 
-// Executor is implemented by the app layer. It performs the actual terminal
-// and daemon operations behind the agent's tools.
 type Executor interface {
 	ListTabs(ctx context.Context) ([]TabInfo, error)
-	// ReadTab returns a window of the tab's full transcript (scrollback +
-	// visible screen): up to maxBytes ending skipFromEnd bytes before the
-	// transcript tail, plus the total transcript size in bytes.
 	ReadTab(ctx context.Context, id string, maxBytes, skipFromEnd int) (text string, totalBytes int, err error)
-	// SendKeys decodes escape sequences in keys (\\ -> \, \n -> LF, \r -> CR,
-	// \t -> TAB, \xHH -> raw byte; unknown escapes and raw control bytes pass
-	// through unchanged), writes the result to the tab's pty stdin, waits
-	// waitMs, and returns the tab's visible-screen tail.
 	SendKeys(ctx context.Context, id string, keys string, waitMs int) (string, error)
 	ListDaemons(ctx context.Context) ([]DaemonInfo, error)
 	ListDaemonSessions(ctx context.Context, daemon string) ([]SessionInfo, error)
@@ -55,14 +44,11 @@ type Executor interface {
 	CreateSession(ctx context.Context, daemon, name string) error
 	RenameSession(ctx context.Context, daemon, oldName, newName string) error
 	KillSession(ctx context.Context, daemon, name string) error
-	// The open_* methods open a new terminal tab and return its tab id (as
-	// reported by ListTabs) once it exists.
 	OpenLocalTerminal(ctx context.Context) (tabID string, err error)
 	ListHosts(ctx context.Context) ([]HostInfo, error)
 	OpenSSH(ctx context.Context, host string) (tabID string, err error)
 	ListTmuxSessions(ctx context.Context) ([]SessionInfo, error)
 	OpenTmux(ctx context.Context, session string) (tabID string, err error)
-	// Notify emits a desktop notification (OSC 9) on the user's terminal.
 	Notify(ctx context.Context, text string) error
 }
 
@@ -187,16 +173,10 @@ type NotifyOutput struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Tool handlers report executor failures in the output struct instead of
-// returning a Go error: eino aborts the whole agent run on any tool error,
-// and a failed operation (e.g. unknown session) is recoverable.
 type toolBuilder struct {
 	exec Executor
 }
 
-// BuildTools builds the terminal tools; cron (when non-nil) adds the
-// cron_create/cron_list/cron_delete scheduled-wake tools, and daemons adds
-// the remote-daemon tools (pointless when no daemon is registered).
 func BuildTools(exec Executor, cron *CronScheduler, daemons bool) ([]tool.BaseTool, error) {
 	tb := &toolBuilder{exec: exec}
 

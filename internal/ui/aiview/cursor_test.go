@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// The chat view must report a real cursor at the textarea caret so the
-// terminal hardware cursor (and IME candidate window) tracks the input.
 func TestViewReportsInputCursor(t *testing.T) {
 	m := newTestModel(nil)
 	m.Init()
@@ -15,9 +13,6 @@ func TestViewReportsInputCursor(t *testing.T) {
 	if v.Cursor == nil {
 		t.Fatal("chat view missing cursor")
 	}
-	// Empty input: caret at textarea origin; body is the 1-row placeholder.
-	// x = border(1)+padding(1)+input border(1)+padding(1) = 4
-	// y = border(1)+title(1)+blank(1)+body(1)+status(1)+input border(1) = 6
 	if v.Cursor.X != 4 || v.Cursor.Y != 6 {
 		t.Fatalf("cursor = %d,%d want 4,6", v.Cursor.X, v.Cursor.Y)
 	}
@@ -26,15 +21,11 @@ func TestViewReportsInputCursor(t *testing.T) {
 	}
 }
 
-// CJK input wraps mid-box; the reported cursor must land on the wrapped
-// row/column, not the logical line (the reported misalignment bug).
 func TestViewCursorFollowsWrappedCJKCaret(t *testing.T) {
 	m := newTestModel(nil)
 	m.Init()
-	fillConversation(m) // body becomes the full-height viewport
+	fillConversation(m)
 
-	// 100 runes = 200 cells; input wrap width is cw-6 = 90, so the caret
-	// sits on wrapped row 2 at cell 20.
 	m.input.SetValue(strings.Repeat("你好", 50))
 
 	c := m.input.Cursor()
@@ -56,7 +47,6 @@ func TestViewCursorFollowsWrappedCJKCaret(t *testing.T) {
 	}
 }
 
-// Non-chat modes have no text input; they must not report a cursor.
 func TestViewOmitsCursorOutsideChat(t *testing.T) {
 	for _, md := range []mode{modeProviders, modeSessions, modeTasks} {
 		m := newTestModel(nil)

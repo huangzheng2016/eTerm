@@ -19,7 +19,6 @@ const (
 	FrameAck      FrameType = 0x23
 )
 
-// ProtocolVersion is the relay wire version. Peers without a version are v1.
 const ProtocolVersion = 2
 
 const (
@@ -34,12 +33,8 @@ const (
 
 const CloseDaemonDisconnected = "daemon disconnected"
 
-// CloseClientDisconnected is the FrameClose payload syncd sends to the daemon
-// when a client connection drops; the daemon keeps the PTY alive for resume.
 const CloseClientDisconnected = "client disconnected"
 
-// CloseSessionTakenOver is the FrameClose payload the daemon sends on a named
-// session's old stream id when a new attach takes the session over.
 const CloseSessionTakenOver = "session taken over"
 
 type TmuxSessionInfo struct {
@@ -121,9 +116,6 @@ func ParseResize(b []byte) (int, int, error) {
 	return int(binary.BigEndian.Uint16(b[0:2])), int(binary.BigEndian.Uint16(b[2:4])), nil
 }
 
-// In protocol v2, daemon -> client FrameData payloads are prefixed with an
-// 8-byte big-endian sequence: the absolute byte offset of the data in the
-// stream. Client -> daemon FrameData payloads are raw terminal input.
 const dataSeqLen = 8
 
 func DataPayload(seq uint64, data []byte) []byte {
@@ -140,8 +132,6 @@ func ParseData(b []byte) (uint64, []byte, error) {
 	return binary.BigEndian.Uint64(b[:dataSeqLen]), b[dataSeqLen:], nil
 }
 
-// FrameAck payloads are the 8-byte big-endian cumulative offset the client
-// has consumed (the next sequence it expects).
 func AckPayload(ack uint64) []byte {
 	out := make([]byte, 8)
 	binary.BigEndian.PutUint64(out, ack)

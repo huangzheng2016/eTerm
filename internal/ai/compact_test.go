@@ -11,8 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// summaryModel records the last Generate request and replies with a fixed
-// summary, or fails with a fixed error.
 type summaryModel struct {
 	summary string
 	err     error
@@ -64,7 +62,6 @@ func TestCompactSummarizesAndKeepsRecentTurns(t *testing.T) {
 	if !strings.Contains(m.input[0].Content, "decisions") || !strings.Contains(m.input[0].Content, "paths") {
 		t.Fatalf("system prompt must demand decisions and paths, got %q", m.input[0].Content)
 	}
-	// The transcript covers the dropped turns only, not the kept tail.
 	if !strings.Contains(m.input[1].Content, "question 1") || !strings.Contains(m.input[1].Content, "answer 2") {
 		t.Fatalf("transcript must cover the early turns, got %q", m.input[1].Content)
 	}

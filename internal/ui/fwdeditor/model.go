@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	hostField      = 0
-	directionField = 1
-	localPortField = 2
+	hostField       = 0
+	directionField  = 1
+	localPortField  = 2
 	remoteHostField = 3
 	remotePortField = 4
 )
 
-const inputCount = 3 // localPort, remoteHost, remotePort
+const inputCount = 3
 
 var directionOptions = []string{"local", "remote", "dynamic"}
 var directionDisplay = []string{"Local (-L)", "Remote (-R)", "Dynamic (-D)"}
@@ -37,13 +37,11 @@ type Model struct {
 	width        int
 	height       int
 	err          string
-	ruleID       uint // 0 = new, >0 = editing
+	ruleID       uint
 	hostOptions  []db.Host
 	hostIdx      int
 	directionIdx int
 }
-
-// PLACEHOLDER_MORE
 
 func (m Model) visibleFields() []int {
 	fields := []int{hostField, directionField, localPortField}
@@ -111,8 +109,6 @@ func (m *Model) SetSize(w, h int) {
 }
 
 func (m *Model) syncInputWidths() {
-	// formStyle has Width(50) and Padding(1,3), so inner content is ~42 chars.
-	// Label is 14 chars wide. Input gets the rest.
 	iw := 24
 	if m.width > 0 && m.width < 50 {
 		iw = max(10, m.width-26)

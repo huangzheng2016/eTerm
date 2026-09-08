@@ -13,7 +13,6 @@ import (
 
 const hostKeyProbeTimeout = 10 * time.Second
 
-// hostFingerprintDialBlock returns a message to interrupt the dial (trust dialog or probe error), or nil to continue.
 func hostFingerprintDialBlock(database *gorm.DB, hostID uint, hostname string, port int, connType string, streamID uint64, forwardRuleID uint) tea.Msg {
 	if internalssh.NeedsFingerprint(database, hostname, port) {
 		algo, fp, err := internalssh.ProbeHostKey(hostname, port, hostKeyProbeTimeout)

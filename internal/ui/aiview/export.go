@@ -11,8 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// copyLastReply (/copy) puts the newest assistant reply on the clipboard as
-// plain text.
 func (m *Model) copyLastReply() tea.Cmd {
 	for i := len(m.blocks) - 1; i >= 0; i-- {
 		if m.blocks[i].kind == blockAssistant && m.blocks[i].text != "" {
@@ -26,8 +24,6 @@ func (m *Model) copyLastReply() tea.Cmd {
 	return m.slashError("no assistant reply to copy")
 }
 
-// exportSession (/export) writes the conversation as Markdown into
-// ~/Downloads (falling back to the home directory) and toasts the path.
 func (m *Model) exportSession() tea.Cmd {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -48,7 +44,6 @@ func (m *Model) exportSession() tea.Cmd {
 	return m.setToast("Exported to " + shown)
 }
 
-// exportMarkdown renders blocks in one plain format per kind.
 func (m *Model) exportMarkdown() string {
 	var sb strings.Builder
 	sb.WriteString("# eTerm AI session\n")
@@ -81,8 +76,6 @@ type compactDoneMsg struct {
 	err   error
 }
 
-// compactSession (/compact) runs agent compaction off the UI goroutine; the
-// result lands as a system block via compactDoneMsg.
 func (m *Model) compactSession() tea.Cmd {
 	return func() tea.Msg {
 		stats, err := m.runner.Compact(context.Background())

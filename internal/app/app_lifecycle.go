@@ -57,7 +57,6 @@ func (a App) runSync() tea.Cmd {
 			return types.SyncResultMsg{Err: fmt.Errorf("merge: %w", err)}
 		}
 
-		// Collect only records modified since last sync
 		lastSyncAt := time.Time{}
 		if ts, err := db.GetSetting(database, "sync_last_sync_at"); err == nil && ts != "" {
 			lastSyncAt, _ = time.Parse(time.RFC3339, ts)
@@ -100,7 +99,7 @@ func syncTickCmd(database *gorm.DB) tea.Cmd {
 	interval, _ := db.GetSetting(database, "sync_interval")
 	sec, _ := strconv.Atoi(interval)
 	if sec <= 0 {
-		sec = 300 // match LoadConfig default for empty/invalid sync_interval
+		sec = 300
 	}
 	enabled, _ := db.GetSetting(database, "sync_enabled")
 	if enabled != "true" {
@@ -231,7 +230,6 @@ func autoLockTick() tea.Cmd {
 }
 
 func (a App) quitWithCheck() (tea.Model, tea.Cmd) {
-	// Count active SSH sessions (SFTP doesn't need confirmation)
 	var sshCount int
 	for _, tab := range a.tabs {
 		if isTerminalTab(tab.Type) {
@@ -263,7 +261,6 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
-	// Handle pending quit
 	if a.pendingQuit {
 		a.pendingQuit = false
 		if confirmed {
@@ -274,7 +271,6 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
-	// Handle pending delete
 	if a.pendingDeleteID > 0 {
 		id := a.pendingDeleteID
 		a.pendingDeleteID = 0
@@ -284,7 +280,6 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
-	// Handle pending snippet delete
 	if a.pendingSnippetDeleteID > 0 {
 		id := a.pendingSnippetDeleteID
 		a.pendingSnippetDeleteID = 0
@@ -298,7 +293,6 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
-	// Handle pending forward rule delete
 	if a.pendingFwdDeleteID > 0 {
 		id := a.pendingFwdDeleteID
 		a.pendingFwdDeleteID = 0
@@ -330,7 +324,6 @@ func (a *App) processConfirmResult() tea.Cmd {
 		return nil
 	}
 
-	// Handle pending fingerprint
 	if a.pendingFingerprint != nil {
 		fp := a.pendingFingerprint
 		a.pendingFingerprint = nil

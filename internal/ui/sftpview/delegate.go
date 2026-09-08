@@ -23,14 +23,12 @@ type fileDelegate struct {
 
 func newFileDelegate() fileDelegate {
 	st := list.NewDefaultItemStyles(true)
-	// Default SelectedTitle adds a left border (+1 cell). That makes the row wider than
-	// list width and the terminal wraps the tail (e.g. time) to the next line.
 	st.SelectedTitle = st.SelectedTitle.UnsetBorderStyle().UnsetBorderForeground().Padding(0, 0, 0, 2)
 	st.SelectedDesc = st.SelectedDesc.UnsetBorderStyle().UnsetBorderForeground()
 	return fileDelegate{styles: st}
 }
 
-func (fileDelegate) Height() int   { return 1 }
+func (fileDelegate) Height() int  { return 1 }
 func (fileDelegate) Spacing() int { return 0 }
 
 func (fileDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
@@ -110,8 +108,6 @@ func padRightVisual(s string, w int) string {
 	return s + strings.Repeat(" ", w-sw)
 }
 
-// fitFileName fits the file name to a fixed cell budget. Unselected: head + ellipsis.
-// Selected: ellipsis + tail (so the end of long names stays visible).
 func fitFileName(name string, budget int, preferTail bool) string {
 	if budget <= 0 {
 		return ""

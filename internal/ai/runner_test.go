@@ -12,8 +12,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// fakeModel streams a tool call on the first call and a text answer on the
-// second, mimicking one ReAct iteration.
 type fakeModel struct {
 	calls int
 }
@@ -38,7 +36,7 @@ func (f *fakeModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 }
 
 type fakeExecutor struct {
-	Executor // nil embedded; only ListTabs is exercised
+	Executor
 }
 
 func (fakeExecutor) ListTabs(ctx context.Context) ([]TabInfo, error) {
@@ -86,7 +84,6 @@ func TestAgentRunEmitsEventsAndHistory(t *testing.T) {
 	if got := joinStrings(texts); got != "I see one tab." {
 		t.Fatalf("text deltas: %q", got)
 	}
-	// user + assistant(tool call) + tool result + assistant(final)
 	if len(a.history) != 4 {
 		t.Fatalf("history: got %d messages, want 4", len(a.history))
 	}
@@ -117,15 +114,12 @@ func TestDequeueLast(t *testing.T) {
 		t.Fatal("queue must be empty after popping all")
 	}
 
-	// Agents without a steer queue (sub-agents) must not panic.
 	nilAgent := &Agent{}
 	if _, ok := nilAgent.DequeueLast(); ok {
 		t.Fatal("nil queue must report ok=false")
 	}
 }
 
-// A recalled message must not be injected by the steer middleware's
-// step-boundary drain.
 func TestDequeueLastPreventsInjection(t *testing.T) {
 	ctx := context.Background()
 	m := &steerToolModel{release: make(chan struct{}), entered: make(chan struct{})}
@@ -133,7 +127,7 @@ func TestDequeueLastPreventsInjection(t *testing.T) {
 	a := newSteerAgent(t, m, queue)
 
 	done := drainRun(a, ctx, "list tabs")
-	<-m.entered // first model call in flight, turn is running
+	<-m.entered
 	a.Enqueue("keep")
 	a.Enqueue("recall me")
 	text, ok := a.DequeueLast()
@@ -159,10 +153,6 @@ func joinStrings(parts []string) string {
 	return s
 }
 
-// Regression: consumeStream must route sends through the ctx-aware path.
-// With a full event buffer (consumer stopped draining) and a canceled ctx,
-// a blocking send would wedge the run goroutine holding a.mu forever
-// (Esc during streaming in the TUI).
 func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 	sr, sw := schema.Pipe[*schema.Message](0)
 	go func() {
@@ -175,7 +165,7 @@ func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 	}()
 	mo := &adk.MessageVariant{IsStreaming: true, MessageStream: sr, Role: schema.Assistant}
 
-	ch := make(chan Event, 64) // deliberately never drained
+	ch := make(chan Event, 64)
 	ctx, cancel := context.WithCancel(context.Background())
 	send := func(ev Event) {
 		select {
@@ -189,7 +179,7 @@ func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 		consumeStream(mo, send)
 		close(done)
 	}()
-	time.Sleep(100 * time.Millisecond) // by now the buffer is full and send blocks
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 	select {
 	case <-done:
@@ -198,7 +188,6 @@ func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 	}
 }
 
-// echoModel answers every turn with the same 1000-char text.
 type echoModel struct{}
 
 func (m *echoModel) BindTools(tools []*schema.ToolInfo) error { return nil }
@@ -213,8 +202,6 @@ func (m *echoModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 	}), nil
 }
 
-// Regression: history must stay bounded across many turns, evicting oldest
-// whole turns (never splitting a tool-call/result pair).
 func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 	ctx := context.Background()
 	tools, err := BuildTools(fakeExecutor{}, nil, false)
@@ -225,7 +212,6 @@ func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One turn costs ~252 estimated tokens (1000 ASCII chars + user text).
 	a := &Agent{agent: adkAgent, historyBudget: 1000}
 
 	for i := 0; i < 10; i++ {
@@ -359,7 +345,7 @@ func TestUndoLastTurn(t *testing.T) {
 	if len(a.history) != 0 {
 		t.Fatalf("undo of last turn must empty history, got %d", len(a.history))
 	}
-	a.UndoLastTurn() // no-op on empty history
+	a.UndoLastTurn()
 }
 
 func TestTrimHistoryKeepsNewestTurnOverBudget(t *testing.T) {
@@ -407,8 +393,6 @@ func TestUsageReflectsHistory(t *testing.T) {
 	}
 }
 
-// Usage must not take the run mutex: a run blocked in the model still lets
-// Usage report the history written so far.
 func TestUsageDuringRunDoesNotBlock(t *testing.T) {
 	ctx := context.Background()
 	m := &gatedModel{release: make(chan struct{}), entered: make(chan struct{})}
@@ -428,7 +412,7 @@ func TestUsageDuringRunDoesNotBlock(t *testing.T) {
 		}
 		close(runDone)
 	}()
-	<-m.entered // run in flight, model blocked
+	<-m.entered
 
 	usageDone := make(chan struct{})
 	go func() {

@@ -1,5 +1,3 @@
-// Package vt provides a virtual terminal implementation.
-// SKIP: Fix typecheck errors - function signature mismatches and undefined types
 package vt
 
 import (
@@ -11,9 +9,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// handleOsc handles an OSC escape sequence.
 func (e *Emulator) handleOsc(cmd int, data []byte) {
-	e.flushGrapheme() // Flush any pending grapheme before handling OSC sequences.
+	e.flushGrapheme()
 	if !e.handlers.handleOsc(cmd, data) {
 		e.logf("unhandled sequence: OSC %q", data)
 	}
@@ -22,11 +19,10 @@ func (e *Emulator) handleOsc(cmd int, data []byte) {
 func (e *Emulator) handleTitle(cmd int, data []byte) {
 	parts := bytes.Split(data, []byte{';'})
 	if len(parts) != 2 {
-		// Invalid, ignore
 		return
 	}
 	switch cmd {
-	case 0: // Set window title and icon name
+	case 0:
 		name := string(parts[1])
 		e.iconName, e.title = name, name
 		if e.cb.Title != nil {
@@ -35,13 +31,13 @@ func (e *Emulator) handleTitle(cmd int, data []byte) {
 		if e.cb.IconName != nil {
 			e.cb.IconName(name)
 		}
-	case 1: // Set icon name
+	case 1:
 		name := string(parts[1])
 		e.iconName = name
 		if e.cb.IconName != nil {
 			e.cb.IconName(name)
 		}
-	case 2: // Set window title
+	case 2:
 		name := string(parts[1])
 		e.title = name
 		if e.cb.Title != nil {
@@ -53,46 +49,44 @@ func (e *Emulator) handleTitle(cmd int, data []byte) {
 func (e *Emulator) handleDefaultColor(cmd int, data []byte) {
 	if cmd != 10 && cmd != 11 && cmd != 12 &&
 		cmd != 110 && cmd != 111 && cmd != 112 {
-		// Invalid, ignore
 		return
 	}
 
 	parts := bytes.Split(data, []byte{';'})
 	if len(parts) == 0 {
-		// Invalid, ignore
 		return
 	}
 
 	cb := func(c color.Color) {
 		switch cmd {
-		case 10, 110: // Foreground color
+		case 10, 110:
 			e.SetForegroundColor(c)
-		case 11, 111: // Background color
+		case 11, 111:
 			e.SetBackgroundColor(c)
-		case 12, 112: // Cursor color
+		case 12, 112:
 			e.SetCursorColor(c)
 		}
 	}
 
 	switch len(parts) {
-	case 1: // Reset color
+	case 1:
 		cb(nil)
-	case 2: // Set/Query color
+	case 2:
 		arg := string(parts[1])
 		if arg == "?" {
 			var xrgb ansi.XRGBColor
 			switch cmd {
-			case 10: // Query foreground color
+			case 10:
 				xrgb.Color = e.ForegroundColor()
 				if xrgb.Color != nil {
 					io.WriteString(e.pw, ansi.SetForegroundColor(xrgb.String())) //nolint:errcheck,gosec
 				}
-			case 11: // Query background color
+			case 11:
 				xrgb.Color = e.BackgroundColor()
 				if xrgb.Color != nil {
 					io.WriteString(e.pw, ansi.SetBackgroundColor(xrgb.String())) //nolint:errcheck,gosec
 				}
-			case 12: // Query cursor color
+			case 12:
 				xrgb.Color = e.CursorColor()
 				if xrgb.Color != nil {
 					io.WriteString(e.pw, ansi.SetCursorColor(xrgb.String())) //nolint:errcheck,gosec
@@ -106,14 +100,11 @@ func (e *Emulator) handleDefaultColor(cmd int, data []byte) {
 
 func (e *Emulator) handleWorkingDirectory(cmd int, data []byte) {
 	if cmd != 7 {
-		// Invalid, ignore
 		return
 	}
 
-	// The data is the working directory path.
 	parts := bytes.Split(data, []byte{';'})
 	if len(parts) != 2 {
-		// Invalid, ignore
 		return
 	}
 
@@ -125,16 +116,13 @@ func (e *Emulator) handleWorkingDirectory(cmd int, data []byte) {
 	}
 }
 
-// handleNotification handles OSC 9 iTerm2-style desktop notifications.
 func (e *Emulator) handleNotification(cmd int, data []byte) {
 	if cmd != 9 {
-		// Invalid, ignore
 		return
 	}
 
 	parts := bytes.SplitN(data, []byte{';'}, 2)
 	if len(parts) != 2 || len(parts[1]) == 0 {
-		// Invalid, ignore
 		return
 	}
 
@@ -143,18 +131,13 @@ func (e *Emulator) handleNotification(cmd int, data []byte) {
 	}
 }
 
-// handleUrxvtNotify handles OSC 777 urxvt notifications. The payload
-// "777;notify;title;body" is folded into the OSC 9 notification flow with
-// the title and body joined.
 func (e *Emulator) handleUrxvtNotify(cmd int, data []byte) {
 	if cmd != 777 {
-		// Invalid, ignore
 		return
 	}
 
 	parts := bytes.SplitN(data, []byte{';'}, 4)
 	if len(parts) != 4 || string(parts[1]) != "notify" {
-		// Invalid, ignore
 		return
 	}
 
@@ -166,7 +149,6 @@ func (e *Emulator) handleUrxvtNotify(cmd int, data []byte) {
 		text += body
 	}
 	if text == "" {
-		// Invalid, ignore
 		return
 	}
 
@@ -175,35 +157,30 @@ func (e *Emulator) handleUrxvtNotify(cmd int, data []byte) {
 	}
 }
 
-// handleCommandSequence handles OSC 133 shell command lifecycle markers.
-// A = prompt start, B = input start, C = command execution start,
-// D;<exitcode> = command finished.
 func (e *Emulator) handleCommandSequence(cmd int, data []byte) {
 	if cmd != 133 {
-		// Invalid, ignore
 		return
 	}
 
 	parts := bytes.Split(data, []byte{';'})
 	if len(parts) < 2 || len(parts[1]) == 0 {
-		// Invalid, ignore
 		return
 	}
 
 	switch parts[1][0] {
-	case 'A': // Prompt starts
+	case 'A':
 		if e.cb.PromptStart != nil {
 			e.cb.PromptStart()
 		}
-	case 'B': // Input starts
+	case 'B':
 		if e.cb.InputStart != nil {
 			e.cb.InputStart()
 		}
-	case 'C': // Command execution starts
+	case 'C':
 		if e.cb.CommandStart != nil {
 			e.cb.CommandStart()
 		}
-	case 'D': // Command finished
+	case 'D':
 		exitCode := -1
 		if len(parts) >= 3 {
 			if n, err := strconv.Atoi(string(parts[2])); err == nil {
@@ -219,7 +196,6 @@ func (e *Emulator) handleCommandSequence(cmd int, data []byte) {
 func (e *Emulator) handleHyperlink(cmd int, data []byte) {
 	parts := bytes.Split(data, []byte{';'})
 	if len(parts) != 3 || cmd != 8 {
-		// Invalid, ignore
 		return
 	}
 

@@ -9,18 +9,14 @@ type githubRelease struct {
 	HTMLURL string `json:"html_url"`
 }
 
-// CheckLatestRelease queries GitHub for the latest release of eTerm (no DB throttle).
-// Returns the tag and URL if a newer version is available, or empty strings if up-to-date.
 func CheckLatestRelease() (tag, url string, err error) {
 	t, u, _, err := fetchLatestRelease()
 	return t, u, err
 }
 
-// isNewer reports whether remote version is newer than local.
-// Compares semver-style: v1.2.3 > v1.2.2. Falls back to string comparison.
 func isNewer(remote, local string) bool {
 	if local == "dev" || local == "" {
-		return false // dev builds don't show update notices
+		return false
 	}
 	rv := normalizeSemver(remote)
 	lv := normalizeSemver(local)
@@ -38,7 +34,6 @@ func isNewer(remote, local string) bool {
 	return remote > local
 }
 
-// normalizeSemver parses "v1.2.3" into [1, 2, 3].
 func normalizeSemver(s string) []int {
 	s = strings.TrimPrefix(s, "v")
 	parts := strings.SplitN(s, ".", 3)
@@ -47,7 +42,6 @@ func normalizeSemver(s string) []int {
 	}
 	nums := make([]int, 3)
 	for i, p := range parts {
-		// Strip pre-release suffix (e.g., "3-beta")
 		if dash := strings.IndexByte(p, '-'); dash >= 0 {
 			p = p[:dash]
 		}

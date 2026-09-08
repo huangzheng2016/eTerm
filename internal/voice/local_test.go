@@ -20,8 +20,6 @@ import (
 	"time"
 )
 
-// TestHelperProcess acts as a fake voicehelper subprocess when spawned via
-// the wrapper script from fakeHelperWrapper.
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_FAKE_HELPER") != "1" {
 		return
@@ -79,9 +77,6 @@ func fakeHelperMain() {
 	}
 }
 
-// fakeHelperWrapper writes a shell script that runs this test binary as the
-// fake helper, and returns its path. GO_FAKE_HELPER is set by the script so
-// the parent test process never sees it.
 func fakeHelperWrapper(t *testing.T) string {
 	t.Helper()
 	wrapper := filepath.Join(t.TempDir(), "fakehelper")
@@ -127,8 +122,6 @@ func TestLocalEngineRoundTrip(t *testing.T) {
 
 	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventState && ev.State == StateListening })
 
-	// a zero no_speech_timeout is transmitted too: it disables the
-	// helper-side no-speech cancel rather than keeping the helper default
 	if err := eng.SetVAD(VADParams{Threshold: 0.7}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +144,6 @@ func TestLocalEngineRoundTrip(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// drain buffered events; the channel must end up closed
 	deadline := time.After(5 * time.Second)
 	for {
 		select {
@@ -188,7 +180,6 @@ func TestLocalEngineRestartOnCrash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// first helper crashes on start; engine restarts and re-enters listening
 	waitEvent(t, eng, func(ev Event) bool {
 		return ev.Type == EventError && strings.Contains(ev.Msg, "restarted")
 	})
@@ -210,7 +201,6 @@ func TestLocalEngineStopAfterCrashGiveUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// every spawn crashes on start; engine exhausts its restart budget
 	waitEvent(t, eng, func(ev Event) bool {
 		return ev.Type == EventError && strings.Contains(ev.Msg, "giving up")
 	})
@@ -285,7 +275,6 @@ func TestEnsureHelperBinaryDownload(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Fatalf("binary not executable: %v", info.Mode())
 	}
-	// dylibs must land next to the binary (@executable_path)
 	dylib, err := os.ReadFile(filepath.Join(filepath.Dir(path), "libsherpa-fake.dylib"))
 	if err != nil || string(dylib) != "dylib-bytes" {
 		t.Fatalf("dylib: %v %q", err, dylib)
@@ -294,13 +283,11 @@ func TestEnsureHelperBinaryDownload(t *testing.T) {
 		t.Fatalf("progress callbacks: %v", pcts)
 	}
 
-	// cached: second call must not hit the server
 	path2, err := ensureHelperBinary(context.Background(), LocalConfig{CacheDir: cacheDir, DownloadURL: "http://127.0.0.1:1/unreachable"})
 	if err != nil || path2 != path {
 		t.Fatalf("cached lookup: %v %s", err, path2)
 	}
 
-	// wrong sha256 must fail and leave no binary behind
 	badDir := t.TempDir()
 	_, err = ensureHelperBinary(context.Background(), LocalConfig{
 		CacheDir:    badDir,
@@ -333,7 +320,6 @@ func TestEnsureHelperBinaryMissingExplicitPath(t *testing.T) {
 	}
 }
 
-// set_model goes out on start (stored beforehand) and live (after start).
 func TestLocalEngineSetModel(t *testing.T) {
 	eng := NewLocalEngine(LocalConfig{BinPath: fakeHelperWrapper(t)})
 	defer eng.Close()

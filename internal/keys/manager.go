@@ -120,9 +120,6 @@ func ImportKey(database *gorm.DB, masterKey *security.MasterKeyManager, name, pr
 	return importPrivateKeyRecord(database, masterKey, name, pemData, storageMode, privatePath, detectCertificatePath(privatePath, ""))
 }
 
-// importPrivateKeyRecord persists an imported key. When storageMode is "file" and
-// sourcePathWhenFile is non-empty, that path is stored as the key location (existing file).
-// When sourcePathWhenFile is empty with "file" mode, PEM is written under ~/.ssh (same as generate).
 func importPrivateKeyRecord(database *gorm.DB, masterKey *security.MasterKeyManager, name string, pemData []byte, storageMode, sourcePathWhenFile, certificatePath string) (*db.SSHKey, error) {
 	signer, err := ssh.ParsePrivateKey(pemData)
 	if err != nil {

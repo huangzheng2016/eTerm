@@ -9,8 +9,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// StartDynamicForward listens on 127.0.0.1:localPort and serves SOCKS5 CONNECT (RFC 1928)
-// over the SSH connection (outbound dials use client.Dial).
 func StartDynamicForward(client *ssh.Client, localPort int) (*PortForwardCloser, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
 	if err != nil {
@@ -42,7 +40,6 @@ func handleSOCKSConn(client *ssh.Client, c net.Conn, done <-chan struct{}) {
 	setNoDelay(c)
 	br := bufio.NewReader(c)
 
-	// Negotiation: VER, NMETHODS, METHODS...
 	var hdr [2]byte
 	if _, err := io.ReadFull(br, hdr[:]); err != nil {
 		return
@@ -55,16 +52,15 @@ func handleSOCKSConn(client *ssh.Client, c net.Conn, done <-chan struct{}) {
 	if _, err := io.ReadFull(br, methods); err != nil {
 		return
 	}
-	if _, err := c.Write([]byte{5, 0}); err != nil { // no auth
+	if _, err := c.Write([]byte{5, 0}); err != nil {
 		return
 	}
 
-	// Request: VER CMD RSV ATYP ...
 	var reqHdr [4]byte
 	if _, err := io.ReadFull(br, reqHdr[:]); err != nil {
 		return
 	}
-	if reqHdr[0] != 5 || reqHdr[1] != 1 { // CONNECT only
+	if reqHdr[0] != 5 || reqHdr[1] != 1 {
 		_, _ = c.Write([]byte{5, 7, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
@@ -94,7 +90,7 @@ func handleSOCKSConn(client *ssh.Client, c net.Conn, done <-chan struct{}) {
 		}
 		host = net.IP(ip[:]).String()
 	default:
-		_, _ = c.Write([]byte{5, 8, 0, 1, 0, 0, 0, 0, 0, 0}) // address not supported
+		_, _ = c.Write([]byte{5, 8, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
 	var portBuf [2]byte
@@ -106,16 +102,14 @@ func handleSOCKSConn(client *ssh.Client, c net.Conn, done <-chan struct{}) {
 
 	remote, err := client.Dial("tcp", addr)
 	if err != nil {
-		_, _ = c.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0}) // connection refused / failed
+		_, _ = c.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
 	defer remote.Close()
 
-	// success, bind 0.0.0.0:0
 	if _, err := c.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
 		return
 	}
-	// Wrap so copyBidi reads any bytes already buffered by br.
 	bc := &bufferedConn{Conn: c, r: br}
 	copyBidi(bc, remote, done)
 }

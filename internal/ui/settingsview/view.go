@@ -21,7 +21,7 @@ var (
 
 type scrollLine struct {
 	text       string
-	logicalIdx int // -1 category/spacer; else matches m.cursor when selected
+	logicalIdx int
 }
 
 func prefToggleLine(label string, on bool, selected bool) string {

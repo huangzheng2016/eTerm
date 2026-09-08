@@ -15,10 +15,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
-// Named daemon-hosted shell sessions: a tmux substitute for platforms where
-// no tmux binary is available (e.g. Windows). Sessions are plain local shells
-// owned by the daemon; they live until killed or until the daemon exits.
-
 const maxDaemonSessions = 32
 
 type namedSession struct {
@@ -49,8 +45,6 @@ func (m *sessionManager) namedCount() int {
 	return len(m.named)
 }
 
-// addNamed registers a new named session atomically, enforcing
-// maxDaemonSessions; false means the limit is reached.
 func (m *sessionManager) addNamed(name string, streamID uint32, sr *streamRelay, createdAt time.Time) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -62,9 +56,6 @@ func (m *sessionManager) addNamed(name string, streamID uint32, sr *streamRelay,
 	return true
 }
 
-// rekeyNamed atomically moves a named session's stream onto newStreamID.
-// existed is false when the name is unknown; a nil stream with existed true
-// means the session vanished and its stale entry was dropped.
 func (m *sessionManager) rekeyNamed(name string, newStreamID uint32) (sr *streamRelay, existed bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -83,7 +74,6 @@ func (m *sessionManager) rekeyNamed(name string, newStreamID uint32) (sr *stream
 	return sr, true
 }
 
-// removeNamed deletes a named entry and its stream, returning the stream.
 func (m *sessionManager) removeNamed(name string) *streamRelay {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -97,8 +87,6 @@ func (m *sessionManager) removeNamed(name string) *streamRelay {
 	return sr
 }
 
-// renameNamed retitles a session; false when oldName is unknown or newName
-// is already taken.
 func (m *sessionManager) renameNamed(oldName, newName string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -126,7 +114,6 @@ func (m *sessionManager) isPersistent(streamID uint32) bool {
 	return false
 }
 
-// namedList reports daemon-hosted sessions in the tmux list shape.
 func (m *sessionManager) namedList() []types.TmuxSession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -145,7 +132,6 @@ func (m *sessionManager) namedList() []types.TmuxSession {
 	return out
 }
 
-// daemonSessionList handles TargetTmuxList without tmux.
 func daemonSessionList(mgr *sessionManager, sender *frameSender, streamID uint32) {
 	payload, _ := json.Marshal(mgr.namedList())
 	if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID, Payload: payload}) == nil {
@@ -153,8 +139,6 @@ func daemonSessionList(mgr *sessionManager, sender *frameSender, streamID uint32
 	}
 }
 
-// daemonSessionNew handles TargetTmuxNew without tmux: start a persistent
-// local shell and answer with its generated name.
 func daemonSessionNew(rt *runtimeConfig, mgr *sessionManager, sender *frameSender, streamID uint32, rows, cols int, streamCtx context.Context) {
 	openErr := func(err error) {
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: streamID, Payload: []byte(err.Error())})
@@ -195,19 +179,12 @@ func daemonSessionNew(rt *runtimeConfig, mgr *sessionManager, sender *frameSende
 	go sr.pump(streamCtx, streamID, mgr)
 }
 
-// daemonSessionAttach handles TargetTmuxAttach without tmux: move the named
-// session's stream onto this connection and replay retained output. attachMu
-// makes the rekey and the rewind atomic against a second attach or a kill,
-// so the stream can never be split across two ids; a later attach wins.
 func daemonSessionAttach(mgr *sessionManager, sender *frameSender, streamID uint32, name string, resumeFromSeq uint64) {
 	openErr := func(err error) {
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: streamID, Payload: []byte(err.Error())})
 	}
 	mgr.attachMu.Lock()
 	defer mgr.attachMu.Unlock()
-	// A previous client may still hold the old stream id; close it so that
-	// client drops cleanly instead of hanging on an id that goes silent.
-	// A failed send must not block the attach.
 	var oldStreamID uint32
 	if ns := mgr.namedGet(name); ns != nil {
 		oldStreamID = ns.streamID
@@ -230,8 +207,6 @@ func daemonSessionAttach(mgr *sessionManager, sender *frameSender, streamID uint
 	}
 }
 
-// daemonSessionKill handles TargetTmuxKill without tmux. attachMu keeps a
-// kill from landing between another attach's rekey and rewind.
 func daemonSessionKill(mgr *sessionManager, sender *frameSender, streamID uint32, name string) {
 	mgr.attachMu.Lock()
 	sr := mgr.removeNamed(name)
@@ -245,7 +220,6 @@ func daemonSessionKill(mgr *sessionManager, sender *frameSender, streamID uint32
 	}
 }
 
-// daemonSessionRename handles TargetTmuxRename without tmux.
 func daemonSessionRename(mgr *sessionManager, sender *frameSender, streamID uint32, oldName, newName string) {
 	if !mgr.renameNamed(oldName, newName) {
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: streamID, Payload: []byte("cannot rename session")})

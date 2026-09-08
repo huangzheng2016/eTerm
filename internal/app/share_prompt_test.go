@@ -32,7 +32,6 @@ func TestRemoteShareMsgOpensPromptWithDefaultHours(t *testing.T) {
 		t.Fatal("expected blink command")
 	}
 
-	// first enter moves focus to name field, second enter submits
 	next, _ = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	a = next.(App)
 	if a.sharePrompt == nil {

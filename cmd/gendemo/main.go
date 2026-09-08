@@ -1,6 +1,3 @@
-// Command gendemo writes a SQLite file with realistic sample data for UI testing.
-//
-//	go run ./cmd/gendemo -o demo.db
 package main
 
 import (
@@ -296,7 +293,6 @@ func main() {
 	}
 
 	extraHosts := []db.Host{
-		// production (via prod bastion)
 		{Alias: "prod-web-01", Hostname: "10.0.12.50", Port: 22, Username: "deploy", AuthMethod: "key", KeyID: &ciID, JumpHostID: &bJump, Group: "production", Tags: "nginx,k8s", Description: "Ingress pool node az-1a."},
 		{Alias: "prod-web-02", Hostname: "10.0.12.51", Port: 22, Username: "deploy", AuthMethod: "key", KeyID: &ciID, JumpHostID: &bJump, Group: "production", Tags: "nginx,k8s", Description: "Ingress pool node az-1b."},
 		{Alias: "prod-worker-batch", Hostname: "10.0.14.20", Port: 22, Username: "batch", AuthMethod: "key", KeyID: &ciID, JumpHostID: &bJump, Group: "production", Tags: "celery,sidekiq", Description: "Queue workers; autoscale 2–12."},
@@ -306,12 +302,10 @@ func main() {
 		{Alias: "obs-loki", Hostname: "10.0.18.41", Port: 22, Username: "ubuntu", AuthMethod: "key", KeyID: &kwID, JumpHostID: &bJump, Group: "production", Tags: "loki,logs", Description: "Log retention 14d hot, 90d cold."},
 		{Alias: "clickhouse-olap", Hostname: "10.0.19.7", Port: 22, Username: "clickhouse", AuthMethod: "key", KeyID: &legID, JumpHostID: &bJump, Group: "production", Tags: "clickhouse,analytics", Description: "Product analytics; read-only analysts."},
 		{Alias: "prod-sftp-bridge", Hostname: "10.0.22.2", Port: 22, Username: "sftp", AuthMethod: "key", KeyID: &ciID, JumpHostID: &bJump, Group: "production", Tags: "sftp,partner", Description: "Inbound file drops from finance partners."},
-		// staging (via stg bastion)
 		{Alias: "stg-api", Hostname: "172.16.8.10", Port: 22, Username: "deploy", AuthMethod: "key", KeyID: &ciID, JumpHostID: &stgJump, Group: "staging", Tags: "api,rails", Description: "Feature branch deploys from GitHub Actions."},
 		{Alias: "stg-worker", Hostname: "172.16.8.20", Port: 22, Username: "deploy", AuthMethod: "key", KeyID: &ciID, JumpHostID: &stgJump, Group: "staging", Tags: "sidekiq", Description: "Shares Redis with stg-redis."},
 		{Alias: "stg-redis", Hostname: "172.16.9.5", Port: 22, Username: "ubuntu", AuthMethod: "key", KeyID: &kwID, JumpHostID: &stgJump, Group: "staging", Tags: "redis", Description: "Single node; flushed nightly."},
 		{Alias: "stg-mysql", Hostname: "172.16.10.3", Port: 22, Username: "dba", AuthMethod: "password", Password: demoSharedPW, JumpHostID: &stgJump, Group: "staging", Tags: "mysql", Description: "MySQL 8; snapshot from anonymized prod weekly."},
-		// other clouds / direct
 		{Alias: "gcp-bastion", Hostname: "34.12.88.101", Port: 22, Username: "huangzheng", AuthMethod: "key", KeyID: &kwID, Group: "gcp", Tags: "iap,bastion", Description: "GCP OS Login + IAP tunnel; project acme-prod-2."},
 		{Alias: "gcp-gke-node", Hostname: "10.128.0.14", Port: 22, Username: "containerd", AuthMethod: "key", KeyID: &ciID, Group: "gcp", Tags: "gke", Description: "Debug pod networking; use kubectl debug first."},
 		{Alias: "azure-vm-dev", Hostname: "acme-dev.eastus.cloudapp.azure.com", Port: 22, Username: "azureuser", AuthMethod: "key", KeyID: &kwID, Group: "azure", Tags: "dev,vm", Description: "Standard_D4s_v5; spot when possible."},

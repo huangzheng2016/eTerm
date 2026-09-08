@@ -9,7 +9,7 @@ import (
 )
 
 func newSelectionModel() *Model {
-	m := newTestModel(nil) // 100x32
+	m := newTestModel(nil)
 	m.blocks = append(m.blocks,
 		block{kind: blockUser, text: "hello world"},
 		block{kind: blockSystem, text: "system note"},
@@ -23,7 +23,6 @@ func mouse(x, y int) tea.Mouse { return tea.Mouse{X: x, Y: y, Button: tea.MouseL
 func TestDragSelectCopiesPlainText(t *testing.T) {
 	m := newSelectionModel()
 
-	// Viewport row 0 is overlay-local y=3; content col 0 is x=2.
 	m.Update(tea.MouseClickMsg(mouse(2, 3)))
 	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
 	if !m.sel.Active || !m.sel.Dragging {
@@ -48,8 +47,8 @@ func TestDragSelectCopiesPlainText(t *testing.T) {
 
 func TestDragSelectAcrossLines(t *testing.T) {
 	m := newSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(3, 3)))  // line 0, col 1
-	m.Update(tea.MouseMotionMsg(mouse(8, 5))) // line 2, col 6
+	m.Update(tea.MouseClickMsg(mouse(3, 3)))
+	m.Update(tea.MouseMotionMsg(mouse(8, 5)))
 	_, cmd := m.Update(tea.MouseReleaseMsg(mouse(8, 5)))
 	if cmd == nil {
 		t.Fatal("release after drag returned no clipboard cmd")
@@ -116,7 +115,7 @@ func TestCtrlLDoesNotClear(t *testing.T) {
 }
 
 func TestSelectionFollowsScrollOffset(t *testing.T) {
-	m := newTestModel(nil) // 100x32, viewH=21
+	m := newTestModel(nil)
 	for i := 0; i < 30; i++ {
 		m.blocks = append(m.blocks, block{kind: blockSystem, text: "note"})
 	}
@@ -126,7 +125,7 @@ func TestSelectionFollowsScrollOffset(t *testing.T) {
 	if off == 0 {
 		t.Fatal("expected scrolled viewport")
 	}
-	m.Update(tea.MouseClickMsg(mouse(2, 3))) // first visible row
+	m.Update(tea.MouseClickMsg(mouse(2, 3)))
 	m.Update(tea.MouseMotionMsg(mouse(6, 3)))
 	m.Update(tea.MouseReleaseMsg(mouse(6, 3)))
 	text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
@@ -135,10 +134,8 @@ func TestSelectionFollowsScrollOffset(t *testing.T) {
 	}
 }
 
-// newTallSelectionModel loads enough one-line blocks to make the conversation
-// scrollable: 30 blocks -> 59 content lines against a 21-row viewport.
 func newTallSelectionModel() *Model {
-	m := newTestModel(nil) // 100x32, viewH=21, viewport rows y=3..23
+	m := newTestModel(nil)
 	for i := 0; i < 30; i++ {
 		m.blocks = append(m.blocks, block{kind: blockSystem, text: fmt.Sprintf("note%02d", i)})
 	}
@@ -148,11 +145,11 @@ func newTallSelectionModel() *Model {
 
 func TestDragSelectAutoScrollsAtBottomEdge(t *testing.T) {
 	m := newTallSelectionModel()
-	m.viewport.ScrollUp(1000) // pull to the top so down-scrolling has room
+	m.viewport.ScrollUp(1000)
 	if m.viewport.YOffset() != 0 {
 		t.Fatal("expected top-anchored viewport")
 	}
-	m.Update(tea.MouseClickMsg(mouse(2, 3))) // anchor at content line 0
+	m.Update(tea.MouseClickMsg(mouse(2, 3)))
 	_, cmd := m.Update(tea.MouseMotionMsg(mouse(2, 22)))
 	if cmd == nil {
 		t.Fatal("drag at the bottom edge must schedule auto-scroll")
@@ -160,7 +157,6 @@ func TestDragSelectAutoScrollsAtBottomEdge(t *testing.T) {
 	if m.selAutoScroll.Dir != 1 {
 		t.Fatalf("auto-scroll dir = %d, want 1", m.selAutoScroll.Dir)
 	}
-	// Ticks scroll the viewport and stretch the caret to the bottom edge.
 	for i := 0; i < 3; i++ {
 		m.Update(selectionAutoScrollMsg{seq: m.selSeq})
 	}
@@ -170,14 +166,12 @@ func TestDragSelectAutoScrollsAtBottomEdge(t *testing.T) {
 	if !m.sel.Moved || m.sel.Caret.Line <= m.sel.Anchor.Line {
 		t.Fatalf("caret did not extend: %+v", m.sel)
 	}
-	// Drain to the bottom: scrolling stops when the viewport hits the end.
 	for i := 0; i < 60; i++ {
 		m.Update(selectionAutoScrollMsg{seq: m.selSeq})
 	}
 	if m.selAutoScroll.Dir != 0 {
 		t.Fatal("auto-scroll must stop at the bottom")
 	}
-	// The drag now spans beyond the initially visible rows (note00..note09).
 	_, cmd = m.Update(tea.MouseReleaseMsg(mouse(2, 22)))
 	if cmd == nil {
 		t.Fatal("release after auto-scroll returned no clipboard cmd")
@@ -197,7 +191,7 @@ func TestDragSelectAutoScrollStopsOnRelease(t *testing.T) {
 		t.Fatal("release must stop auto-scroll")
 	}
 	off := m.viewport.YOffset()
-	m.Update(selectionAutoScrollMsg{seq: m.selSeq}) // stale tick after release
+	m.Update(selectionAutoScrollMsg{seq: m.selSeq})
 	if m.viewport.YOffset() != off {
 		t.Fatal("stale tick scrolled the viewport")
 	}
@@ -208,14 +202,12 @@ func TestDragSelectIgnoresStaleAutoScrollTick(t *testing.T) {
 	m.Update(tea.MouseClickMsg(mouse(2, 3)))
 	m.Update(tea.MouseMotionMsg(mouse(2, 22)))
 	off := m.viewport.YOffset()
-	m.Update(selectionAutoScrollMsg{seq: m.selSeq + 1}) // wrong generation
+	m.Update(selectionAutoScrollMsg{seq: m.selSeq + 1})
 	if m.viewport.YOffset() != off {
 		t.Fatal("stale-generation tick scrolled the viewport")
 	}
 }
 
-// selectAll drags from the first content line to the last and returns what
-// the release handler would copy.
 func selectAll(t *testing.T, m *Model) string {
 	t.Helper()
 	lines := strings.Split(m.viewport.GetContent(), "\n")
@@ -230,16 +222,12 @@ func selectAll(t *testing.T, m *Model) string {
 	return m.sel.TextJoined(strings.Split(m.viewport.GetContent(), "\n"), m.lineBreaks)
 }
 
-// A paragraph soft-wrapped for display must copy as one logical line, like
-// the terminal view joins wrapped lines.
 func TestCopyJoinsSoftWrappedParagraph(t *testing.T) {
-	m := newTestModel(nil) // 100x32, content width 96
+	m := newTestModel(nil)
 	para := strings.TrimSpace(strings.Repeat("word ", 40))
 	m.blocks = append(m.blocks, block{kind: blockAssistant, text: para, final: true})
 	m.renderAll()
 	got := selectAll(t, m)
-	// Glamour frames the document with blank lines; the paragraph itself
-	// must come out as a single line.
 	body := strings.TrimSpace(got)
 	if strings.Contains(body, "\n") {
 		t.Fatalf("wrapped paragraph copied with newlines: %q", got)
@@ -249,7 +237,6 @@ func TestCopyJoinsSoftWrappedParagraph(t *testing.T) {
 	}
 }
 
-// An overlong word (URL) chopped mid-word must copy without injected spaces.
 func TestCopyJoinsHardWrappedURL(t *testing.T) {
 	url := "https://example.com/" + strings.Repeat("u", 180)
 	m := newTestModel(nil)

@@ -33,7 +33,6 @@ func sendKeysRequest(sv *sshview.Model, ctx context.Context) aiToolRequest {
 	}
 }
 
-// feedSSHChunk pushes pty output through the emulator, firing OSC callbacks.
 func feedSSHChunk(m *sshview.Model, data string) {
 	m.Update(sshview.ChunkMsg{StreamID: m.StreamID(), Data: []byte(data)})
 }
@@ -50,8 +49,6 @@ func TestSendKeysWaitsForCommandEnd(t *testing.T) {
 		t.Fatal("expected wait command")
 	}
 
-	// The shell starts the command after the send; the minimum wait alone
-	// must not answer while it runs.
 	feedSSHChunk(sv, "\x1b]133;C\a")
 	msg, ok := cmd().(aiToolSendKeysDoneMsg)
 	if !ok {
@@ -67,7 +64,6 @@ func TestSendKeysWaitsForCommandEnd(t *testing.T) {
 	default:
 	}
 
-	// 133;D finishes the command; the next poll answers with its output.
 	feedSSHChunk(sv, "build ok\r\n\x1b]133;D;0\a")
 	msg, ok = cmd().(aiToolSendKeysDoneMsg)
 	if !ok {
@@ -99,7 +95,6 @@ func TestSendKeysTimeoutFallback(t *testing.T) {
 	req := sendKeysRequest(sv, context.Background())
 	_, cmd := a.handleAIToolRequest(req)
 
-	// The command starts but never reports 133;D: the wait runs to the cap.
 	feedSSHChunk(sv, "\x1b]133;C\a")
 
 	start := time.Now()
@@ -144,8 +139,6 @@ func TestSendKeysStaleOSC133AnswersPromptly(t *testing.T) {
 	t.Cleanup(func() { aiSendKeysMaxWait, aiSendKeysPollInterval = oldMax, oldPoll })
 
 	a, sv := sendKeysTestApp(t)
-	// A 133-capable shell ran commands earlier, but nothing is in flight now
-	// (e.g. a dumb shell was exec'd): the stale count must not stall the wait.
 	feedSSHChunk(sv, "\x1b]133;C\a\x1b]133;D;0\a")
 
 	req := sendKeysRequest(sv, context.Background())
@@ -181,7 +174,6 @@ func TestSendKeysCtxCancel(t *testing.T) {
 	req := sendKeysRequest(sv, ctx)
 	_, cmd := a.handleAIToolRequest(req)
 
-	// A command is in flight, so the wait extends; cancel aborts it.
 	feedSSHChunk(sv, "\x1b]133;C\a")
 	msg, ok := cmd().(aiToolSendKeysDoneMsg)
 	if !ok {

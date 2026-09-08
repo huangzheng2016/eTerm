@@ -35,8 +35,8 @@ type wsStdin struct {
 	conn     *websocket.Conn
 	streamID uint32
 	mu       sync.Mutex
-	nextSeq  atomic.Uint64 // next daemon output offset expected (consumed so far)
-	lastAck  atomic.Uint64 // last offset acked to the daemon
+	nextSeq  atomic.Uint64
+	lastAck  atomic.Uint64
 }
 
 const (
@@ -57,10 +57,6 @@ func OpenWithProgress(ctx context.Context, serverURL, apiKey, tenant string, ins
 	return sessionFromConn(ctx, conn, streamID, rows, cols, 0), nil
 }
 
-// ResumeOpenWithProgress reopens streamID asking the daemon to replay output
-// from resumeFromSeq (the client's next expected offset). It fails with the
-// daemon's OpenErr when the stream or the retained offset is gone; callers
-// should fall back to a fresh open.
 func ResumeOpenWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest, streamID uint32, resumeFromSeq uint64, progress ProgressFunc) (*internalssh.InteractiveSession, error) {
 	op.ResumeFromSeq = resumeFromSeq
 	conn, _, _, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, op, streamID, progress)
@@ -70,8 +66,6 @@ func ResumeOpenWithProgress(ctx context.Context, serverURL, apiKey, tenant strin
 	return sessionFromConn(ctx, conn, streamID, op.Rows, op.Cols, resumeFromSeq), nil
 }
 
-// ResumeInfo reports the relay stream and the next expected output offset for
-// a relay-backed session, for use with ResumeOpenWithProgress.
 func ResumeInfo(is *internalssh.InteractiveSession) (streamID uint32, nextSeq uint64, ok bool) {
 	if is == nil {
 		return 0, 0, false
@@ -278,13 +272,9 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 				}
 				next := stdin.nextSeq.Load()
 				if seq < next {
-					// Stale or duplicated segment (e.g. mixed with a replay);
-					// the daemon resends anything still needed.
 					continue
 				}
 				if seq > next {
-					// Output gap: the byte stream is unrecoverable locally.
-					// Fail the session so the caller reconnects and resumes.
 					done <- fmt.Errorf("relay output gap: got seq %d, want %d", seq, next)
 					return
 				}

@@ -131,8 +131,6 @@ func (m Model) renderEditOverlay() string {
 	return overlayBoxStyle.Width(m.overlayWidth()).Render(content)
 }
 
-// PLACEHOLDER_OVERLAYS
-
 func (m Model) renderDeleteOverlay() string {
 	title := overlayTitleStyle.Render("Delete SSH Key")
 	name := lipgloss.NewStyle().Bold(true).Render(m.pendingDeleteName)

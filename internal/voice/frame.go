@@ -9,10 +9,6 @@ import (
 	"io"
 )
 
-// Volcano Engine speech protocol (openspeech.bytedance.com sauc/bigmodel_async):
-// 4-byte header, optional i32 sequence, optional i32 event/error code,
-// u32 payload size, gzip-compressed payload.
-
 const (
 	msgFullClientRequest  = 0x1
 	msgAudioOnlyRequest   = 0x2
@@ -115,7 +111,6 @@ func buildFullClientRequest(cfg VolcanoConfig, seq int32) ([]byte, error) {
 	return buildFrame(msgFullClientRequest, flagPosSequence, serialJSON, body, seq)
 }
 
-// buildAudioFrame packs one PCM chunk. A negative seq marks the final frame.
 func buildAudioFrame(chunk []byte, seq int32) ([]byte, error) {
 	flags := byte(flagPosSequence)
 	if seq < 0 {
@@ -126,8 +121,8 @@ func buildAudioFrame(chunk []byte, seq int32) ([]byte, error) {
 
 type serverEvent struct {
 	isError bool
-	msg     string // error message
-	text    string // transcript
+	msg     string
+	text    string
 	final   bool
 }
 

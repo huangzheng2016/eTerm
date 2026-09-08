@@ -16,7 +16,6 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 )
 
-// readOpen consumes the client FrameHello and returns the FrameOpen.
 func readOpen(t *testing.T, c *websocket.Conn, ctx context.Context) (relay.Frame, bool) {
 	t.Helper()
 	for {
@@ -155,8 +154,6 @@ func TestOpenReadsDataFrames(t *testing.T) {
 	waitNextSeq(t, is, 6)
 }
 
-// waitNextSeq polls until the session's consumed offset reaches want; the
-// read loop stores it just after the pipe write unblocks.
 func waitNextSeq(t *testing.T, is *internalssh.InteractiveSession, want uint64) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

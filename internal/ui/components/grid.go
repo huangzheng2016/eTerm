@@ -7,14 +7,12 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Grid card defaults.
 const (
-	CardMinOuterW = 30 // minimum total card width (including border)
-	CardOuterH    = 4  // 2 content lines + 2 border lines
-	GridGap       = 1  // horizontal gap between cards
+	CardMinOuterW = 30
+	CardOuterH    = 4
+	GridGap       = 1
 )
 
-// Card border styles shared across all grid views.
 var (
 	ActiveCardBorder = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -28,18 +26,14 @@ var (
 	PageNumStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
 )
 
-// GridLayout holds computed grid dimensions.
 type GridLayout struct {
 	Cols     int
 	Rows     int
 	PageSize int
-	CardW    int // total card width (includes border)
+	CardW    int
 	CardH    int
 }
 
-// PLACEHOLDER_FUNCS
-
-// ComputeGrid calculates grid dimensions for the given terminal size.
 func ComputeGrid(width, height int) GridLayout {
 	return ComputeGridWithCardHeight(width, height, CardOuterH)
 }
@@ -60,7 +54,6 @@ func ComputeGridWithCardHeight(width, height, cardH int) GridLayout {
 	return GridLayout{Cols: cols, Rows: rows, PageSize: cols * rows, CardW: cardW, CardH: cardH}
 }
 
-// GridPage returns the page number for a given cursor and pageSize.
 func GridPage(cursor, pageSize int) int {
 	if pageSize <= 0 {
 		return 0
@@ -73,7 +66,6 @@ func GridPageRange(total, cursor int, gl GridLayout) (int, int) {
 	return start, min(total, start+gl.PageSize)
 }
 
-// GridMove computes the new cursor after a direction key press.
 func GridMove(dir string, cursor, total int, gl GridLayout) (int, bool) {
 	if total == 0 {
 		return 0, false
@@ -120,7 +112,6 @@ func GridMove(dir string, cursor, total int, gl GridLayout) (int, bool) {
 	return cursor, false
 }
 
-// GridIndexAtMouse returns the item index for a click at (x, y) within the grid area.
 func GridIndexAtMouse(x, y, total int, gl GridLayout, page int) (int, bool) {
 	if x < 0 || y < 0 {
 		return 0, false
@@ -141,7 +132,6 @@ func GridIndexAtMouse(x, y, total int, gl GridLayout, page int) (int, bool) {
 	return idx, true
 }
 
-// truncateToWidth cuts s to fit within maxW visible cells, appending "…" if truncated.
 func truncateToWidth(s string, maxW int) string {
 	if maxW <= 0 {
 		return ""
@@ -150,7 +140,6 @@ func truncateToWidth(s string, maxW int) string {
 	if w <= maxW {
 		return s
 	}
-	// Trim rune by rune until it fits
 	runes := []rune(s)
 	for len(runes) > 0 {
 		runes = runes[:len(runes)-1]
@@ -162,13 +151,11 @@ func truncateToWidth(s string, maxW int) string {
 	return ""
 }
 
-// RenderCard renders a two-line card with the given title, description, and active state.
 func RenderCard(title, desc string, active bool, cardW int) string {
 	innerW := cardW - 2
 	if innerW < 1 {
 		innerW = 1
 	}
-	// Truncate text before rendering to prevent line wrapping inside the card.
 	title = truncateToWidth(title, innerW)
 	desc = truncateToWidth(desc, innerW)
 	t := CardTitleBase.Width(innerW).Render(title)
@@ -194,7 +181,6 @@ func RenderThreeLineCard(title, second, third string, active bool, cardW int) st
 	return InactiveCardBorder.Width(cardW).Height(3).Render(content)
 }
 
-// EmptyCard returns a blank placeholder the same size as a card.
 func EmptyCard(cardW, cardH int) string {
 	line := strings.Repeat(" ", cardW)
 	lines := make([]string, cardH)
@@ -204,8 +190,6 @@ func EmptyCard(cardW, cardH int) string {
 	return strings.Join(lines, "\n")
 }
 
-// RenderGridRows renders a grid page from pre-rendered card strings.
-// cards is the full list of rendered card strings; cursor is the selected index.
 func RenderGridRows(cards []string, total, cursor int, gl GridLayout) string {
 	if total == 0 || gl.PageSize == 0 {
 		return ""
@@ -238,7 +222,6 @@ func RenderGridRows(cards []string, total, cursor int, gl GridLayout) string {
 	grid := lipgloss.JoinVertical(lipgloss.Left, rowStrings...)
 
 	totalPages := (total + gl.PageSize - 1) / gl.PageSize
-	// Always show page indicator
 	var parts []string
 	if page > 0 {
 		parts = append(parts, PageIndicatorStyle.Render("◀ "))
@@ -256,7 +239,6 @@ func RenderGridRows(cards []string, total, cursor int, gl GridLayout) string {
 	return grid
 }
 
-// Intersperse inserts sep between each element.
 func Intersperse(items []string, sep string) []string {
 	if len(items) <= 1 {
 		return items

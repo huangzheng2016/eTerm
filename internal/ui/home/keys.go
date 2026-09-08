@@ -2,7 +2,6 @@ package home
 
 import "charm.land/bubbles/v2/key"
 
-// listKeyMap holds shortcuts for the host list; runtime matching uses internal/keymatch (Keystroke + ultraviolet).
 type listKeyMap struct {
 	SSHConnect key.Binding
 	SFTPOpen   key.Binding
@@ -71,7 +70,6 @@ func helpLabel(keys []string) string {
 	return keys[0] + "/" + keys[1]
 }
 
-// BuildListKeyMap constructs a listKeyMap from configurable key slices.
 func BuildListKeyMap(sshConnect, sftpOpen, newHost, editHost, deleteHost, copySSH, cloneHost, search, toggleView, tmux []string) listKeyMap {
 	return listKeyMap{
 		SSHConnect: key.NewBinding(key.WithKeys(sshConnect...), key.WithHelp(helpLabel(sshConnect), "connect")),

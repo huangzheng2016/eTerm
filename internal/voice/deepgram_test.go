@@ -37,12 +37,9 @@ func TestDeepgramDescriptor(t *testing.T) {
 	eng.Close()
 }
 
-// deepgramServer is a fake Deepgram realtime endpoint. Each connection reads
-// binary audio frames until a CloseStream text message, answers with a final
-// result, and closes.
 type deepgramServer struct {
 	t           *testing.T
-	connN       int32 // atomic
+	connN       int32
 	audio       chan []byte
 	closeStream chan struct{}
 	conn2       chan struct{}
@@ -178,9 +175,6 @@ func TestDeepgramEngineRequiresKey(t *testing.T) {
 	eng.Close()
 }
 
-// Passthrough flow: fake helper audio lands as deepgram audio frames,
-// utterance_end sends CloseStream, the final transcript surfaces, and the
-// next utterance gets a fresh connection.
 func TestDeepgramFeedRoutesPassthrough(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")

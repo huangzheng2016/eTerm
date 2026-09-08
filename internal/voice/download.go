@@ -19,9 +19,6 @@ import (
 	"strings"
 )
 
-// DefaultHelperURL is the release artifact for this platform: a tarball with
-// the helper binary and its cgo dylibs, produced by the CI recipe in
-// cmd/voicehelper/README.md.
 const DefaultHelperURL = "https://github.com/huangzheng2016/eTerm/releases/latest/download/voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
 
 func helperBinaryName() string {
@@ -31,14 +28,10 @@ func helperBinaryName() string {
 	return "voicehelper"
 }
 
-// helperDir holds the helper binary and the dylibs it needs at
-// @executable_path.
 func helperDir(cacheDir string) string {
 	return filepath.Join(cacheDir, "voicehelper")
 }
 
-// DefaultCacheDir is the eterm cache root; the helper and the voice models
-// live under it.
 func DefaultCacheDir() string {
 	d, err := os.UserCacheDir()
 	if err != nil {
@@ -47,26 +40,20 @@ func DefaultCacheDir() string {
 	return filepath.Join(d, "eterm")
 }
 
-// HelperInstallPath is where the managed helper binary lives.
 func HelperInstallPath() string {
 	return filepath.Join(helperDir(DefaultCacheDir()), helperBinaryName())
 }
 
-// HelperInstalled reports whether the managed helper binary exists.
 func HelperInstalled() bool {
 	_, err := os.Stat(HelperInstallPath())
 	return err == nil
 }
 
-// HelperVersion runs the installed helper with -version and extracts the
-// version token ("dev" for builds without an injected tag); "" when the
-// helper is missing or predates the -version flag.
 func HelperVersion() string {
 	out, err := exec.Command(HelperInstallPath(), "-version").Output()
 	if err != nil {
 		return ""
 	}
-	// "voicehelper v1.2.3 (protocol 2)"
 	f := strings.Fields(string(out))
 	if len(f) >= 2 && f[0] == "voicehelper" {
 		return f[1]
@@ -74,8 +61,6 @@ func HelperVersion() string {
 	return ""
 }
 
-// LatestHelperVersion queries the tag of the latest GitHub release; the
-// helper ships as a release asset of that tag.
 func LatestHelperVersion(ctx context.Context) (string, error) {
 	const latestURL = "https://api.github.com/repos/huangzheng2016/eTerm/releases/latest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestURL, nil)
@@ -104,9 +89,6 @@ func LatestHelperVersion(ctx context.Context) (string, error) {
 	return rel.TagName, nil
 }
 
-// DownloadHelper installs or updates the helper binary from url
-// (DefaultHelperURL when empty), replacing any existing installation.
-// Reports download progress.
 func DownloadHelper(ctx context.Context, url string, onProgress func(pct float64)) error {
 	if url == "" {
 		url = DefaultHelperURL
@@ -125,7 +107,6 @@ func DownloadHelper(ctx context.Context, url string, onProgress func(pct float64
 	return os.Chmod(binPath, 0o755)
 }
 
-// ensureHelperBinary locates or downloads the helper binary.
 func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 	if cfg.BinPath != "" {
 		if _, err := os.Stat(cfg.BinPath); err != nil {
@@ -160,10 +141,6 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 	return binPath, nil
 }
 
-// downloadAndExtract downloads the helper tarball, verifies sha256Hex when
-// non-empty, and extracts it into helperDir(cacheDir) via an atomic rename.
-// replace=false keeps an existing install (concurrent first-install guard);
-// replace=true removes it first (user-initiated update).
 func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, replace bool, onProgress func(pct float64)) error {
 	tmp := filepath.Join(cacheDir, ".voicehelper.tar.gz.tmp")
 	defer os.Remove(tmp)
@@ -181,7 +158,6 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, re
 	dest := helperDir(cacheDir)
 	if _, err := os.Stat(dest); err == nil {
 		if !replace {
-			// another process installed it meanwhile
 			return nil
 		}
 		if err := os.RemoveAll(dest); err != nil {
@@ -191,8 +167,6 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, re
 	return os.Rename(staging, dest)
 }
 
-// downloadFile fetches url into dest with progress, verifying sha256Hex when
-// non-empty. The file lands atomically (temp file + rename).
 func downloadFile(ctx context.Context, url, dest, sha256Hex string, onProgress func(pct float64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -254,7 +228,6 @@ func downloadFile(ctx context.Context, url, dest, sha256Hex string, onProgress f
 	return os.Rename(tmp, dest)
 }
 
-// untar extracts a tar.gz or tar.bz2 archive (detected by magic bytes).
 func untar(archive, destDir string) error {
 	f, err := os.Open(archive)
 	if err != nil {

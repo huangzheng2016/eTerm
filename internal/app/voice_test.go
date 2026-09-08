@@ -33,7 +33,6 @@ type fakeVoiceEngine struct {
 	modelKind string
 }
 
-// findVoiceRow returns the index of the first row of kind, -1 when absent.
 func findVoiceRow(m *voiceSettingsModel, kind int) int {
 	for i, r := range m.rows() {
 		if r.kind == kind {
@@ -43,7 +42,6 @@ func findVoiceRow(m *voiceSettingsModel, kind int) int {
 	return -1
 }
 
-// findVoiceParamRow returns the index of the param row for key, -1 when absent.
 func findVoiceParamRow(m *voiceSettingsModel, key string) int {
 	for i, r := range m.rows() {
 		if r.kind == vrowParam && r.param.Key == key {
@@ -67,9 +65,6 @@ func (f *fakeVoiceEngine) SetModel(dir, kind string) error {
 func (f *fakeVoiceEngine) Events() <-chan voice.Event { return f.events }
 func (f *fakeVoiceEngine) Close() error               { f.closed = true; close(f.events); return nil }
 
-// collectCmdMsgs runs cmd and its (flattened) sub-commands, gathering the
-// messages they produce until want matches or the deadline passes. Pump
-// commands that block on channels keep their goroutines.
 func collectCmdMsgs(t *testing.T, cmd tea.Cmd, want func(tea.Msg) bool) []tea.Msg {
 	t.Helper()
 	if cmd == nil {
@@ -142,7 +137,6 @@ func TestVoiceHotkeyToggleStartsAndStops(t *testing.T) {
 	if !fe.started {
 		t.Fatal("engine not started")
 	}
-	// The runtime feeds completions back; they clear voiceBusy.
 	for _, m := range msgs {
 		upd, _ = a.Update(m)
 		a = upd.(App)
@@ -209,8 +203,6 @@ func voiceFinalMsg(text string) voiceEventMsg {
 	return voiceEventMsg{ev: voice.Event{Type: voice.EventFinal, Text: text}}
 }
 
-// Dictation disables the helper no-speech timeout (record until ctrl+r); the
-// settings-panel test recording keeps it so a silent mic reports "no speech".
 func TestVoiceNoSpeechTimeoutPerPath(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -246,7 +238,6 @@ func TestVoiceNoSpeechTimeoutPerPath(t *testing.T) {
 	a = upd.(App)
 	pump(cmd, stopped)
 
-	// the test's timeout must not leak into the next dictation session
 	upd, _ = a.Update(key)
 	a = upd.(App)
 	if fe.vad.NoSpeechTimeout != 0 {
@@ -359,7 +350,6 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("round trip = %+v, want %+v", got, cfg)
 	}
 
-	// the params blob is encrypted at rest
 	blob, err := db.GetSetting(database, voiceParamsSettingPrefix+voiceEngineVolcano)
 	if err != nil || blob == "" {
 		t.Fatal("params blob not stored")
@@ -369,8 +359,6 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	}
 }
 
-// The legacy voice_volcano blob migrates into voice_params_volcano on load;
-// the old key is deleted afterwards.
 func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
@@ -409,7 +397,6 @@ func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
 		t.Fatal("migrated blob stored in plaintext")
 	}
 
-	// the migration ran once; the new blob loads on its own
 	cfg = loadVoiceSettings(database, mk)
 	if got := cfg.engineParams(voiceEngineVolcano); got["api_key"] != "a" {
 		t.Fatalf("reloaded params = %v", got)
@@ -425,8 +412,6 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
-	// Engine row: right opens the picker; enter on an option selects it and
-	// rebuilds the engine.
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	if m.view != voiceViewEngines {
 		t.Fatal("engine row did not open the picker")
@@ -451,7 +436,6 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 		t.Fatal("gated note still in the view")
 	}
 
-	// Sensitivity row: right steps 0 -> 0.05 and keeps the engine alive.
 	m.cursor = findVoiceRow(m, vrowThreshold)
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	msg, ok = cmd().(voiceSettingsChangedMsg)
@@ -459,7 +443,6 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 		t.Fatalf("threshold change msg = %#v", msg)
 	}
 
-	// Silence row: right steps 1000 -> 1050 and keeps the engine alive.
 	m.cursor = findVoiceRow(m, vrowSilence)
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	msg, ok = cmd().(voiceSettingsChangedMsg)
@@ -470,7 +453,6 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 		t.Fatalf("persisted silence = %d", got.VADSilenceMs)
 	}
 
-	// API key row: enter edits, enter commits, stored encrypted, masked in view.
 	m.cursor = findVoiceParamRow(m, "api_key")
 	if m.cursor < 0 {
 		t.Fatal("api key row missing")
@@ -498,12 +480,9 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	}
 }
 
-// Rows render per the selected engine: local shows the helper and Model
-// rows, volcano shows its three key rows, unknown engines render generically.
 func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
 
-	// local: helper + Model > rows, no engine param rows
 	if findVoiceRow(m, vrowHelper) < 0 || findVoiceRow(m, vrowModels) < 0 {
 		t.Fatal("local helper/model rows missing")
 	}
@@ -514,7 +493,6 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 		t.Fatalf("local rows not rendered:\n%s", view)
 	}
 
-	// volcano: 3 secret param rows, no helper/model rows
 	m.cfg.Engine = voiceEngineVolcano
 	if findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
 		t.Fatal("volcano shows local-only rows")
@@ -538,7 +516,6 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 		}
 	}
 
-	// unknown engine: engine row + shared rows only, labeled unknown
 	m.cfg.Engine = "mystery"
 	if findVoiceRow(m, vrowEngine) < 0 || findVoiceRow(m, vrowTest) < 0 {
 		t.Fatal("unknown engine lost shared rows")
@@ -554,8 +531,6 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	}
 }
 
-// defaultVoiceEngine picks the local engine or the volcano feed composition
-// from the configured engine.
 func TestDefaultVoiceEngineSelection(t *testing.T) {
 	local, err := defaultVoiceEngine(defaultVoiceSettings(), nil)
 	if err != nil {
@@ -583,7 +558,6 @@ func TestDefaultVoiceEngineSelection(t *testing.T) {
 	}
 }
 
-// A keepEngine settings change applies VAD params live via SetVAD.
 func TestVoiceSettingsLiveApplySendsVADParams(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -634,7 +608,6 @@ func TestVoiceSettingsOverlayMouse(t *testing.T) {
 	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
 	a.voiceSettingsView = newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
-	// Click the threshold row: cursor moves there and the row adjusts.
 	thresholdRow := findVoiceRow(a.voiceSettingsView, vrowThreshold)
 	if thresholdRow < 0 {
 		t.Fatal("threshold row missing")
@@ -650,7 +623,6 @@ func TestVoiceSettingsOverlayMouse(t *testing.T) {
 		t.Fatalf("threshold = %v", a.voiceSettingsView.cfg.VADThreshold)
 	}
 
-	// Click outside dismisses the overlay without reaching the tab bar.
 	upd, _ = a.Update(tea.MouseClickMsg(tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft}))
 	a = upd.(App)
 	if a.voiceSettingsView != nil {
@@ -661,8 +633,6 @@ func TestVoiceSettingsOverlayMouse(t *testing.T) {
 	}
 }
 
-// With the ctrl+r routing notice visible the panel grows by two lines; row
-// clicks must still land on the right row.
 func TestVoiceSettingsMouseWithNotice(t *testing.T) {
 	stubHelperInstalled(t, false)
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
@@ -718,8 +688,6 @@ func TestVoiceDeliveryDroppedWhenLocked(t *testing.T) {
 	}
 }
 
-// gateVoiceEngine blocks Start/Stop on gates so tests can force slow engine
-// operations (the first-use download is the real-world case).
 type gateVoiceEngine struct {
 	events    chan voice.Event
 	startGate chan struct{}
@@ -761,7 +729,6 @@ func (g *gateVoiceEngine) counts() (int, int) {
 	return g.starts, g.stops
 }
 
-// Stop requested while a slow Start is in flight must land after it.
 func TestVoiceToggleReconcileStopAfterSlowStart(t *testing.T) {
 	ge := &gateVoiceEngine{events: make(chan voice.Event), startGate: make(chan struct{})}
 	a := voiceTestAppMake(ge)
@@ -779,14 +746,12 @@ func TestVoiceToggleReconcileStopAfterSlowStart(t *testing.T) {
 		})
 	}(cmd)
 
-	// Toggle off while the start is blocked: intent flips, no stop cmd yet.
 	upd, cmd = a.toggleVoice()
 	a = upd
 	if a.voiceRec || cmd != nil {
 		t.Fatalf("rec=%v cmd=%v", a.voiceRec, cmd != nil)
 	}
 
-	// Release the start; its completion must reconcile into a stop.
 	close(ge.startGate)
 	var stopCmd tea.Cmd
 	for _, m := range <-startMsgs {
@@ -812,12 +777,10 @@ func TestVoiceToggleReconcileStopAfterSlowStart(t *testing.T) {
 	}
 }
 
-// Start requested while a slow Stop is in flight must land after it.
 func TestVoiceToggleReconcileStartAfterSlowStop(t *testing.T) {
 	ge := &gateVoiceEngine{events: make(chan voice.Event), stopGate: make(chan struct{})}
 	a := voiceTestAppMake(ge)
 
-	// Start and let it complete.
 	upd, cmd := a.toggleVoice()
 	a = upd
 	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
@@ -828,7 +791,6 @@ func TestVoiceToggleReconcileStartAfterSlowStop(t *testing.T) {
 		a = upd2.(App)
 	}
 
-	// Toggle off: the stop blocks on the gate.
 	upd, cmd = a.toggleVoice()
 	a = upd
 	stopMsgs := make(chan []tea.Msg, 1)
@@ -839,14 +801,12 @@ func TestVoiceToggleReconcileStartAfterSlowStop(t *testing.T) {
 		})
 	}(cmd)
 
-	// Toggle back on while the stop is blocked: intent flips, no start cmd.
 	upd, cmd = a.toggleVoice()
 	a = upd
 	if !a.voiceRec || cmd != nil {
 		t.Fatalf("rec=%v cmd=%v", a.voiceRec, cmd != nil)
 	}
 
-	// Release the stop; its completion must reconcile into a start.
 	close(ge.stopGate)
 	var startCmd tea.Cmd
 	for _, m := range <-stopMsgs {
@@ -931,7 +891,6 @@ func TestVoiceSetupReady(t *testing.T) {
 		t.Fatal("unknown engine ready")
 	}
 
-	// a valid custom model dir counts as an installed model
 	ccfg := defaultVoiceSettings()
 	custom := t.TempDir()
 	ccfg.CustomModelDir = custom
@@ -948,8 +907,6 @@ func TestVoiceSetupReady(t *testing.T) {
 	}
 }
 
-// ctrl+r with an incomplete setup opens the settings panel with guidance
-// instead of recording (and failing).
 func TestVoiceHotkeyOpensSettingsWhenNotReady(t *testing.T) {
 	stubHelperInstalled(t, false)
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
@@ -979,7 +936,6 @@ func TestVoiceHotkeyOpensSettingsWhenNotReady(t *testing.T) {
 	}
 }
 
-// The routing notice names the engine-specific missing piece.
 func TestVoiceHotkeyNoticeNamesMissingKeys(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1011,7 +967,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 
-	// helper row requests a helper download
 	m.cursor = findVoiceRow(m, vrowHelper)
 	_, cmd := m.Update(enter)
 	req, ok := cmd().(voiceDownloadRequestMsg)
@@ -1019,8 +974,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatalf("helper download request = %#v", cmd())
 	}
 
-	// Model > enters the submenu: catalog rows + custom path row, no Back
-	// row (esc back like other pickers)
 	m.cursor = findVoiceRow(m, vrowModels)
 	m.Update(enter)
 	if m.view != voiceViewModels {
@@ -1031,7 +984,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatalf("submenu rows = %+v", rows)
 	}
 
-	// not-downloaded model row requests the model download
 	m.cursor = 1
 	_, cmd = m.Update(enter)
 	req, ok = cmd().(voiceDownloadRequestMsg)
@@ -1039,7 +991,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatalf("model download request = %#v", cmd())
 	}
 
-	// installed model row selects and persists the model, clearing verified
 	spec := voice.ModelCatalog()[1]
 	writeFakeModel(t, m.modelsRoot, spec)
 	m.cfg.Verified = true
@@ -1059,7 +1010,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatal("active model not marked")
 	}
 
-	// progress and failures render on the row and stay visible
 	m.downloadStarted(spec.ID)
 	m.downloadUpdate(voiceDownloadMsg{target: spec.ID, pct: 42})
 	if !strings.Contains(m.View(), "downloading 42%") {
@@ -1073,8 +1023,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 		t.Fatal("download not cleared after done")
 	}
 
-	// left returns to the main panel; re-enter, then esc returns too, and a
-	// second esc closes the overlay
 	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
 	if m.view != voiceViewMain {
 		t.Fatal("left did not leave the submenu")
@@ -1091,8 +1039,6 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 	}
 }
 
-// The custom model path entry validates the directory, persists the setting,
-// applies via set_model kind sensevoice, and counts toward readiness.
 func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	stubHelperInstalled(t, true)
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
@@ -1114,7 +1060,6 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 		t.Fatal("custom path row missing")
 	}
 
-	// invalid dir: rejected, error rendered, nothing persisted
 	m.Update(enter)
 	m.input.SetValue(t.TempDir())
 	_, cmd := m.Update(enter)
@@ -1131,7 +1076,6 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 		t.Fatalf("error not rendered:\n%s", m.View())
 	}
 
-	// valid dir (tokens.txt + model.int8.onnx): accepted and persisted
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "tokens.txt"), []byte("x"), 0o644)
 	os.WriteFile(filepath.Join(dir, "model.int8.onnx"), []byte("x"), 0o644)
@@ -1151,7 +1095,6 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 		t.Fatalf("persisted custom dir = %q", got.CustomModelDir)
 	}
 
-	// readiness counts the custom path; set_model targets it with sensevoice
 	if !voiceSetupReady(m.cfg, m.modelsRoot) {
 		t.Fatal("custom path not counted as model present")
 	}
@@ -1163,7 +1106,6 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 		t.Fatal("custom path not marked active")
 	}
 
-	// clearing the path falls back to the catalog selection
 	m.cursor = findVoiceRow(m, vrowCustomPath)
 	m.Update(enter)
 	m.input.SetValue("")
@@ -1177,9 +1119,6 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	}
 }
 
-// The precision row lives in the main view under Model >, shown only when
-// the active model has both weight variants; it toggles fp32/int8, persists,
-// and steers the set_model kind.
 func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
@@ -1212,8 +1151,6 @@ func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 		t.Fatal("precision not rendered")
 	}
 
-	// paraformer has no precision variants: the row disappears from the main
-	// view and the kind is unaffected by the toggle.
 	m.cfg.ModelID = voice.ModelCatalog()[1].ID
 	if findVoiceRow(m, vrowPrecision) >= 0 {
 		t.Fatal("precision row shown for paraformer")
@@ -1223,9 +1160,6 @@ func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	}
 }
 
-// The precision row and the set_model kind follow a custom directory's
-// contents: both weight files -> toggle offered and honored; one file -> no
-// toggle, helper falls back to whatever is present.
 func TestVoiceSettingsPrecisionCustomDir(t *testing.T) {
 	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
 	m.cfg.ModelInt8 = true
@@ -1254,7 +1188,6 @@ func TestVoiceSettingsPrecisionCustomDir(t *testing.T) {
 	}
 }
 
-// The engine picker lists local first, volcano second, then the rest.
 func TestVoiceSettingsEnginePickerOrder(t *testing.T) {
 	descs := enginePickerDescriptors()
 	if len(descs) < 2 || descs[0].ID != voiceEngineLocal || descs[1].ID != voiceEngineVolcano {
@@ -1272,7 +1205,6 @@ func TestVoiceSettingsEnginePickerOrder(t *testing.T) {
 	}
 }
 
-// A persisted pre-merge model id migrates to the merged entry + precision.
 func TestVoiceSettingsLegacyModelIDMigration(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
@@ -1294,7 +1226,6 @@ func TestVoiceSettingsLegacyModelIDMigration(t *testing.T) {
 	}
 }
 
-// The engine picker leaves the engine untouched on esc.
 func TestVoiceSettingsEnginePickerEscKeepsEngine(t *testing.T) {
 	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
 	m.enterEngines()
@@ -1313,8 +1244,6 @@ func TestVoiceSettingsEnginePickerEscKeepsEngine(t *testing.T) {
 
 var errTest = errors.New("boom")
 
-// The Voice Helper row shows install state plus the detected version, checks
-// the latest release tag on demand, and reinstalls when an update exists.
 func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
@@ -1333,7 +1262,6 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 		t.Fatalf("version not rendered:\n%s", view)
 	}
 
-	// enter asks the app to check for updates
 	m.cursor = findVoiceRow(m, vrowHelper)
 	_, cmd := m.Update(enter)
 	if _, ok := cmd().(voiceHelperUpdateCheckRequestMsg); !ok {
@@ -1343,7 +1271,6 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 		t.Fatal("check not marked in flight")
 	}
 
-	// a newer tag offers the update; enter downloads the helper again
 	m.updateCheckDone("v3.1.0", nil)
 	if view := m.View(); !strings.Contains(view, "update available") || !strings.Contains(view, "v3.0.0 -> v3.1.0") {
 		t.Fatalf("update not offered:\n%s", view)
@@ -1354,7 +1281,6 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 		t.Fatalf("update download request = %#v", cmd())
 	}
 
-	// completion refreshes the detected version and clears the check
 	m.downloadStarted(voiceHelperTarget)
 	ver = "v3.1.0"
 	m.downloadUpdate(voiceDownloadMsg{target: voiceHelperTarget, done: true})
@@ -1365,7 +1291,6 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 		t.Fatal("stale update tag after reinstall")
 	}
 
-	// the same tag reports up to date; a failure renders the error
 	_, cmd = m.Update(enter)
 	cmd()
 	m.updateCheckDone("v3.1.0", nil)
@@ -1377,7 +1302,6 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 		t.Fatalf("check failure not rendered:\n%s", view)
 	}
 
-	// dev/manual builds show as unknown version
 	ver = "dev"
 	m.refreshInstallState()
 	if view := m.View(); !strings.Contains(view, "installed (unknown version)") {
@@ -1385,8 +1309,6 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	}
 }
 
-// The app runs the latest-tag query as a command and routes the result to
-// the panel.
 func TestVoiceHelperUpdateCheckFlow(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1409,8 +1331,6 @@ func TestVoiceHelperUpdateCheckFlow(t *testing.T) {
 	}
 }
 
-// drainVoiceDownload pumps the download wait command chain until the done
-// message arrives.
 func drainVoiceDownload(t *testing.T, a App, cmd tea.Cmd) App {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -1469,7 +1389,6 @@ func TestVoiceDownloadFlow(t *testing.T) {
 		t.Fatal("helper state not refreshed")
 	}
 
-	// a second request while idle works; failure leaves the panel error
 	a.voiceDownload = func(string, func(float64)) error { return errTest }
 	upd, cmd = a.Update(voiceDownloadRequestMsg{target: voice.ModelCatalog()[0].ID})
 	a = upd.(App)
@@ -1520,14 +1439,12 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 		t.Fatalf("set_model = %q %q", fe.modelKind, fe.modelDir)
 	}
 
-	// info events (helper-side model downloads) do not abort the test
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventInfo, Msg: "downloading silero_vad.onnx"}})
 	a = upd.(App)
 	if !a.voiceTest {
 		t.Fatal("info event aborted the test")
 	}
 
-	// partials route to the panel, not the recording indicator
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "ni hao"}})
 	a = upd.(App)
 	if a.voiceSettingsView.testText != "ni hao" {
@@ -1571,7 +1488,6 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	}
 }
 
-// A cancelled test (timeout) stops the engine and swallows the flushed final.
 func TestVoiceTestTimeoutSwallowsFinal(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1618,7 +1534,6 @@ func TestVoiceTestTimeoutSwallowsFinal(t *testing.T) {
 		t.Fatal("swallow flag not cleared")
 	}
 
-	// stale timeout for an old seq is ignored
 	upd, _ = a.Update(voiceTestTimeoutMsg{seq: a.voiceTestSeq})
 	a = upd.(App)
 	if a.voiceBusy {
@@ -1626,7 +1541,6 @@ func TestVoiceTestTimeoutSwallowsFinal(t *testing.T) {
 	}
 }
 
-// Test blocked on incomplete setup: no engine op, guidance in the panel.
 func TestVoiceTestBlockedWhenNotReady(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1647,7 +1561,6 @@ func TestVoiceTestBlockedWhenNotReady(t *testing.T) {
 	}
 }
 
-// A model change applies to the live engine via set_model.
 func TestVoiceSettingsModelChangeAppliesToEngine(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1665,7 +1578,6 @@ func TestVoiceSettingsModelChangeAppliesToEngine(t *testing.T) {
 	}
 }
 
-// Closing the panel mid-test cancels the recording.
 func TestVoiceSettingsCloseStopsTest(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1702,8 +1614,6 @@ func TestVoiceSettingsCloseStopsTest(t *testing.T) {
 	}
 }
 
-// A cancelled test that flushes no final has its swallow flag cleared by the
-// trailing state idle, so later dictation finals still deliver.
 func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1730,7 +1640,6 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 		t.Fatal("cancel did not arm the final swallow")
 	}
 
-	// helper reports idle after the stop; the swallow must clear
 	sink := &syncWriteCloser{}
 	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
 	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
@@ -1742,9 +1651,6 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 		t.Fatal("state idle did not clear the swallow")
 	}
 
-	// a later final (normal post-stop dictation) delivers again; PasteText
-	// runs synchronously inside Update (the returned cmd only re-arms the
-	// event pump, which would block the test)
 	upd, _ = a.Update(voiceFinalMsg("real dictation"))
 	a = upd.(App)
 	deadline := time.Now().Add(time.Second)
@@ -1756,8 +1662,6 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 	}
 }
 
-// Clicking outside the panel cancels an active test recording (same as esc):
-// the engine stops and the flushed final neither delivers nor verifies.
 func TestVoiceSettingsOutsideClickStopsTest(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1800,7 +1704,6 @@ func TestVoiceSettingsOutsideClickStopsTest(t *testing.T) {
 		t.Fatal("engine not stopped after outside click")
 	}
 
-	// the flushed final is swallowed: no delivery, no verified mark
 	sink := &syncWriteCloser{}
 	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
 	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
@@ -1815,8 +1718,6 @@ func TestVoiceSettingsOutsideClickStopsTest(t *testing.T) {
 	}
 }
 
-// Starting a panel test while dictation is active is refused; the dictation
-// event stream is not hijacked.
 func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -1837,7 +1738,6 @@ func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 		t.Fatalf("no refusal shown:\n%s", a.voiceSettingsView.View())
 	}
 
-	// dictation partials still go to the recording indicator, not the panel
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "dictating"}})
 	a = upd.(App)
 	if a.voicePartial != "dictating" {

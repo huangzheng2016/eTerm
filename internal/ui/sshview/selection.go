@@ -6,8 +6,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// selPoint is a position in the absolute-line coordinate space (see visibleAbsLine):
-// line indexes scrollback rows [0, sbLen) then live screen rows [sbLen, sbLen+h).
 type selPoint struct {
 	line, col int
 }
@@ -42,14 +40,10 @@ func (m *Model) clampMouse(x, y int) (int, int) {
 	return x, y
 }
 
-// visibleAbsLine maps a content-relative row (0-based, within the SSH body) to an
-// absolute line. It mirrors the window split in renderScrollback so highlighting and
-// hit-testing agree.
 func (m *Model) visibleAbsLine(yVis int) int {
 	sbLen := m.emu.ScrollbackLen()
 	h := m.emu.Height()
 	if m.scrollOffset == 0 {
-		// Live view; bottomPad pushes screen content up by bottomPad rows.
 		return sbLen + m.bottomPad + yVis
 	}
 	offset := m.scrollOffset
@@ -103,9 +97,6 @@ func (m *Model) lineWrapped(line int) bool {
 	return m.emu.LineWrapped(line - sbLen)
 }
 
-// selectedText extracts the highlighted text: full rows for interior lines, partial
-// for the first/last. Wide-char placeholders (Width==0) are skipped and trailing
-// spaces trimmed per line.
 func (m *Model) selectedText() string {
 	if !m.sel.active {
 		return ""

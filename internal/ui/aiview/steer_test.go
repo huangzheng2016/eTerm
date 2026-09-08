@@ -9,7 +9,7 @@ import (
 )
 
 func newSteerTestModel() (*Model, *FakeRunner) {
-	fake := NewFakeRunner() // 20ms event delay keeps the run active
+	fake := NewFakeRunner()
 	m := New(fake, fake, fake)
 	m.SetSize(100, 32)
 	return m, fake

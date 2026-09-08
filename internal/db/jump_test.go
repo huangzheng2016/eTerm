@@ -30,11 +30,9 @@ func TestJumpChainPointsBackToHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Editing A: jump to B would eventually reach A -> cycle
 	if !JumpChainPointsBackToHost(d, a.ID, b.ID) {
 		t.Fatal("expected cycle A<-B<-A")
 	}
-	// Editing B: jump to leaf A is ok
 	if JumpChainPointsBackToHost(d, b.ID, a.ID) {
 		t.Fatal("unexpected cycle for B -> A")
 	}

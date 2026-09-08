@@ -2,7 +2,6 @@ package sessionhistview
 
 import "unicode/utf8"
 
-// truncateUTF8BytesShorten trims s to at most maxBytes UTF-8-safe bytes and appends an ellipsis.
 func truncateUTF8BytesEllipsis(s string, maxBytes int) string {
 	if maxBytes <= 0 {
 		return "…"

@@ -18,7 +18,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/voice"
 )
 
-// voice row kinds; the visible row list is built per state (rows()).
 const (
 	vrowEngine = iota
 	vrowHelper
@@ -34,63 +33,53 @@ const (
 	vrowEngineOption
 )
 
-// panel views: the main settings list, the model catalog submenu and the
-// engine picker submenu.
 const (
 	voiceViewMain = iota
 	voiceViewModels
 	voiceViewEngines
 )
 
-// voiceHelperTarget is the download target id for the helper binary; model
-// downloads use the catalog model ID.
 const voiceHelperTarget = "helper"
 
-// voiceRow is one rendered settings row; param/modelIdx/engineIdx qualify
-// the kind.
 type voiceRow struct {
 	kind      int
-	param     voice.ParamSpec // vrowParam
-	modelIdx  int             // vrowModel
-	engineIdx int             // vrowEngineOption
+	param     voice.ParamSpec
+	modelIdx  int
+	engineIdx int
 }
 
-// voiceSettingsModel is the voice input settings overlay (opened from the
-// command palette, the esc menu, or by ctrl+r while the setup is
-// incomplete). Rows render per the selected engine's descriptor; the local
-// engine additionally shows the helper row and the Model submenu.
 type voiceSettingsModel struct {
 	db     *gorm.DB
 	mk     *security.MasterKeyManager
 	cfg    voiceSettings
 	cursor int
-	view   int // voiceView*
-	edit   int // editing row index, -1 when not editing
+	view   int
+	edit   int
 	input  textinput.Model
 
 	modelsRoot        string
-	helperInstalledFn func() bool   // test hook; nil = voice.HelperInstalled
-	helperVersionFn   func() string // test hook; nil = voice.HelperVersion
+	helperInstalledFn func() bool
+	helperVersionFn   func() string
 	helperOK          bool
-	helperVersion     string // raw -version output; ""/"dev"/"0.1.0" = unknown
+	helperVersion     string
 	modelOK           []bool
 
 	checkingUpdate bool
 	updateChecked  bool
-	updateTag      string // latest release tag after a successful check
+	updateTag      string
 	updateErr      string
 
-	dlTarget    string // "" when no download is running
+	dlTarget    string
 	dlPct       float64
 	dlErr       string
 	dlErrTarget string
 
-	customErr string // invalid custom model path, shown on the row
+	customErr string
 
-	fromHotkey bool // opened by ctrl+r with an incomplete setup: show the reason
+	fromHotkey bool
 
 	testing  bool
-	testText string // partial while recording, final when done
+	testText string
 	testErr  string
 }
 
@@ -116,7 +105,6 @@ func (m *voiceSettingsModel) refreshInstallState() {
 		}
 		m.helperVersion = vfn()
 	}
-	// a fresh install state invalidates any previous update check
 	m.checkingUpdate = false
 	m.updateChecked = false
 	m.updateTag = ""
@@ -128,7 +116,6 @@ func (m *voiceSettingsModel) refreshInstallState() {
 	}
 }
 
-// rows builds the visible row list for the current view and engine.
 func (m *voiceSettingsModel) rows() []voiceRow {
 	if m.view == voiceViewModels {
 		rows := make([]voiceRow, 0, len(voice.ModelCatalog())+1)
@@ -165,9 +152,6 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 	return rows
 }
 
-// precisionAvailable reports whether the active model offers an fp32/int8
-// choice: the SenseVoice catalog model always does (its archive carries both
-// weights); a custom directory only when it holds both weight files.
 func (m *voiceSettingsModel) precisionAvailable() bool {
 	if m.cfg.Engine != voiceEngineLocal {
 		return false
@@ -178,8 +162,6 @@ func (m *voiceSettingsModel) precisionAvailable() bool {
 	return voice.ModelByID(m.cfg.ModelID).Kind == voice.ModelKindSenseVoice
 }
 
-// enginePickerDescriptors orders the engine picker: local first, volcano
-// second, everything else in registry order.
 func enginePickerDescriptors() []voice.EngineDescriptor {
 	descs := voice.EngineDescriptors()
 	out := make([]voice.EngineDescriptor, 0, len(descs))
@@ -198,7 +180,6 @@ func enginePickerDescriptors() []voice.EngineDescriptor {
 	return out
 }
 
-// rowCount is the visible row count (mouse hit-testing).
 func (m *voiceSettingsModel) rowCount() int { return len(m.rows()) }
 
 func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
@@ -213,9 +194,6 @@ func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 	}
 }
 
-// adjust steps the numeric rows and toggles the enum rows; returns the
-// persist command when the row changed. VAD changes apply live via SetVAD,
-// precision changes via SetModel.
 func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 	rows := m.rows()
 	if m.cursor < 0 || m.cursor >= len(rows) {
@@ -257,8 +235,6 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 	return nil
 }
 
-// startDownload requests a helper or model download; one download runs at a
-// time.
 func (m *voiceSettingsModel) startDownload(target string) tea.Cmd {
 	if m.dlTarget != "" {
 		return nil
@@ -268,8 +244,6 @@ func (m *voiceSettingsModel) startDownload(target string) tea.Cmd {
 	return func() tea.Msg { return voiceDownloadRequestMsg{target: target} }
 }
 
-// helperAction downloads the helper when missing (or an update is
-// available); otherwise it asks the app to check the latest release tag.
 func (m *voiceSettingsModel) helperAction() tea.Cmd {
 	if !m.helperOK || m.updateAvailable() {
 		return m.startDownload(voiceHelperTarget)
@@ -286,7 +260,6 @@ func (m *voiceSettingsModel) updateAvailable() bool {
 	return m.helperOK && m.updateTag != "" && m.updateTag != m.helperVersion
 }
 
-// updateCheckDone applies the latest-tag check result.
 func (m *voiceSettingsModel) updateCheckDone(tag string, err error) {
 	m.checkingUpdate = false
 	m.updateChecked = true
@@ -297,8 +270,6 @@ func (m *voiceSettingsModel) updateCheckDone(tag string, err error) {
 	m.updateTag = tag
 }
 
-// modelAction selects an installed model (persisted, clearing any custom
-// path) or starts its download.
 func (m *voiceSettingsModel) modelAction(i int) tea.Cmd {
 	spec := voice.ModelCatalog()[i]
 	if m.modelOK[i] {
@@ -347,7 +318,6 @@ func (m *voiceSettingsModel) leaveEngines() {
 	m.cursor = 0
 }
 
-// selectEngine applies the engine picker choice and returns to the main view.
 func (m *voiceSettingsModel) selectEngine(idx int) tea.Cmd {
 	descs := enginePickerDescriptors()
 	if idx < 0 || idx >= len(descs) {
@@ -362,9 +332,6 @@ func (m *voiceSettingsModel) selectEngine(idx int) tea.Cmd {
 	return m.persist(false)
 }
 
-// commitEdit applies the edited value: engine params persist encrypted and
-// rebuild the engine; the custom model path is validated before persisting
-// (empty clears it) and applies live via set_model.
 func (m *voiceSettingsModel) commitEdit(rows []voiceRow) tea.Cmd {
 	if m.edit < 0 || m.edit >= len(rows) {
 		m.edit = -1
@@ -501,14 +468,11 @@ func (m *voiceSettingsModel) paste(msg tea.PasteMsg) {
 	}
 }
 
-// downloadStarted marks a download in flight (the app accepted the request).
 func (m *voiceSettingsModel) downloadStarted(target string) {
 	m.dlTarget = target
 	m.dlPct = 0
 }
 
-// downloadUpdate applies one progress/done event; failures stay visible on
-// the affected row until the next attempt.
 func (m *voiceSettingsModel) downloadUpdate(msg voiceDownloadMsg) {
 	if !msg.done {
 		if m.dlTarget == msg.target {
@@ -648,7 +612,6 @@ func (m *voiceSettingsModel) testValue() string {
 	return "enter to record a sample"
 }
 
-// statusLine summarizes the readiness gate (what ctrl+r does next).
 func (m *voiceSettingsModel) statusLine() string {
 	if issue := voiceSetupIssue(m.cfg, m.modelsRoot); issue != "" {
 		return "setup incomplete - " + issue
@@ -656,9 +619,6 @@ func (m *voiceSettingsModel) statusLine() string {
 	return "ready - ctrl+r starts recording"
 }
 
-// noticeText is the top-of-panel hint shown when ctrl+r routed here because
-// the setup is incomplete; it names the missing piece and clears itself once
-// the setup becomes ready while the panel is open.
 func (m *voiceSettingsModel) noticeText() string {
 	if !m.fromHotkey {
 		return ""

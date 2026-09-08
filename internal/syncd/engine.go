@@ -86,7 +86,6 @@ func (e *Engine) Push(tenant string, entries []SyncEntry) (int64, error) {
 		found := e.DB.Where("tenant = ? AND sync_id = ?", tenant, entry.SyncID).First(&existing).Error == nil
 
 		if found {
-			// LWW: skip if incoming is not newer
 			if !entry.UpdatedAt.After(existing.UpdatedAt) {
 				continue
 			}

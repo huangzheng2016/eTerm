@@ -38,7 +38,6 @@ func newQuickConnectModel() *quickConnectModel {
 	return q
 }
 
-// syncInputWidth sets textinput width so placeholder is not truncated to one character (bubbles textinput when Width<=0).
 func (q *quickConnectModel) syncInputWidth(termW int) {
 	iw := 44
 	if termW > 0 {
@@ -92,7 +91,6 @@ func parseQuickConnect(raw string) (hostname string, port int, username string) 
 	port = 22
 	username = "root"
 
-	// user@host:port
 	if at := strings.Index(raw, "@"); at >= 0 {
 		username = raw[:at]
 		raw = raw[at+1:]

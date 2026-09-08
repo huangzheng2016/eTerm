@@ -7,10 +7,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// KeyMod represents a key modifier.
 type KeyMod = uv.KeyMod
 
-// Modifier keys.
 const (
 	ModShift = uv.ModShift
 	ModAlt   = uv.ModAlt
@@ -18,35 +16,27 @@ const (
 	ModMeta  = uv.ModMeta
 )
 
-// KeyPressEvent represents a key press event.
 type KeyPressEvent = uv.KeyPressEvent
 
-// SendKey returns the default key map.
 func (e *Emulator) SendKey(k uv.KeyEvent) {
 	var seq string
 
-	ack := e.isModeSet(ansi.ModeCursorKeys)    // Application cursor keys mode
-	akk := e.isModeSet(ansi.ModeNumericKeypad) // Application keypad keys mode
+	ack := e.isModeSet(ansi.ModeCursorKeys)
+	akk := e.isModeSet(ansi.ModeNumericKeypad)
 
 	//nolint:godox
-	// TODO: Support Kitty, CSI u, and XTerm modifyOtherKeys.
 	switch key := k.(type) {
 	case KeyPressEvent:
 		if key.Mod&ModAlt != 0 {
-			// Handle alt-modified keys
 			seq = "\x1b" + seq
-			key.Mod &^= ModAlt // Remove the Alt modifier for easier matching
+			key.Mod &^= ModAlt
 		}
 
 		//nolint:godox
-		// FIXME: We remove any Base and Shifted codes to properly handle
-		// comparison. This is a workaround for the fact that we don't support
-		// extended keys yet.
 		key.BaseCode = 0
 		key.ShiftedCode = 0
 
 		switch key {
-		// Control keys
 		case KeyPressEvent{Code: KeySpace, Mod: ModCtrl}:
 			seq += "\x00"
 		case KeyPressEvent{Code: 'a', Mod: ModCtrl}:
@@ -291,7 +281,6 @@ func (e *Emulator) SendKey(k uv.KeyEvent) {
 			seq += "\x1b[Z"
 
 		default:
-			// Handle the rest of the keys.
 			if key.Mod == 0 {
 				seq += string(key.Code)
 			}
@@ -301,7 +290,6 @@ func (e *Emulator) SendKey(k uv.KeyEvent) {
 	}
 }
 
-// Key codes.
 const (
 	KeyExtended         = uv.KeyExtended
 	KeyUp               = uv.KeyUp

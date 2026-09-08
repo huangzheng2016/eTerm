@@ -193,7 +193,6 @@ func TestContextUsageInBottomRow(t *testing.T) {
 		t.Fatal("ctx shown without usage data")
 	}
 
-	// ctx plus a long model name still fits the frame at 80x24.
 	long := strings.Repeat("very-long-provider-name-", 4)
 	fake.Add(Provider{Name: long, Type: "openai"})
 	fake.Switch(long, "x")
@@ -215,8 +214,6 @@ func TestRunningIndicatorAboveInput(t *testing.T) {
 
 	content, _ := m.chatView()
 	lines := strings.Split(plain(content), "\n")
-	// The input box takes the 5 rows above the last row; the status row sits
-	// right above it.
 	statusRow := lines[len(lines)-7]
 	if strings.TrimSpace(statusRow) == "" {
 		t.Fatal("status row blank while running")
@@ -461,7 +458,7 @@ func TestTitleFitsWithVoiceActive(t *testing.T) {
 	m.store.Add(Provider{Name: "a-very-long-provider-name-for-width-testing", Type: "openai", Model: "m"})
 	m.store.Switch("a-very-long-provider-name-for-width-testing", "m")
 	m.SetVoiceActive(true)
-	m.status = statusRunning // spinner visible too
+	m.status = statusRunning
 
 	content, _ := m.chatView()
 	line := strings.Split(plain(content), "\n")[0]
@@ -585,7 +582,6 @@ func TestThinkingTailWindowThenCollapsed(t *testing.T) {
 	m.handleEvent(<-m.events)
 	m.flush()
 
-	// Streaming: a fixed tail window shows only the last 2 lines.
 	live := plain(m.blocks[1].cache)
 	if !strings.Contains(live, "line3") || !strings.Contains(live, "line4") {
 		t.Fatalf("live window missing tail lines:\n%s", live)
@@ -594,7 +590,6 @@ func TestThinkingTailWindowThenCollapsed(t *testing.T) {
 		t.Fatalf("live window must not show head lines:\n%s", live)
 	}
 
-	// Done: collapsed to the first 2 lines plus a hint.
 	m.handleEvent(<-m.events)
 	collapsed := plain(m.blocks[1].cache)
 	if !strings.Contains(collapsed, "line1") || !strings.Contains(collapsed, "line2") {
@@ -619,7 +614,7 @@ func TestThinkingCollapsesWhenToolStarts(t *testing.T) {
 	m.send()
 	m.handleEvent(<-m.events)
 	m.flush()
-	m.handleEvent(<-m.events) // tool start seals the thinking block mid-run
+	m.handleEvent(<-m.events)
 	sealed := plain(m.blocks[1].cache)
 	if !strings.Contains(sealed, "t1") || strings.Contains(sealed, "t3") {
 		t.Fatalf("sealed thinking must collapse to the head:\n%s", sealed)
@@ -728,7 +723,7 @@ func TestQueuedMessageCollapsesTailThinking(t *testing.T) {
 	}
 
 	m.input.SetValue("second")
-	m.send() // queued mid-run; the user block seals the thinking tail
+	m.send()
 	got := plain(m.blocks[1].cache)
 	if !strings.Contains(got, "t1") || strings.Contains(got, "t3") {
 		t.Fatalf("queued message must collapse the thinking block: %q", got)

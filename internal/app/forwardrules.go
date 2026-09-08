@@ -13,17 +13,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// hostForwardState shares one SSH connection for multiple port-forward rules on the same host.
 type hostForwardState struct {
 	res   *internalssh.ConnectResult
 	rules map[uint]*internalssh.PortForwardCloser
 }
 
-// forwardRuleAttachMsg completes registration of a started listener after dial or session reuse.
 type forwardRuleAttachMsg struct {
 	ruleID uint
 	hostID uint
-	res    *internalssh.ConnectResult // nil when reusing an existing hostForwardState
+	res    *internalssh.ConnectResult
 	pfc    *internalssh.PortForwardCloser
 }
 
@@ -128,8 +126,6 @@ func (a App) handleForwardRuleStart(ruleID uint) (App, tea.Cmd) {
 
 	if a.forwardByHost != nil {
 		if st, ok := a.forwardByHost[hostID]; ok && st != nil && st.res != nil {
-			// Capture client by value — st may be mutated or closed by a concurrent
-			// handleForwardRuleStop before this closure executes.
 			client := st.res.Client
 			r := rule
 			return a, func() tea.Msg {
@@ -154,8 +150,6 @@ func (a App) attachForward(msg forwardRuleAttachMsg) (App, tea.Cmd) {
 	st := a.forwardByHost[msg.hostID]
 	if msg.res != nil {
 		if old := a.forwardByHost[msg.hostID]; old != nil && old.res != nil {
-			// A concurrent dial already attached this host; the displaced
-			// session and its listeners must not leak.
 			for _, pfc := range old.rules {
 				if pfc != nil {
 					_ = pfc.Close()

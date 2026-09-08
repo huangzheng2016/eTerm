@@ -11,8 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// steerToolModel blocks its first call until release, emits a tool call, then
-// captures the second call's input and answers with text.
 type steerToolModel struct {
 	release chan struct{}
 	entered chan struct{}
@@ -91,7 +89,7 @@ func TestSteerInjectedAtStepBoundary(t *testing.T) {
 	a := newSteerAgent(t, m, queue)
 
 	done := drainRun(a, ctx, "list tabs")
-	<-m.entered // first model call in flight, turn is running
+	<-m.entered
 	a.Enqueue("focus on the second tab")
 	a.Enqueue("then close it")
 	close(m.release)
@@ -124,8 +122,6 @@ func TestSteerInjectedAtStepBoundary(t *testing.T) {
 	}
 }
 
-// chainedModel blocks only its first call until release, then always answers
-// text (no tool calls, one call per turn).
 type chainedModel struct {
 	release chan struct{}
 	entered chan struct{}
@@ -158,8 +154,6 @@ func (m *chainedModel) Stream(ctx context.Context, input []*schema.Message, opts
 	}), nil
 }
 
-// A message queued after the last model call of a turn is run as a chained
-// turn instead of waiting for the user to resend it.
 func TestSteerQueuedAtTurnEndChainsNewTurn(t *testing.T) {
 	ctx := context.Background()
 	m := &chainedModel{release: make(chan struct{}), entered: make(chan struct{})}
@@ -220,12 +214,6 @@ func TestSteerCancelClearsQueue(t *testing.T) {
 	}
 }
 
-// Regression: a mid-turn steer injection must never split an assistant
-// tool-call / tool-result pair in history. The previous onInject hook
-// appended from the ADK flow goroutine and raced the runner's event loop,
-// producing assistant(tool_calls) -> user([steer]) -> tool in 3/300 runs;
-// both that interleave and the patched duplicate it triggers in
-// patchtoolcalls are rejected by the model APIs.
 func TestSteerInjectionNeverSplitsToolPairs(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < 300; i++ {

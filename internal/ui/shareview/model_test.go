@@ -34,11 +34,11 @@ func TestInvalidHoursBlocked(t *testing.T) {
 	for _, bad := range []string{"abc", "0", "169", ""} {
 		m := New(types.RemotePeer{ID: "p1", Name: "peer"}, "", "", "peer", 4)
 		m.hours.SetValue(bad)
-		closed, _ := m.Update(key("enter")) // focus hours -> name
+		closed, _ := m.Update(key("enter"))
 		if closed {
 			t.Fatal("first enter should switch field")
 		}
-		closed, cmd := m.Update(key("enter")) // submit
+		closed, cmd := m.Update(key("enter"))
 		if closed || cmd != nil {
 			t.Fatalf("hours %q should block submit", bad)
 		}

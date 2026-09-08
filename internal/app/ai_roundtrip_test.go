@@ -34,10 +34,6 @@ func (w *syncWriteCloser) String() string {
 	return w.buf.String()
 }
 
-// serveAIToolRequests mimics the App.Update side of the tool bridge without a
-// tea runtime: handle each request, and for send_keys run the wait tick and
-// the done handler like the aiToolSendKeysDoneMsg case does, following poll
-// re-arms until the request is answered.
 func serveAIToolRequests(a App, ch <-chan aiToolRequest) {
 	for req := range ch {
 		_, cmd := a.handleAIToolRequest(req)
@@ -75,7 +71,6 @@ func TestAIExecutorRoundTrip(t *testing.T) {
 		t.Fatalf("ListTabs = %+v %v", tabs, err)
 	}
 
-	// Feed output through the chunk path so the transcript has content.
 	updated, _ := sv.Update(sshview.ChunkMsg{StreamID: sv.StreamID(), Data: []byte("hello ai\r\n")})
 	sv = updated.(*sshview.Model)
 	a.tabs[0].Model = sv
@@ -105,8 +100,6 @@ func TestAIExecutorRoundTrip(t *testing.T) {
 	}
 }
 
-// sendKeysToPty runs one SendKeys call against a fake pty and returns the
-// bytes written to its stdin.
 func sendKeysToPty(t *testing.T, keys string) string {
 	t.Helper()
 	ch := make(chan aiToolRequest, 16)
@@ -159,7 +152,6 @@ func TestAIExecutorRoundTripCancel(t *testing.T) {
 	}
 }
 
-// cronFireAgent records Run inputs on top of fakeAgent.
 type cronFireAgent struct {
 	fakeAgent
 	runs []string
@@ -170,9 +162,6 @@ func (a *cronFireAgent) Run(ctx context.Context, input string) <-chan ai.Event {
 	return a.fakeAgent.Run(ctx, input)
 }
 
-// The fullscreen AI panel must sit at overlay origin (0,0) exactly: clicks
-// outside overlayBounds dismiss the panel, so any gap makes edge clicks
-// close it and shifts every drag selection.
 func TestAIOverlayBoundsFillFrame(t *testing.T) {
 	store := &ai.Store{}
 	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
@@ -189,7 +178,6 @@ func TestAIOverlayBoundsFillFrame(t *testing.T) {
 	}
 }
 
-// The notify tool request is answered and emitted as an OSC 9 raw sequence.
 func TestAINotifyEmitsOSC9(t *testing.T) {
 	store := &ai.Store{}
 	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
@@ -217,8 +205,6 @@ func TestAINotifyEmitsOSC9(t *testing.T) {
 	}
 }
 
-// A cron fire routed through the panel's send path starts a new run when the
-// panel is idle and queues onto the active run when one is in flight.
 func TestAICronFireDelivery(t *testing.T) {
 	store := &ai.Store{}
 	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})

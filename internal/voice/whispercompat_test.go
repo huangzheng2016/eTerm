@@ -42,8 +42,6 @@ func TestWhisperCompatDescriptor(t *testing.T) {
 	eng.Close()
 }
 
-// The buffered utterance lands as one WAV multipart POST; the JSON text
-// field becomes the final transcript.
 func TestWhisperCompatFeedPostsUtterance(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
@@ -126,7 +124,6 @@ func TestWhisperCompatFeedPostsUtterance(t *testing.T) {
 	}
 }
 
-// A non-200 response surfaces as an error event.
 func TestWhisperCompatFeedHTTPError(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")

@@ -5,9 +5,8 @@ import (
 	"github.com/charmbracelet/x/ansi/parser"
 )
 
-// handleEsc handles an escape sequence.
 func (e *Emulator) handleEsc(cmd ansi.Cmd) {
-	e.flushGrapheme() // Flush any pending grapheme before handling ESC sequences.
+	e.flushGrapheme()
 	if !e.handlers.handleEsc(int(cmd)) {
 		var str string
 		if inter := cmd.Intermediate(); inter != 0 {
@@ -20,13 +19,11 @@ func (e *Emulator) handleEsc(cmd ansi.Cmd) {
 	}
 }
 
-// fullReset performs a full terminal reset as in [ansi.RIS].
 func (e *Emulator) fullReset() {
 	e.scrs[0].Reset()
 	e.scrs[1].Reset()
 	e.resetTabStops()
 
-	// XXX: Do we reset all modes here? Investigate.
 	e.resetModes()
 
 	e.gl, e.gr = 0, 1

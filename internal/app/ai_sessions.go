@@ -7,7 +7,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 )
 
-// aiSessionHistoryCap bounds the persisted history JSON (~1MB).
 const aiSessionHistoryCap = 1 << 20
 
 type aiSession struct {
@@ -23,20 +22,17 @@ type aiSession struct {
 
 func (aiSession) TableName() string { return "ai_sessions" }
 
-// aiCronJob is the persisted form of ai.CronJob; jobs belong to the session
-// that created them and fire only while that session is active in the panel.
 type aiCronJob struct {
 	ID              string `gorm:"primaryKey;size:32"`
 	SessionID       string `gorm:"index;size:32;not null;default:''"`
 	Prompt          string `gorm:"not null;default:''"`
-	IntervalMinutes int    `gorm:"not null;default:0"` // 0 = one-shot
+	IntervalMinutes int    `gorm:"not null;default:0"`
 	NextFireAt      time.Time
 	CreatedAt       time.Time
 }
 
 func (aiCronJob) TableName() string { return "ai_cron" }
 
-// LoadCronJobs implements ai.CronStore.
 func (b *aiBridge) LoadCronJobs(sessionID string) ([]ai.CronJob, error) {
 	var rows []aiCronJob
 	if err := b.db.Where("session_id = ?", sessionID).Find(&rows).Error; err != nil {
@@ -52,7 +48,6 @@ func (b *aiBridge) LoadCronJobs(sessionID string) ([]ai.CronJob, error) {
 	return out, nil
 }
 
-// UpsertCronJob implements ai.CronStore.
 func (b *aiBridge) UpsertCronJob(job ai.CronJob) error {
 	return b.db.Save(&aiCronJob{
 		ID: job.ID, SessionID: job.SessionID, Prompt: job.Prompt,
@@ -60,24 +55,18 @@ func (b *aiBridge) UpsertCronJob(job ai.CronJob) error {
 	}).Error
 }
 
-// DeleteCronJob implements ai.CronStore.
 func (b *aiBridge) DeleteCronJob(id string) error {
 	return b.db.Where("id = ?", id).Delete(&aiCronJob{}).Error
 }
 
-// DeleteSessionCronJobs implements ai.CronStore.
 func (b *aiBridge) DeleteSessionCronJobs(sessionID string) error {
 	return b.db.Where("session_id = ?", sessionID).Delete(&aiCronJob{}).Error
 }
 
-// MoveCronJobs implements ai.CronStore.
 func (b *aiBridge) MoveCronJobs(from, to string) error {
 	return b.db.Model(&aiCronJob{}).Where("session_id = ?", from).Update("session_id", to).Error
 }
 
-// SaveSession implements aiview.SessionStore: export the agent history and
-// upsert the session row. Empty history never creates a row, but an existing
-// row is updated (e.g. emptied by /undo).
 func (b *aiBridge) SaveSession(id, title, forkOf string) {
 	b.setCronSession(id)
 	b.mu.Lock()
@@ -106,7 +95,6 @@ func (b *aiBridge) SaveSession(id, title, forkOf string) {
 	}
 }
 
-// Sessions implements aiview.SessionStore: most recently updated first.
 func (b *aiBridge) Sessions() []aiview.SessionEntry {
 	var rows []aiSession
 	if err := b.db.Select("id", "title", "provider", "model", "updated_at").
@@ -122,8 +110,6 @@ func (b *aiBridge) Sessions() []aiview.SessionEntry {
 	return out
 }
 
-// abandonCronSession wipes the current session's cron jobs (/new or a switch
-// to another session): jobs die with their conversation.
 func (b *aiBridge) abandonCronSession() {
 	if b.cron == nil {
 		return
@@ -134,11 +120,6 @@ func (b *aiBridge) abandonCronSession() {
 	b.cron.AbandonSession()
 }
 
-// LoadSession implements aiview.SessionStore: import the row's history into
-// the agent (or stash it until the first agent exists) and return it so the
-// panel can rebuild its blocks. A switch wipes the previous session's cron
-// jobs and resumes the loaded session's jobs; resuming the session already
-// active in the panel keeps its jobs.
 func (b *aiBridge) LoadSession(id string) ([]byte, bool) {
 	var row aiSession
 	if err := b.db.Select("history").Where("id = ?", id).First(&row).Error; err != nil {
@@ -161,7 +142,6 @@ func (b *aiBridge) LoadSession(id string) ([]byte, bool) {
 	return row.History, true
 }
 
-// UndoLastTurn implements aiview.SessionStore.
 func (b *aiBridge) UndoLastTurn() {
 	b.mu.Lock()
 	agent := b.agent
@@ -176,9 +156,6 @@ func (b *aiBridge) UndoLastTurn() {
 	}
 }
 
-// ResetHistory implements aiview.SessionStore. Synchronous: slash commands
-// are rejected while a run is active, so the agent mutex is free. The current
-// session's cron jobs are wiped.
 func (b *aiBridge) ResetHistory() {
 	b.abandonCronSession()
 	b.mu.Lock()

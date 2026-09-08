@@ -54,7 +54,6 @@ func TestClassifyKind(t *testing.T) {
 }
 
 func TestClassifyTimeoutBeforeRefused(t *testing.T) {
-	// net.OpError carrying a timeout should classify as timeout, not unknown.
 	opErr := &net.OpError{Op: "dial", Net: "tcp", Err: timeoutErr{}}
 	if got := Classify(opErr); got.Kind != ErrKindTimeout {
 		t.Fatalf("timeout OpError = %v, want ErrKindTimeout", got.Kind)

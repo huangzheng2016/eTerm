@@ -17,7 +17,6 @@ func titleMsgsForChunk(t *testing.T, m *Model, data string) []TitleMsg {
 	msg := cmd()
 	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
-		// No title commands: the batch collapsed to the lone waitChunk.
 		return nil
 	}
 	var out []TitleMsg
@@ -57,7 +56,6 @@ func TestOSCTitleZeroFiresOnce(t *testing.T) {
 	m := New(nil, "test", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = m.Close() })
 
-	// OSC 0 sets title and icon name; both callbacks fire with the same text.
 	if got := titleMsgsForChunk(t, m, "\x1b]0;both\a"); len(got) != 1 {
 		t.Fatalf("OSC 0 -> %d title msgs, want 1", len(got))
 	}

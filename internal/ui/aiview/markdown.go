@@ -9,10 +9,8 @@ import (
 )
 
 type markdown struct {
-	full      *glamour.TermRenderer
-	transient *glamour.TermRenderer
-	// wide renders the same text without wrapping; alignBreaks compares the
-	// wrapped output against it to find soft-wrap continuations for copying.
+	full          *glamour.TermRenderer
+	transient     *glamour.TermRenderer
 	fullWide      *glamour.TermRenderer
 	transientWide *glamour.TermRenderer
 	width         int
@@ -56,8 +54,6 @@ func (m *markdown) render(text string, final bool) string {
 	return out
 }
 
-// renderLogical renders text unwrapped and returns its plain-text lines:
-// the logical lines the wrapped display lines were broken from.
 func (m *markdown) renderLogical(text string, final bool) []string {
 	r := m.transientWide
 	if final {

@@ -33,7 +33,6 @@ func NewToast() ToastModel {
 	return ToastModel{}
 }
 
-// Dismiss hides the toast immediately (e.g. when a long-running action completes).
 func (t ToastModel) Dismiss() ToastModel {
 	t.visible = false
 	return t

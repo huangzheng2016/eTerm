@@ -5,13 +5,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// MergeResult holds merge statistics.
 type MergeResult struct {
 	Merged int
 	Failed int
 }
 
-// MergeRecords applies pulled records to the local database inside a transaction.
 func MergeRecords(database *gorm.DB, mk *security.MasterKeyManager, passphrase string, records []SyncRecord) (MergeResult, error) {
 	var keys, hosts, fwds, snippets []SyncRecord
 	for _, r := range records {

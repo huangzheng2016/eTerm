@@ -11,8 +11,6 @@ func debugKeysEnabled() bool {
 	return os.Getenv("ETERM_DEBUG_KEYS") != ""
 }
 
-// logKeyPress logs the raw key shape to stderr when ETERM_DEBUG_KEYS is set.
-// Use this to see what the terminal actually sends when shortcuts fail.
 func logKeyPress(context string, filterLabel string, itemCount int, msg tea.KeyPressMsg) {
 	if !debugKeysEnabled() {
 		return

@@ -8,13 +8,13 @@ import (
 )
 
 type Model struct {
-	inputs    [2]textinput.Model // 0=name, 1=command
+	inputs    [2]textinput.Model
 	focused   int
 	db        *gorm.DB
 	width     int
 	height    int
 	err       string
-	snippetID uint // 0 = new
+	snippetID uint
 }
 
 func New(database *gorm.DB, snippet *db.Snippet) Model {

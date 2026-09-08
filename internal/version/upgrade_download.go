@@ -23,7 +23,6 @@ func UpgradeStagingDir(tag string) (string, error) {
 	return dir, nil
 }
 
-// DownloadUpgradeArchive downloads verify extract to staging; returns extracted binary path and whether SHA256SUMS was used.
 func DownloadUpgradeArchive(tag, archiveBase, innerName string) (string, bool, error) {
 	stageDir, err := UpgradeStagingDir(tag)
 	if err != nil {

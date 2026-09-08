@@ -7,8 +7,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// startPortForwards loads port forward configs for a host and starts them.
-// Closers are attached to the InteractiveSession so they stop when the session ends.
 func startPortForwards(database *gorm.DB, client *ssh.Client, hostID uint, is *internalssh.InteractiveSession) {
 	var forwards []db.PortForward
 	database.Where("host_id = ?", hostID).Find(&forwards)

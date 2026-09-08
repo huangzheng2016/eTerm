@@ -27,7 +27,6 @@ func startDetachedDaemon(exe string, args []string, env []string, logFile *os.Fi
 	return cmd.Process.Pid, nil
 }
 
-// stillActive is the Windows STILL_ACTIVE exit code (259), missing from x/sys.
 const stillActive = 259
 
 func isProcessAlive(pid int) bool {

@@ -32,13 +32,11 @@ func TestOSC133CommandLifecycle(t *testing.T) {
 		t.Fatalf("exit code = %d want 0", events[3].exitCode)
 	}
 
-	// Non-zero exit code, ST terminator.
 	term.WriteString("\x1b]133;C\x1b\\\x1b]133;D;127\x1b\\")
 	if len(events) != 6 || events[5].exitCode != 127 {
 		t.Fatalf("events = %v", events)
 	}
 
-	// D without an exit code reports -1.
 	term.WriteString("\x1b]133;D\a")
 	if len(events) != 7 || events[6].exitCode != -1 {
 		t.Fatalf("events = %v", events)

@@ -109,7 +109,6 @@ func TestWebSocketRelayData(t *testing.T) {
 		t.Fatalf("got frame type=%#v len=%d, want DATA len=%d", f.Type, len(f.Payload), len(largePayload))
 	}
 
-	// Client -> daemon: ack and input frames pass through.
 	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(41 * 1024)})); err != nil {
 		t.Fatal(err)
 	}
@@ -402,12 +401,10 @@ func TestClientWSForeignStreamFrameDropped(t *testing.T) {
 		t.Fatalf("got frame %#v, want OPEN stream 99", f)
 	}
 
-	// A different client connection injects a frame on client1's stream.
 	if err := client2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(111)})); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
-	// The owner connection's frame still goes through.
 	if err := client1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(222)})); err != nil {
 		t.Fatal(err)
 	}
@@ -443,12 +440,10 @@ func TestDaemonWSForeignStreamFrameDropped(t *testing.T) {
 		t.Fatalf("got frame %#v, want OPEN stream 99", f)
 	}
 
-	// A different daemon connection injects output on peer-a's stream.
 	if err := daemon2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("injected"))})); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
-	// The owner daemon's frame still goes through.
 	if err := daemon1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("legit"))})); err != nil {
 		t.Fatal(err)
 	}

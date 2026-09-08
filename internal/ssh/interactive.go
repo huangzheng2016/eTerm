@@ -7,8 +7,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// InteractiveSession is a non-blocking interactive shell: caller reads Stdout and writes Stdin.
-// Call Wait in a goroutine or read from Done; close Stdin and Session to terminate.
 type InteractiveSession struct {
 	Client        *ssh.Client
 	Session       *ssh.Session
@@ -20,17 +18,14 @@ type InteractiveSession struct {
 	stopKeepalive chan struct{}
 }
 
-// SetClosers attaches resources (agent conns, jump clients) to be closed with the session.
 func (i *InteractiveSession) SetClosers(c []io.Closer) {
 	i.closers = c
 }
 
-// AddCloser appends a single closer (e.g. port forward) to be cleaned up with the session.
 func (i *InteractiveSession) AddCloser(c io.Closer) {
 	i.closers = append(i.closers, c)
 }
 
-// Close releases local resources (remote shell may still exit).
 func (i *InteractiveSession) Close() error {
 	if i.stopKeepalive != nil {
 		select {
@@ -57,8 +52,6 @@ func (i *InteractiveSession) Close() error {
 	return err
 }
 
-// NewInteractiveSession opens a PTY shell without blocking on Wait().
-// rows/cols are PTY dimensions (height x width in cells).
 func NewInteractiveSession(client *ssh.Client, rows, cols int, forwardAgent bool) (*InteractiveSession, error) {
 	rows, cols = NormalizePTYSize(rows, cols)
 

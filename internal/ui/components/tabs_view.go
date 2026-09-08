@@ -14,7 +14,6 @@ func (t TabsModel) View() string {
 
 	avail := t.width
 	if avail <= 0 {
-		// No width constraint — render all tabs
 		var tabs []string
 		for i, item := range t.items {
 			if i == t.activeIdx {
@@ -29,7 +28,6 @@ func (t TabsModel) View() string {
 
 	layout := t.layout()
 
-	// Build the row
 	var parts []string
 	if layout.hasLeft {
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(arrowLeft))

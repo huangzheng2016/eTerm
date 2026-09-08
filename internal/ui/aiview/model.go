@@ -53,15 +53,13 @@ const (
 type block struct {
 	kind     blockKind
 	text     string
-	args     string // tool input (blockTool only)
-	output   string // tool result (blockTool only)
+	args     string
+	output   string
 	toolDone bool
 	final    bool
-	queued   bool // blockUser only: submitted mid-run, not yet acked by the agent
+	queued   bool
 	cache    string
-	// joins has one textselection break kind per cache line: which lines are
-	// soft-wrap continuations, so copying joins them like the terminal does.
-	joins []textselection.LineBreak
+	joins    []textselection.LineBreak
 }
 
 type agentEventMsg struct{ ev AgentEvent }
@@ -84,22 +82,17 @@ type Model struct {
 	viewport viewport.Model
 	spinner  spinner.Model
 
-	blocks []block
-	cancel context.CancelFunc
-	events <-chan AgentEvent
-	// lineBreaks mirrors the viewport content lines (see rebuild).
+	blocks     []block
+	cancel     context.CancelFunc
+	events     <-chan AgentEvent
 	lineBreaks []textselection.LineBreak
 
-	dirty        bool
-	flushPending bool
-	expandTools  bool
-	sel          textselection.Selection
-	// toast is a transient confirmation at the title row's right edge (e.g.
-	// "Copied N chars"); toastSeq invalidates stale clear ticks.
-	toast    string
-	toastSeq int
-	// selAutoScroll scrolls the conversation while a drag selection sits in
-	// the top/bottom edge band; selSeq invalidates stale ticks on a new drag.
+	dirty         bool
+	flushPending  bool
+	expandTools   bool
+	sel           textselection.Selection
+	toast         string
+	toastSeq      int
 	selAutoScroll textselection.AutoScroll
 	selSeq        int
 
@@ -115,9 +108,6 @@ type Model struct {
 	sCursor     int
 	sFilter     string
 
-	// history holds submitted inputs for up/down recall; histIdx is the
-	// browse position (-1 = not browsing) and histDraft preserves the input
-	// the user was typing when browsing started.
 	history   []string
 	histIdx   int
 	histDraft string
@@ -128,15 +118,11 @@ type Model struct {
 	taskDetailID string
 	dOffset      int
 
-	// slashCursor is the highlighted row of the slash-command menu;
-	// slashMenuOff dismisses it (esc) until the input changes.
 	slashCursor  int
 	slashMenuOff bool
 
-	voiceActive bool // recording indicator in the title (voice input)
+	voiceActive bool
 
-	// injected holds programmatic user messages (cron wakes) buffered while a
-	// picker mode is open; flushed on return to chat.
 	injected []string
 }
 
@@ -146,8 +132,6 @@ func New(runner AgentRunner, store ProviderStore, sessions SessionStore) *Model 
 	in.ShowLineNumbers = false
 	in.Prompt = ""
 	in.SetHeight(3)
-	// The real terminal cursor follows the caret (see View); the virtual
-	// inverse-video caret would double-render it.
 	in.SetVirtualCursor(false)
 
 	sp := spinner.New(spinner.WithSpinner(spinner.Dot))
@@ -175,7 +159,6 @@ func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	_, _, cw, vh := m.layout()
-	// The input box is cw-2 wide total; its interior wrap is cw-6.
 	m.input.SetWidth(cw - 6)
 	m.viewport = viewport.New(viewport.WithWidth(cw), viewport.WithHeight(vh))
 	if m.md == nil || m.md.width != cw {
@@ -184,11 +167,6 @@ func (m *Model) SetSize(w, h int) {
 	m.renderAll()
 }
 
-// layout returns the panel geometry. The AI panel renders fullscreen: the
-// border box fills the frame exactly (boxW x boxH), so overlay mouse coords
-// map 1:1 (overlayBounds centers a same-sized box at offset 0,0). lipgloss
-// Width/Height include border and padding, so the interior wrap width is
-// boxW-2(border)-2(padding).
 func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
 	boxW = m.width
 	if boxW < 20 {
@@ -199,8 +177,6 @@ func (m *Model) layout() (boxW, boxH, contentW, viewH int) {
 		boxH = 8
 	}
 	contentW = boxW - 4
-	// Non-viewport rows: border(2) + title(1) + blank(1) + status(1) +
-	// input box(5) + last row(1).
 	viewH = boxH - 11
 	if viewH < 1 {
 		viewH = 1
@@ -215,10 +191,8 @@ func (m *Model) contentWidth() int {
 
 func (m *Model) Running() bool { return m.status == statusRunning }
 
-// SetVoiceActive toggles the recording indicator in the title bar.
 func (m *Model) SetVoiceActive(v bool) { m.voiceActive = v }
 
-// InsertText appends dictated text to the chat input (voice delivery).
 func (m *Model) InsertText(text string) {
 	if m.mode != modeChat {
 		return
@@ -226,8 +200,6 @@ func (m *Model) InsertText(text string) {
 	m.input.SetValue(m.input.Value() + text)
 }
 
-// SubmitInput sends the current input as if enter was pressed (voice
-// sentence-end "enter" with the panel open).
 func (m *Model) SubmitInput() tea.Cmd {
 	if m.mode != modeChat {
 		return nil
@@ -262,13 +234,8 @@ func (m *Model) send() tea.Cmd {
 	return cmd
 }
 
-// queueOrRun delivers prompt as a user message: queued onto the active run
-// (dim Queued marker, acked by EventSteer) or starting a new run when idle.
-// ok is false only when the enqueue failed, so the caller can keep its draft.
 func (m *Model) queueOrRun(prompt string) (cmd tea.Cmd, ok bool) {
 	if m.status == statusRunning {
-		// Queue instead of blocking: the agent injects it at the next step
-		// boundary and acks with EventSteer, which undims the block.
 		if err := m.runner.Enqueue(prompt); err != nil {
 			m.errMsg = "queue failed: " + err.Error()
 			return nil, false
@@ -302,14 +269,8 @@ func (m *Model) queueOrRun(prompt string) (cmd tea.Cmd, ok bool) {
 	return tea.Batch(waitEvent(ch), m.spinner.Tick), true
 }
 
-// maxInjectedBuffer bounds programmatic messages buffered while a picker
-// mode is open; oldest are dropped beyond it (latest state wins).
 const maxInjectedBuffer = 10
 
-// InjectUserMessage delivers a programmatic user message (e.g. a cron wake)
-// without touching the draft input and without slash-command interception:
-// queued onto the active run or starting a new one, same as send(). While a
-// picker mode is open the message is buffered and flushed on return to chat.
 func (m *Model) InjectUserMessage(text string) tea.Cmd {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -326,8 +287,6 @@ func (m *Model) InjectUserMessage(text string) tea.Cmd {
 	return cmd
 }
 
-// flushInjected delivers buffered programmatic messages once the panel is
-// back in chat mode.
 func (m *Model) flushInjected() tea.Cmd {
 	if m.mode != modeChat || len(m.injected) == 0 {
 		return nil
@@ -361,7 +320,6 @@ func (m *Model) clearSession() {
 	m.viewport.SetContent("")
 }
 
-// handleEvent applies one agent event; returns true when the stream is terminal.
 func (m *Model) handleEvent(ev AgentEvent) bool {
 	switch ev.Kind {
 	case EventTextDelta:
@@ -393,7 +351,6 @@ func (m *Model) handleEvent(ev AgentEvent) bool {
 			}
 		}
 	case EventSteer:
-		// Oldest queued block first; the agent acks in queue order.
 		for i := range m.blocks {
 			if m.blocks[i].kind == blockUser && m.blocks[i].queued {
 				m.blocks[i].queued = false
@@ -423,9 +380,6 @@ func (m *Model) openBlock(kind blockKind) *block {
 	return &m.blocks[len(m.blocks)-1]
 }
 
-// collapseThinking re-renders block i when it is a thinking block that just
-// stopped being the stream tail, folding its live tail-window into the
-// collapsed head view.
 func (m *Model) collapseThinking(i int) {
 	if i >= 0 && m.blocks[i].kind == blockThinking {
 		m.renderBlock(i)
@@ -457,7 +411,6 @@ func (m *Model) finish() {
 	m.dirty = false
 }
 
-// dropQueued removes queued (not yet injected) user blocks; returns the count.
 func (m *Model) dropQueued() int {
 	var kept []block
 	n := 0
@@ -488,7 +441,6 @@ func (m *Model) flush() {
 	m.dirty = false
 }
 
-// truncateCells truncates s to max terminal cells (ANSI- and wide-rune-aware).
 func truncateCells(s string, max int) string {
 	return ansi.Truncate(s, max, "...")
 }
@@ -496,7 +448,7 @@ func truncateCells(s string, max int) string {
 func (m *Model) renderBlock(i int) {
 	b := &m.blocks[i]
 	cw := m.contentWidth()
-	var logical []string // unwrapped source lines; nil means all real breaks
+	var logical []string
 	switch b.kind {
 	case blockUser:
 		prefix := "You: "
@@ -512,9 +464,6 @@ func (m *Model) renderBlock(i int) {
 			Render(prefix + b.text)
 	case blockThinking:
 		lines := strings.Split(strings.TrimRight(b.text, "\n"), "\n")
-		// Live (stream tail) shows a fixed tail window that scrolls with the
-		// deltas; sealed blocks collapse to the head plus a hint; ctrl+o
-		// (expandTools) shows everything.
 		live := i == len(m.blocks)-1 && m.status == statusRunning
 		shown := lines
 		hint := ""
@@ -545,8 +494,6 @@ func (m *Model) renderBlock(i int) {
 			state = ui.SuccessStyle.Render("done")
 			stateW = 4
 		}
-		// Bound every line to the box interior width or the outer box
-		// re-wraps it and the frame grows a row.
 		label := truncateCells(b.text, max(0, cw-9-stateW))
 		head := ui.SelectedStyle.Render("▸ tool: "+label) + " " + state
 		lines := []string{head}
@@ -585,8 +532,6 @@ func (m *Model) renderBlock(i int) {
 	case blockAssistant:
 		final := b.final || m.status != statusRunning
 		out := m.md.render(b.text, final)
-		// Glamour does not break overlong words (URLs); hard-wrap so no
-		// line exceeds the box interior width.
 		b.cache = strings.Trim(lipgloss.NewStyle().Width(cw).Render(out), "\n")
 		logical = m.md.renderLogical(b.text, final)
 		if final {
@@ -609,8 +554,6 @@ func (m *Model) rebuild() {
 	}
 	atBottom := m.viewport.AtBottom()
 	parts := make([]string, 0, len(m.blocks))
-	// lineBreaks tracks each content line's break kind to the previous line,
-	// so a copy joins soft-wrapped lines like the terminal does.
 	breaks := []textselection.LineBreak{{Kind: textselection.BreakNewline}}
 	for i := range m.blocks {
 		parts = append(parts, m.blocks[i].cache)
@@ -623,7 +566,6 @@ func (m *Model) rebuild() {
 			breaks = append(breaks, br)
 		}
 		if i < len(m.blocks)-1 {
-			// The blank separator line and the next block's first line.
 			breaks = append(breaks,
 				textselection.LineBreak{Kind: textselection.BreakNewline},
 				textselection.LineBreak{Kind: textselection.BreakNewline})
@@ -644,9 +586,6 @@ func (m *Model) rebuild() {
 	}
 }
 
-// contentPoint maps overlay-local mouse coords to a conversation content
-// line and column: the viewport starts below border+title+blank (row 3)
-// and right of border+padding (col 2).
 func (m *Model) contentPoint(x, y int) (line, col int) {
 	vh := m.viewport.Height()
 	if vh < 1 {
@@ -662,18 +601,14 @@ func (m *Model) contentPoint(x, y int) (line, col int) {
 	return m.viewport.YOffset() + row, x - 2
 }
 
-// selectionAutoScrollMsg is the tick that scrolls the conversation while a
-// drag selection sits in the top/bottom edge band.
 type selectionAutoScrollMsg struct{ seq int }
 
 const selectionAutoScrollInterval = 60 * time.Millisecond
 
-// toastClearMsg expires the title-row toast.
 type toastClearMsg struct{ seq int }
 
 const toastDuration = 3 * time.Second
 
-// setToast shows a transient confirmation at the title row's right edge.
 func (m *Model) setToast(text string) tea.Cmd {
 	m.toast = text
 	m.toastSeq++
@@ -692,9 +627,6 @@ func (m *Model) queueSelectionAutoScroll() tea.Cmd {
 	})
 }
 
-// scrollSelectionOnce scrolls the conversation one row in the auto-scroll
-// direction and extends the caret to the new edge line. False means the
-// viewport cannot scroll further.
 func (m *Model) scrollSelectionOnce() bool {
 	vh := m.viewport.Height()
 	switch m.selAutoScroll.Dir {
@@ -718,8 +650,6 @@ func (m *Model) scrollSelectionOnce() bool {
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
-	// Mode transitions land in update; flush buffered cron wakes when a
-	// picker closed back into chat.
 	return model, tea.Batch(cmd, m.flushInjected())
 }
 
@@ -792,8 +722,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.stats.TokensBefore, msg.stats.TokensAfter, msg.stats.MessagesBefore, msg.stats.MessagesAfter)})
 		m.renderBlock(len(m.blocks) - 1)
 		m.rebuild()
-		// Persist the compacted history like /undo does: SaveSession exports
-		// the agent's live history, so quitting now would lose the compaction.
 		return m, m.scheduleSave()
 	case spinner.TickMsg:
 		if m.status == statusRunning {
@@ -840,8 +768,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.rebuild()
 				text := m.sel.TextJoined(strings.Split(m.viewport.GetContent(), "\n"), m.lineBreaks)
 				if text != "" {
-					// Toast inside the panel: the app-level toast renders
-					// behind the fullscreen overlay.
 					return m, tea.Batch(
 						tea.SetClipboard(text),
 						m.setToast(fmt.Sprintf("Copied %d chars", len([]rune(text)))),
@@ -880,8 +806,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// History browsing owns up/down (a recalled "/..." must not open the
-	// slash menu).
 	if m.histIdx >= 0 {
 		switch msg.String() {
 		case "up":
@@ -912,7 +836,6 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.slashCursor = 0
 			return m, nil
 		case "enter":
-			// A full command submits; anything else completes first.
 			if strings.TrimSpace(m.input.Value()) != matches[m.slashCursor].name {
 				m.input.SetValue(matches[m.slashCursor].name)
 				m.slashCursor = 0
@@ -928,8 +851,6 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sel = textselection.Selection{}
 		m.selAutoScroll.Stop()
 		m.rebuild()
-		// Esc only hides the panel; the run keeps going in the background
-		// (status bar shows "ai running"). ctrl+c is the interrupt.
 		return m, func() tea.Msg { return CloseMsg{} }
 	case "ctrl+c":
 		if m.status == statusRunning {
@@ -989,7 +910,6 @@ func (m *Model) chatKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	old := m.input.Value()
 	m.input, cmd = m.input.Update(msg)
 	if m.input.Value() != old {
-		// Any edit re-arms the slash menu and resets its cursor.
 		m.slashMenuOff = false
 		m.slashCursor = 0
 	}
@@ -1029,8 +949,6 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-// humanizeTokens abbreviates a token count for the title bar: 950 -> "950",
-// 104448 -> "104k", 1048576 -> "1M".
 func humanizeTokens(n int) string {
 	switch {
 	case n >= 1_000_000:
@@ -1046,8 +964,6 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 	m.syncViewportHeight()
 	cw := m.contentWidth()
 
-	// Title: name, voice recording indicator, copy toast. The model/context
-	// summary lives at the bottom-right corner instead.
 	title := ui.TitleStyle.Render("AI Assistant")
 	if m.voiceActive {
 		title += " " + ui.ErrorStyle.Render("REC")
@@ -1059,8 +975,6 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 		}
 	}
 
-	// The last row carries the error (left) and the model/context summary
-	// (right, dim); it never adds a row.
 	right := ""
 	if m.store != nil && m.store.Active() != "" {
 		right = m.store.Active()
@@ -1097,22 +1011,17 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 		Width(m.contentWidth() - 2).
 		Render(m.input.View())
 
-	// The slash menu sits between the conversation and the input box; its
-	// rows come out of the viewport height, so the frame size is unchanged.
 	menu := m.slashMenuView()
 	menuRows := 0
 	if menu != "" {
 		menuRows = strings.Count(menu, "\n") + 1
 	}
 
-	// The running indicator reuses the blank row above the input box.
 	statusRow := ""
 	if m.status == statusRunning {
 		statusRow = m.spinner.View()
 	}
 
-	// Real cursor at the textarea caret: outer border(1)+padding(1), then
-	// title+blank+body+menu+status above the input box, then its border(1)+padding(1).
 	var cursor *tea.Cursor
 	if c := m.input.Cursor(); c != nil {
 		c.X += 4
@@ -1128,9 +1037,6 @@ func (m *Model) chatView() (string, *tea.Cursor) {
 	return lipgloss.JoinVertical(lipgloss.Left, rows...), cursor
 }
 
-// syncViewportHeight sizes the conversation viewport to the layout height
-// minus the slash menu rows currently shown. A shrink while scrolled to the
-// bottom keeps the latest content in view.
 func (m *Model) syncViewportHeight() {
 	if m.viewport.Width() == 0 {
 		return

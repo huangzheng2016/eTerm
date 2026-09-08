@@ -8,7 +8,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
-// overlayBounds calculates the top-left position and size of a centered overlay.
 func (a App) overlayBounds(rendered string) (ox, oy, ow, oh int) {
 	lines := strings.Split(rendered, "\n")
 	oh = len(lines)
@@ -30,14 +29,11 @@ func (a App) overlayBounds(rendered string) (ox, oy, ow, oh int) {
 	return
 }
 
-// handleOverlayMouse checks if a click is inside the overlay.
-// Outside click dismisses the active overlay. Inside click calls onClick if non-nil.
 func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick func(lx, ly int) (tea.Model, tea.Cmd)) (tea.Model, tea.Cmd) {
 	ox, oy, ow, oh := a.overlayBounds(rendered)
 	lx := msg.X - ox
 	ly := msg.Y - oy
 	if lx < 0 || ly < 0 || lx >= ow || ly >= oh {
-		// Click outside -- dismiss
 		hadUpgradePrompt := a.upgradePrompt != nil
 		a.escMenu = nil
 		a.quickConnect = nil
@@ -53,7 +49,6 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.upgradePrompt = nil
 		a.connError = nil
 		a.voiceSettingsView = nil
-		// cancel an in-flight mic test the same way esc-close does
 		a, voiceCmd := a.endVoiceTest()
 		if a.confirm.IsActive() {
 			a.confirm, _ = a.confirm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
@@ -71,8 +66,6 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 	return a, nil
 }
 
-// commandPaletteMouse handles clicks inside the command palette overlay.
-// Layout: border(1) + padding(1) + title(1) + input(1) + blank(1) + items from ly=4.
 func (a App) commandPaletteMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.commandPalette == nil {
 		return a, nil
@@ -93,8 +86,6 @@ func (a App) commandPaletteMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// escMenuMouse handles a click inside the ESC menu overlay.
-// Layout: border(1) + padding(1) + title(1) + blank(1) + items at ly=4,5,6.
 func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	itemY := ly - 4
 	if itemY >= 0 && itemY <= int(escMenuSync) {
@@ -108,8 +99,6 @@ func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// voiceSettingsMouse handles a click inside the voice settings overlay.
-// Layout: border(1) + padding(1) + title(1) + blank(1) [+ notice(2)] + rows.
 func (a App) voiceSettingsMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.voiceSettingsView == nil {
 		return a, nil
@@ -126,8 +115,6 @@ func (a App) voiceSettingsMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// snippetPickerMouse handles a click inside the snippet picker.
-// Layout: border(1) + padding(1) + title(1) + blank(1) + items at ly=4.
 func (a App) snippetPickerMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	sp := a.snippetPicker
 	if len(sp.snippets) == 0 {
@@ -143,8 +130,6 @@ func (a App) snippetPickerMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// quickConnectMouse handles clicks inside the quick connect overlay.
-// Input row is ly=4; hint row is ly=6 where left half connects and right half cancels.
 func (a App) quickConnectMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.quickConnect == nil {
 		return a, nil
@@ -171,8 +156,6 @@ func (a App) quickConnectMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// batchActionsMouse handles clicks inside the batch actions overlay.
-// Step 0 rows are at ly=6..8, step 1 input row is ly=7.
 func (a App) batchActionsMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.batchActions == nil {
 		return a, nil
@@ -219,8 +202,6 @@ func (a App) batchActionsMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// batchTagMouse handles clicks inside the batch tag overlay.
-// Input row is ly=6; hint row is ly=8 where left half applies and right half cancels.
 func (a App) batchTagMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.batchTag == nil {
 		return a, nil
@@ -254,8 +235,6 @@ func adjustMouse(msg tea.MouseClickMsg, lx, ly int) tea.MouseClickMsg {
 	return tea.MouseClickMsg(m)
 }
 
-// aiOverlayMouse shifts a mouse message into the AI overlay's local
-// coordinate frame (the fullscreen border box, see overlayBounds).
 func (a App) aiOverlayMouse(msg tea.Msg) tea.Msg {
 	ox, oy, _, _ := a.overlayBounds(a.aiView.View().Content)
 	switch m := msg.(type) {

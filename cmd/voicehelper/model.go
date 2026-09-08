@@ -26,9 +26,6 @@ func defaultModelRoot() string {
 	return filepath.Join(cache, "eterm", "voice-models")
 }
 
-// asrModelPaths returns (model, tokens) for a model directory, picking the
-// model file by recognizer kind: sensevoice prefers fp32 over int8,
-// sensevoice-int8 requires the quantized file, paraformer prefers int8.
 func asrModelPaths(dir, kind string) (string, string, error) {
 	tokens := filepath.Join(dir, "tokens.txt")
 	if _, err := os.Stat(tokens); err != nil {
@@ -40,7 +37,7 @@ func asrModelPaths(dir, kind string) (string, string, error) {
 		names = []string{"model.int8.onnx"}
 	case "paraformer":
 		names = []string{"model.int8.onnx", "model.onnx"}
-	default: // sensevoice
+	default:
 		names = []string{"model.onnx", "model.int8.onnx"}
 	}
 	for _, name := range names {
@@ -57,7 +54,6 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// ensureVADModel downloads the silero VAD model into root on first use.
 func ensureVADModel(ctx context.Context, root string, ev *eventWriter) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
@@ -72,8 +68,6 @@ func ensureVADModel(ctx context.Context, root string, ev *eventWriter) (string, 
 	return vadPath, nil
 }
 
-// ensureSenseVoice downloads the default SenseVoice model into root on first
-// use, reporting progress through ev. Returns the model directory.
 func ensureSenseVoice(ctx context.Context, root string, ev *eventWriter) (string, error) {
 	asrDir := filepath.Join(root, senseVoiceDir)
 	if _, _, err := asrModelPaths(asrDir, "sensevoice"); err != nil {
@@ -95,8 +89,6 @@ func ensureSenseVoice(ctx context.Context, root string, ev *eventWriter) (string
 	return asrDir, nil
 }
 
-// ensureModels downloads the default ASR model and VAD model into root on
-// first use, reporting progress through ev. Returns (asrDir, vadModel).
 func ensureModels(ctx context.Context, root string, ev *eventWriter) (string, string, error) {
 	vadPath, err := ensureVADModel(ctx, root, ev)
 	if err != nil {

@@ -38,7 +38,6 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 	mgr.setSender(sender)
 	ctx := context.Background()
 
-	// New: starts a persistent shell and answers with its name.
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	name := string(f.Payload)
@@ -46,7 +45,6 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 		t.Fatalf("name = %q", name)
 	}
 
-	// List: shows the session as attached.
 	handleOpen(rt, openTarget0(relay.TargetTmuxList, "", 2), mgr, sender, ctx, ctx)
 	lf := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	var listed []relay.TmuxSessionInfo
@@ -57,13 +55,11 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 		t.Fatalf("listed = %+v", listed)
 	}
 
-	// Some output lands in the ring.
 	go func() { _, _ = fakes[0].stdout.Write([]byte("hello")) }()
 	if _, data := waitDataBytes(t, out, 5); string(data) != "hello" {
 		t.Fatalf("data = %q", data)
 	}
 
-	// Closing the tab detaches instead of killing the shell.
 	handleFrame(rt, relay.Frame{Type: relay.FrameClose, StreamID: 1}, mgr, sender, ctx)
 	if mgr.get(1) == nil {
 		t.Fatal("persistent session removed on tab close")
@@ -72,7 +68,6 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 		t.Fatal("persistent session shell killed on tab close")
 	}
 
-	// Attach from a fresh stream replays retained output on the new stream id.
 	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, 9), mgr, sender, ctx, ctx)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	deadline := time.After(2 * time.Second)
@@ -105,7 +100,6 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 		t.Fatal("attach stream not registered")
 	}
 
-	// Rename, then kill: the shell is closed and the session is gone.
 	handleOpen(rt, func() relay.Frame {
 		payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: name, Name: "work"})
 		return relay.Frame{Type: relay.FrameOpen, StreamID: 10, Payload: payload}
@@ -137,8 +131,6 @@ func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
 	name := string(waitDaemonFrame(t, out, relay.FrameOpenOK).Payload)
 
-	// A second client attaches while the first still holds stream 1: the old
-	// stream is closed with a takeover notice before the attach proceeds.
 	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, 9), mgr, sender, ctx, ctx)
 	f := waitDaemonFrame(t, out, relay.FrameClose)
 	if f.StreamID != 1 || string(f.Payload) != relay.CloseSessionTakenOver {
@@ -151,7 +143,6 @@ func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 		t.Fatal("stream not re-keyed after takeover")
 	}
 
-	// A third attach evicts stream 9 the same way.
 	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, 10), mgr, sender, ctx, ctx)
 	f = waitDaemonFrame(t, out, relay.FrameClose)
 	if f.StreamID != 9 || string(f.Payload) != relay.CloseSessionTakenOver {
@@ -178,7 +169,7 @@ func TestReapSkipsDaemonSessions(t *testing.T) {
 	sr := newStreamRelay(fake.is)
 	mgr.add(5, sr)
 	mgr.namedAdd("shell-x", 5, time.Now().Add(-time.Hour))
-	mgr.reapDetached(time.Now()) // no sender: everything else would be stamped
+	mgr.reapDetached(time.Now())
 	if mgr.get(5) == nil {
 		t.Fatal("persistent session reaped")
 	}
@@ -221,7 +212,6 @@ func TestDaemonSessionShellExitRemovesNamedEntry(t *testing.T) {
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
 	name := string(waitDaemonFrame(t, out, relay.FrameOpenOK).Payload)
 
-	// The user types exit: the shell ends on its own.
 	_ = fakes[0].stdout.Close()
 	if f := waitDaemonFrame(t, out, relay.FrameClose); f.StreamID != 1 {
 		t.Fatalf("close stream = %d", f.StreamID)
@@ -234,7 +224,6 @@ func TestDaemonSessionShellExitRemovesNamedEntry(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// List must not show the dead session.
 	handleOpen(rt, openTarget0(relay.TargetTmuxList, "", 2), mgr, sender, ctx, ctx)
 	if f := waitDaemonFrame(t, out, relay.FrameOpenOK); string(f.Payload) != "[]" {
 		t.Fatalf("listed = %s", f.Payload)
@@ -253,8 +242,6 @@ func TestDaemonSessionConcurrentAttachKeepsSingleRegistration(t *testing.T) {
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
 	name := string(waitDaemonFrame(t, out, relay.FrameOpenOK).Payload)
 
-	// Two clients attach the same name at once; the later attach wins and the
-	// stream must stay registered under exactly one id.
 	var wg sync.WaitGroup
 	for _, id := range []uint32{9, 10} {
 		wg.Add(1)

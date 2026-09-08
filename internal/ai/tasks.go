@@ -31,8 +31,6 @@ const (
 	TaskCancelled TaskStatus = "cancelled"
 )
 
-// agentFactory builds a fresh sub-agent: same model, tools and middlewares as
-// the parent, minus the task tools (no recursive spawn).
 type agentFactory func(ctx context.Context) (*adk.ChatModelAgent, error)
 
 type agentTask struct {
@@ -46,26 +44,21 @@ type agentTask struct {
 	tail    []TaskActivity
 }
 
-// TaskActivity is one entry in a task's activity tail: a text snippet, a tool
-// call summary, or a status transition.
 type TaskActivity struct {
-	Kind string // text | tool | status
+	Kind string
 	Text string
 }
 
-// TaskSnapshot is a read-only view of one task for the panel's tasks browser.
 type TaskSnapshot struct {
 	ID            string
 	Task          string
 	Status        TaskStatus
 	StartedSecAgo int
-	Tail          []TaskActivity // oldest first, capped at taskTailMax
+	Tail          []TaskActivity
 }
 
-// TaskManager runs background sub-agents for an Agent. Sub-agent events are
-// consumed internally; only the final text comes back via wait.
 type TaskManager struct {
-	mu      sync.Mutex // guards every agentTask field
+	mu      sync.Mutex
 	tasks   []*agentTask
 	counter int
 	factory agentFactory
@@ -91,7 +84,7 @@ type WaitAgentInput struct {
 }
 
 type WaitAgentOutput struct {
-	Status string `json:"status"` // running | done | error | cancelled
+	Status string `json:"status"`
 	Result string `json:"result,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
@@ -101,7 +94,7 @@ type ListAgentsInput struct{}
 type AgentInfo struct {
 	ID            string `json:"id"`
 	Task          string `json:"task"`
-	Status        string `json:"status"` // running | done | error | cancelled
+	Status        string `json:"status"`
 	StartedSecAgo int    `json:"started_sec_ago"`
 }
 
@@ -155,8 +148,6 @@ func (tm *TaskManager) spawn(ctx context.Context, in *SpawnAgentInput) (*SpawnAg
 	return &SpawnAgentOutput{ID: t.id}, nil
 }
 
-// CancelAll cancels every running task; their wait callers unblock with
-// status cancelled. Called when the owning Agent is replaced.
 func (tm *TaskManager) CancelAll() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -167,8 +158,6 @@ func (tm *TaskManager) CancelAll() {
 	}
 }
 
-// CancelTask cancels one running task; its wait caller unblocks with status
-// cancelled. Returns false when the id is unknown or not running.
 func (tm *TaskManager) CancelTask(id string) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -184,9 +173,6 @@ func (tm *TaskManager) CancelTask(id string) bool {
 	return false
 }
 
-// recordActivity appends one entry to the task's activity tail; the tail is a
-// ring buffer capped at taskTailMax (oldest dropped). Text is collapsed to
-// one line and truncated.
 func (tm *TaskManager) recordActivity(t *agentTask, kind, text string) {
 	text = strings.Join(strings.Fields(text), " ")
 	tm.mu.Lock()
@@ -197,7 +183,6 @@ func (tm *TaskManager) recordActivity(t *agentTask, kind, text string) {
 	}
 }
 
-// Snapshots returns every task with its activity tail, oldest spawn first.
 func (tm *TaskManager) Snapshots() []TaskSnapshot {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -269,8 +254,6 @@ func (tm *TaskManager) list(ctx context.Context, in *ListAgentsInput) (*ListAgen
 	return out, nil
 }
 
-// runTask executes one sub-agent turn on a detached ctx (the task keeps
-// running after the spawning tool call returns), stoppable via CancelAll.
 func (tm *TaskManager) runTask(ctx context.Context, t *agentTask, taskCtx string) {
 	result, err := tm.runAgent(ctx, t, taskCtx)
 	tm.mu.Lock()

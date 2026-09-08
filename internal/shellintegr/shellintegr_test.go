@@ -74,9 +74,6 @@ func TestTmuxCommand(t *testing.T) {
 	}
 }
 
-// TestTmuxCommandEnvAssignments runs the generated command through a real
-// shell with a fake "zsh" binary: the env prefixes must parse as assignments,
-// not as command words (fully quoted 'KEY=value' used to break this).
 func TestTmuxCommandEnvAssignments(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -104,8 +101,6 @@ func TestTmuxCommandEnvAssignments(t *testing.T) {
 	}
 }
 
-// TestZshWrapperStartsClean runs a real zsh through the wrapper files: the
-// user's .zshrc must be sourced exactly once and no recursion error may occur.
 func TestZshWrapperStartsClean(t *testing.T) {
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
@@ -113,7 +108,7 @@ func TestZshWrapperStartsClean(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("ZDOTDIR", "") // isolate from a parent shell wrapped by eTerm
+	t.Setenv("ZDOTDIR", "")
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("echo USER_ZSHRC_RAN\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

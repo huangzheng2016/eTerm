@@ -72,7 +72,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch m.mode {
 		case modeNone:
-			// Grid navigation
 			switch msg.String() {
 			case "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
 				newCur, changed := components.GridMove(msg.String(), m.gridCursor, len(m.sshKeys), m.gridLayout)

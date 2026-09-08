@@ -16,24 +16,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// Bounds for one local command: a hard timeout and a per-stream output cap
-// (keeps the tail, where command failures show up).
 const (
 	localCommandTimeout = 120 * time.Second
 	localOutputMaxRunes = 16000
 )
 
-// localOperator implements the eino-ext commandline.Operator interface
-// against the host filesystem (the official package ships only a Docker
-// sandbox operator).
-//
-// Scope is deliberately unrestricted: reads and writes go to any path the
-// user account can. That is the product decision behind the local tools -
-// they run without permission gates and the LLM-facing prompt
-// (localToolsPrompt) warns that the tools are unsandboxed. A home-dir jail
-// would break legitimate work outside ~ (projects in /opt, /tmp scratch
-// files), and a blocklist of sensitive paths would be security theater next
-// to an unrestricted bash tool.
 type localOperator struct{}
 
 func (localOperator) ReadFile(_ context.Context, path string) (string, error) {
@@ -64,9 +51,6 @@ func (localOperator) Exists(_ context.Context, path string) (bool, error) {
 	return false, err
 }
 
-// RunCommand executes argv without a shell. A non-zero exit or a timeout is
-// reported in CommandOutput, not as a Go error: for the LLM both are normal
-// command results.
 func (localOperator) RunCommand(ctx context.Context, command []string) (*commandline.CommandOutput, error) {
 	if len(command) == 0 {
 		return nil, errors.New("empty command")
@@ -126,11 +110,6 @@ type BashOutput struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// safeTool wraps an InvokableTool so a failure comes back as tool output
-// instead of a Go error: eino aborts the whole agent run on any tool error,
-// and a bad edit (non-absolute path, ambiguous old_str) is recoverable. Calls
-// are serialized because StrReplaceEditor keeps per-file undo history in a
-// plain map.
 type safeTool struct {
 	mu    sync.Mutex
 	inner tool.InvokableTool
@@ -150,9 +129,6 @@ func (s *safeTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	return out, nil
 }
 
-// BuildLocalTools builds the local-machine tools: bash (custom, no
-// official equivalent exists) and the official eino-ext str_replace_editor
-// for viewing/creating/editing local files.
 func BuildLocalTools() ([]tool.BaseTool, error) {
 	op := localOperator{}
 	run := func(ctx context.Context, in *BashInput) (*BashOutput, error) {

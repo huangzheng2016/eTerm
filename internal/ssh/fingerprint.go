@@ -12,7 +12,6 @@ import (
 
 type FingerprintCallback func(hostname string, port int, algorithm string, fingerprint string) bool
 
-// ProbeHostKey connects to a host just to retrieve its public key, then disconnects.
 func ProbeHostKey(hostname string, port int, timeout time.Duration) (algorithm, fingerprint string, err error) {
 	addr := net.JoinHostPort(hostname, fmt.Sprintf("%d", port))
 	var hostKey ssh.PublicKey
@@ -22,7 +21,7 @@ func ProbeHostKey(hostname string, port int, timeout time.Duration) (algorithm, 
 		Auth: []ssh.AuthMethod{},
 		HostKeyCallback: func(h string, remote net.Addr, key ssh.PublicKey) error {
 			hostKey = key
-			return fmt.Errorf("probe complete") // abort after getting key
+			return fmt.Errorf("probe complete")
 		},
 		Timeout: timeout,
 	}
@@ -37,7 +36,6 @@ func ProbeHostKey(hostname string, port int, timeout time.Duration) (algorithm, 
 	if c != nil {
 		c.Close()
 	}
-	// We expect the "probe complete" error from our callback
 	if hostKey == nil {
 		return "", "", fmt.Errorf("failed to retrieve host key from %s: %v", addr, err)
 	}
@@ -45,15 +43,12 @@ func ProbeHostKey(hostname string, port int, timeout time.Duration) (algorithm, 
 	return hostKey.Type(), ssh.FingerprintSHA256(hostKey), nil
 }
 
-// NeedsFingerprint checks if a host fingerprint is already stored in the database.
 func NeedsFingerprint(database *gorm.DB, hostname string, port int) bool {
 	var existing db.HostFingerprint
 	result := database.Where("hostname = ? AND port = ?", hostname, port).First(&existing)
 	return result.Error == gorm.ErrRecordNotFound
 }
 
-// LiveHostKeyDiffersFromStored reports whether the live server key differs from the DB record.
-// When no row exists, returns (false, "", "", zero, nil) so callers still use NeedsFingerprint first.
 func LiveHostKeyDiffersFromStored(database *gorm.DB, hostname string, port int, timeout time.Duration) (differs bool, newAlgo, newFP string, stored db.HostFingerprint, err error) {
 	var existing db.HostFingerprint
 	result := database.Where("hostname = ? AND port = ?", hostname, port).First(&existing)

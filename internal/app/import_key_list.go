@@ -269,7 +269,6 @@ func (m *importKeyListModel) View() string {
 			}
 			rows += fmt.Sprintf("%s%s\n", cursor, style.Render(alias))
 		}
-		// "enter new name" option
 		newNameStyle := ui.DimStyle
 		cursor := "  "
 		if m.aliasCursor == len(item.rec.Aliases) {

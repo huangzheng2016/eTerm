@@ -47,13 +47,11 @@ func newImportHostList(items []importHostEntry) *importHostListModel {
 }
 
 func (m *importHostListModel) setPageSize(windowHeight int) {
-	// border(2) + padding(2) + title(1) + hint(1) + blank(1) + pager(1) = 8 overhead
 	ps := windowHeight - 8
 	if ps < 3 {
 		ps = 3
 	}
 	m.pageSize = ps
-	// clamp cursor/page to new size
 	totalPages := (len(m.items) + m.pageSize - 1) / m.pageSize
 	if totalPages < 1 {
 		totalPages = 1
@@ -134,7 +132,7 @@ func (m *importHostListModel) Update(msg tea.KeyPressMsg) (closed bool, proceed 
 
 	case hostListStateAlias:
 		item := &m.items[m.cursor]
-		maxIdx := len(item.rec.Aliases) // last = "enter new name..."
+		maxIdx := len(item.rec.Aliases)
 		switch msg.String() {
 		case "up", "k":
 			if m.aliasCursor > 0 {
@@ -304,7 +302,6 @@ func (m *importHostListModel) viewAlias() string {
 		}
 		rows += cursor + style.Render(a) + "\n"
 	}
-	// "enter new name..." option
 	lastIdx := len(item.rec.Aliases)
 	cursor := "  "
 	style := ui.DimStyle

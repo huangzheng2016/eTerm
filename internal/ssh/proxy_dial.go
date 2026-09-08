@@ -14,7 +14,6 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// normalizeProxyType returns "" for direct connection, or "http" / "socks5".
 func normalizeProxyType(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" {
@@ -40,9 +39,7 @@ func decryptProxyPassword(h *db.Host, masterKey *security.MasterKeyManager) (str
 	return string(b), nil
 }
 
-// dialWithProxy opens a TCP connection to targetAddr ("host:port") using the host's proxy when configured.
 func dialWithProxy(h *db.Host, targetAddr string, masterKey *security.MasterKeyManager) (net.Conn, error) {
-	// ProxyCommand takes highest priority.
 	if h.ProxyCommand != "" {
 		host, portStr, _ := net.SplitHostPort(targetAddr)
 		port, _ := strconv.Atoi(portStr)
@@ -81,9 +78,6 @@ func dialWithProxy(h *db.Host, targetAddr string, masterKey *security.MasterKeyM
 	}
 }
 
-// bufferedConn wraps a net.Conn so that Read drains the bufio.Reader first.
-// This prevents data loss when a bufio.Reader has buffered bytes beyond a
-// protocol header (HTTP CONNECT response, SOCKS5 handshake, etc.).
 type bufferedConn struct {
 	net.Conn
 	r *bufio.Reader
@@ -121,7 +115,6 @@ func dialHTTPConnect(proxyAddr, targetAddr, user, pass string) (net.Conn, error)
 		_ = c.Close()
 		return nil, err
 	}
-	// Parse "HTTP/1.x <code> <reason>" — only accept 200.
 	parts := strings.SplitN(strings.TrimSpace(status), " ", 3)
 	if len(parts) < 2 || parts[1] != "200" {
 		_ = c.Close()

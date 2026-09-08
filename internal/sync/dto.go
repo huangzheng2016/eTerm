@@ -11,7 +11,6 @@ const (
 	TypePortFwd RecordType = "port_forward"
 )
 
-// SyncRecord is the wire format envelope. Payload is age-encrypted, base64-encoded JSON.
 type SyncRecord struct {
 	SyncID    string     `json:"sync_id"`
 	Type      RecordType `json:"type"`

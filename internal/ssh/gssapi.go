@@ -18,17 +18,13 @@ import (
 	"github.com/jcmturner/gokrb5/v8/types"
 )
 
-// gssAPIClient implements golang.org/x/crypto/ssh.GSSAPIClient using gokrb5.
 type gssAPIClient struct {
 	krb          *client.Client
 	sessKey      types.EncryptionKey
 	cleanupPaths []string
 }
 
-// InitSecContext builds a KRB5 AP_REQ token for the SSH server.
-// target is "host@hostname" as provided by the SSH library.
 func (g *gssAPIClient) InitSecContext(target string, token []byte, isGSSDelegCreds bool) ([]byte, bool, error) {
-	// Convert "host@hostname" → SPN "host/hostname"
 	spn := target
 	if i := strings.Index(target, "@"); i >= 0 {
 		spn = target[:i] + "/" + target[i+1:]
@@ -57,7 +53,6 @@ func (g *gssAPIClient) InitSecContext(target string, token []byte, isGSSDelegCre
 	return b, false, nil
 }
 
-// GetMIC computes a MIC over the session binding data using the session key.
 func (g *gssAPIClient) GetMIC(micField []byte) ([]byte, error) {
 	mic, err := gssapi.NewInitiatorMICToken(micField, g.sessKey)
 	if err != nil {
@@ -70,7 +65,6 @@ func (g *gssAPIClient) GetMIC(micField []byte) ([]byte, error) {
 	return b, nil
 }
 
-// DeleteSecContext releases the Kerberos client resources.
 func (g *gssAPIClient) DeleteSecContext() error {
 	if g.krb != nil {
 		g.krb.Destroy()
@@ -224,7 +218,6 @@ func realmFromPrincipal(principal string) string {
 	return strings.TrimSpace(principal[i+1:])
 }
 
-// NewGSSAPIFromCCache creates a GSSAPIClient using an existing credential cache (kinit).
 func NewGSSAPIFromCCache(ccachePath, krb5ConfPath string) (*gssAPIClient, error) {
 	resolved, err := resolveCCachePath(ccachePath)
 	if err != nil {
@@ -248,7 +241,6 @@ func NewGSSAPIFromCCache(ccachePath, krb5ConfPath string) (*gssAPIClient, error)
 	return &gssAPIClient{krb: cl, cleanupPaths: resolved.cleanupPaths}, nil
 }
 
-// NewGSSAPIFromKeytab creates a GSSAPIClient using a keytab file.
 func NewGSSAPIFromKeytab(principal, keytabPath, krb5ConfPath string) (*gssAPIClient, error) {
 	cfg, err := loadKrb5Conf(krb5ConfPath, realmFromPrincipal(principal))
 	if err != nil {
@@ -258,7 +250,6 @@ func NewGSSAPIFromKeytab(principal, keytabPath, krb5ConfPath string) (*gssAPICli
 	if err != nil {
 		return nil, fmt.Errorf("kerberos: load keytab %q: %w", keytabPath, err)
 	}
-	// Split "user@REALM" into username and realm.
 	user := principal
 	realm := ""
 	if i := strings.LastIndex(principal, "@"); i >= 0 {

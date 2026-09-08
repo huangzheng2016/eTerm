@@ -18,7 +18,6 @@ func TestTextUsesTerminalColumnsForWideCharacters(t *testing.T) {
 
 func TestAutoScrollEdgeBands(t *testing.T) {
 	var a AutoScroll
-	// height 100: band = 5 rows at each end.
 	if !a.Update(0, 100) || a.Dir != -1 {
 		t.Fatal("top edge must scroll up")
 	}
@@ -37,14 +36,12 @@ func TestAutoScrollEdgeBands(t *testing.T) {
 	if !a.Update(99, 100) || a.Dir != 1 {
 		t.Fatal("last row is inside the bottom band")
 	}
-	// Small heights clamp to a 2-row band.
 	if !a.Update(1, 10) || a.Dir != -1 {
 		t.Fatal("clamped band must cover row 1")
 	}
 	if a.Update(2, 10) {
 		t.Fatal("row 2 is outside the clamped band")
 	}
-	// Zero height never scrolls.
 	if a.Update(0, 0) {
 		t.Fatal("zero height must not scroll")
 	}
@@ -70,7 +67,6 @@ func TestTextJoinedHonorsBreakKinds(t *testing.T) {
 	if got := s.TextJoined(lines, breaks); got != "foo bar\nhttp://abcdef" {
 		t.Fatalf("got %q", got)
 	}
-	// Nil breaks keeps the plain per-line behavior.
 	if got := s.TextJoined(lines, nil); got != "foo\n  bar\nhttp://ab\n  cdef" {
 		t.Fatalf("got %q", got)
 	}

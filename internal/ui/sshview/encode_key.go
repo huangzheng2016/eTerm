@@ -8,10 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// encodeKey maps a Bubble Tea key event to bytes for the remote PTY (xterm-256color).
-//
-// Application cursor keys (ESC O A vs ESC [ A) are selected via IsAltScreen()
-// as a heuristic for DECCKM — full-screen programs (vim, less) use alt screen.
 func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 	k := msg.Key()
 	mod := k.Mod
@@ -20,7 +16,6 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 	meta := mod.Contains(tea.ModMeta)
 	shift := mod.Contains(tea.ModShift)
 
-	// Ctrl+Shift+letter is reserved by the App layer — never send to PTY.
 	if ctrl && shift {
 		ch := k.Code
 		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' {
@@ -28,14 +23,12 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 		}
 	}
 
-	// Alt/Meta + printable: ESC prefix
 	if (alt || meta) && k.Text != "" && !ctrl {
 		return append([]byte{0x1b}, []byte(k.Text)...)
 	}
 
 	ack := m.appCursorKeys
 
-	// Ctrl + letter → control character
 	if ctrl && k.Code >= 'a' && k.Code <= 'z' {
 		return []byte{byte(k.Code - 'a' + 1)}
 	}
@@ -59,7 +52,6 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 		}
 	}
 
-	// Special keys by Code
 	switch k.Code {
 	case tea.KeyEnter:
 		if seq, ok := modifiedCSIU(13, mod); ok {
@@ -160,7 +152,6 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 		return []byte("\x1b[24~")
 	}
 
-	// Keystroke name fallback (some terminals set Keystroke but not Code)
 	switch k.Keystroke() {
 	case "enter", "shift+enter":
 		return []byte{'\r'}
@@ -184,12 +175,10 @@ func (m *Model) encodeKey(msg tea.KeyPressMsg) []byte {
 		return cursorKey(ack, 'D')
 	}
 
-	// Printable text (covers normal typing, Shift+key producing symbols, etc.)
 	if k.Text != "" {
 		return []byte(k.Text)
 	}
 
-	// Fallback: try Code / ShiftedCode / Keystroke / String()
 	if !ctrl && !alt && !meta {
 		ch := k.Code
 		if shift && k.ShiftedCode != 0 {

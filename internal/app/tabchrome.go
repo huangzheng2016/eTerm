@@ -9,7 +9,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
 
-// layoutWidth returns terminal width for tab strip / body layout (minimum 80 when unknown).
 func (a App) layoutWidth() int {
 	w := a.width
 	if w <= 0 {
@@ -18,7 +17,6 @@ func (a App) layoutWidth() int {
 	return w
 }
 
-// tabStripItems builds tab bar labels matching MainView.View (prefixes, numbering).
 func (a App) tabStripItems() []components.TabItem {
 	items := make([]components.TabItem, len(a.tabs))
 	for i, tab := range a.tabs {
@@ -57,9 +55,6 @@ func (a App) tabStripItems() []components.TabItem {
 	return items
 }
 
-// buildMainTabChrome renders the tab strip + divider line (everything above the tab body).
-// The tab strip may wrap to multiple rows when many tabs are open or the terminal is narrow;
-// callers must use lipgloss.Height on this string — not a fixed row count.
 func (a App) buildMainTabChrome(layoutW int) string {
 	if len(a.tabs) == 0 {
 		return ""
@@ -120,7 +115,6 @@ func (a App) activeReconnectLabel() string {
 	return sm.ReconnectingLabel()
 }
 
-// mainTabChromeTopLines returns the number of screen rows occupied by tab strip + divider.
 func (a App) mainTabChromeTopLines() int {
 	if len(a.tabs) == 0 {
 		return 0

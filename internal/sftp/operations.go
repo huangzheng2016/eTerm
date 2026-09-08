@@ -13,8 +13,8 @@ type TransferProgress struct {
 	TransferredBytes int64
 	CurrentFile      string
 	Done             bool
-	FileIndex        int // 1-based index of current file in batch
-	TotalFiles       int // total files in batch (0 = unknown)
+	FileIndex        int
+	TotalFiles       int
 }
 
 type ProgressCallback func(TransferProgress)
@@ -63,7 +63,6 @@ func Download(client *Client, remotePath string, localPath string, progress Prog
 	return nil
 }
 
-// countLocalFiles recursively counts regular files under dir.
 func countLocalFiles(dir string) int {
 	n := 0
 	entries, err := os.ReadDir(dir)
@@ -80,7 +79,6 @@ func countLocalFiles(dir string) int {
 	return n
 }
 
-// countRemoteFiles recursively counts regular files under dir.
 func countRemoteFiles(client *Client, dir string) int {
 	n := 0
 	entries, err := client.List(dir)
@@ -97,7 +95,6 @@ func countRemoteFiles(client *Client, dir string) int {
 	return n
 }
 
-// batchState tracks file index across a recursive dir transfer.
 type batchState struct {
 	index int
 	total int

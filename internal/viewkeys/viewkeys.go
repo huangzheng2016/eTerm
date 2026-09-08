@@ -1,4 +1,3 @@
-// Package viewkeys provides per-view keybinding configuration passed from the app layer.
 package viewkeys
 
 import (
@@ -9,7 +8,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// SFTPKeys holds configurable keybindings for the SFTP view.
 type SFTPKeys struct {
 	Upload      []string
 	Download    []string
@@ -21,7 +19,6 @@ type SFTPKeys struct {
 	SwitchRight []string
 }
 
-// KeyViewKeys holds configurable keybindings for the SSH key management view.
 type KeyViewKeys struct {
 	New    []string
 	Import []string
@@ -30,7 +27,6 @@ type KeyViewKeys struct {
 	Copy   []string
 }
 
-// FwdKeys holds configurable keybindings for the port forward view.
 type FwdKeys struct {
 	Start  []string
 	Stop   []string
@@ -39,20 +35,17 @@ type FwdKeys struct {
 	Delete []string
 }
 
-// SnippetKeys holds configurable keybindings for the snippet view.
 type SnippetKeys struct {
 	New    []string
 	Edit   []string
 	Delete []string
 }
 
-// SSHKeys holds configurable keybindings for the SSH terminal view.
 type SSHKeys struct {
 	Reconnect     []string
 	SnippetPicker []string
 }
 
-// MatchAny checks if msg.String() matches any of the given keys.
 func MatchAny(msgStr string, keys []string) bool {
 	for _, k := range keys {
 		if msgStr == k {

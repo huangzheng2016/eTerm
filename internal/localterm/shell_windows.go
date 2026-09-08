@@ -17,7 +17,6 @@ func NewSession(shell string, rows, cols int) (*internalssh.InteractiveSession, 
 	if !conpty.IsConPtyAvailable() {
 		return nil, fmt.Errorf("ConPTY is not available on this Windows version")
 	}
-	// ConPty takes a command line, not argv; quote paths with spaces.
 	cmdLine := shell
 	if strings.Contains(shell, " ") && !strings.HasPrefix(shell, `"`) {
 		cmdLine = `"` + shell + `"`
@@ -43,8 +42,5 @@ func NewSession(shell string, rows, cols int) (*internalssh.InteractiveSession, 
 			return cpty.Resize(cols, rows)
 		},
 	}
-	// InteractiveSession.Close closes Stdin (= cpty): closing the pseudo
-	// console terminates the attached shell. Do not also AddCloser(cpty);
-	// ConPty.Close is not idempotent and a double close crashes natively.
 	return is, nil
 }

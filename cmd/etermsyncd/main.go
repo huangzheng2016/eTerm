@@ -47,7 +47,6 @@ func main() {
 		log.Fatalf("init engine: %v", err)
 	}
 
-	// HTTP mode requires an API key
 	if *apiKey == "" {
 		log.Fatal("--api-key or ETERMSYNCD_API_KEY is required in HTTP mode")
 	}

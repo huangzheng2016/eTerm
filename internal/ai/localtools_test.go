@@ -46,8 +46,6 @@ func TestBashToolRunsCommand(t *testing.T) {
 		t.Fatalf("out = %q", out)
 	}
 
-	// A non-zero exit is reported in the output, not as a Go error (eino
-	// aborts the run on tool errors).
 	out, err = bash.InvokableRun(context.Background(), `{"command":"echo oops >&2; exit 3"}`)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +93,6 @@ func TestSafeToolConvertsErrorsToOutput(t *testing.T) {
 	}
 	editor := invokable(t, tools, "str_replace_editor")
 
-	// Relative path: StrReplaceEditor fails; the wrapper must not.
 	out, err := editor.InvokableRun(context.Background(), `{"command":"view","path":"relative.txt"}`)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +101,6 @@ func TestSafeToolConvertsErrorsToOutput(t *testing.T) {
 		t.Fatalf("out = %q", out)
 	}
 
-	// Same for a wrapped stub failing outright.
 	stub := &safeTool{inner: failingTool{}}
 	out, err = stub.InvokableRun(context.Background(), `{}`)
 	if err != nil || out != "error: boom" {

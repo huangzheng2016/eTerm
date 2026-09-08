@@ -33,9 +33,6 @@ var (
 			Bold(true)
 )
 
-// panelListInnerSize is the width/height passed to bubbles list.SetSize so each row fits
-// inside activeBorderStyle (RoundedBorder + Padding(0,1)) without wrapping; outer is the
-// lipgloss block size used in View (Width(panelWidth) / list viewport height budget).
 func panelListInnerWidth(outer int) int {
 	if outer <= 0 {
 		return 0
@@ -58,9 +55,6 @@ func panelListInnerHeight(outer int) int {
 	return n
 }
 
-// composeFooter always returns exactly one line: transfer progress when active,
-// otherwise a file-count summary. This guarantees SetSize reserves a fixed row
-// so the progress bar never gets clipped.
 func (m Model) composeFooter() string {
 	if m.confirmMsg != "" {
 		return m.fitLine(lipgloss.NewStyle().Foreground(lipgloss.Color("#e0a000")).Bold(true).
@@ -71,7 +65,6 @@ func (m Model) composeFooter() string {
 		if m.progress.TotalBytes > 0 {
 			pct = float64(m.progress.TransferredBytes) / float64(m.progress.TotalBytes) * 100
 		}
-		// [2/5] filename [====    ] 45.2%
 		prefix := ""
 		if m.progress.TotalFiles > 0 {
 			prefix = fmt.Sprintf("[%d/%d] ", m.progress.FileIndex, m.progress.TotalFiles)
@@ -81,7 +74,7 @@ func (m Model) composeFooter() string {
 			labelMax = 8
 		}
 		label := prefix + truncateCells(m.progress.CurrentFile, labelMax) + " "
-		barWidth := m.width - lipgloss.Width(label) - 10 // 10 = [] + space + "100.0%"
+		barWidth := m.width - lipgloss.Width(label) - 10
 		if barWidth < 8 {
 			barWidth = 8
 		}
@@ -96,7 +89,6 @@ func (m Model) composeFooter() string {
 	if m.err != "" {
 		return m.fitLine(errStyle.Render("Error: " + m.err))
 	}
-	// Idle: show file counts so the row is never empty.
 	localN := len(m.localList.Items())
 	remoteN := len(m.remoteList.Items())
 	return m.fitLine(helpStyle.Render(fmt.Sprintf("Local: %d items  |  Remote: %d items", localN, remoteN)))
@@ -165,7 +157,6 @@ func (m Model) View() tea.View {
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 
-	// Page indicators for both panels
 	pageInfo := m.composePaginationLine(panelWidth)
 
 	footer := m.composeFooter()
@@ -213,7 +204,6 @@ func (m Model) composePaginationLine(panelWidth int) string {
 	}
 	leftPage := render(m.localList.Paginator)
 	rightPage := render(m.remoteList.Paginator)
-	// Pad each to panelWidth + border (2) to align with panels
 	pw := panelWidth + 2
 	leftPad := lipgloss.NewStyle().Width(pw).Align(lipgloss.Center).Render(leftPage)
 	rightPad := lipgloss.NewStyle().Width(pw).Align(lipgloss.Center).Render(rightPage)

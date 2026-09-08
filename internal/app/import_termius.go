@@ -18,7 +18,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Internal message types for the Termius import flow.
 type termiusLoadMsg struct{}
 type sshConfigLoadMsg struct{}
 
@@ -32,7 +31,6 @@ type termiusExportResultMsg struct {
 
 type termiusHostsReadyMsg struct {
 	hostItems []importHostEntry
-	// allKeys is read from a.importHostList.allKeys in app_update.go
 }
 
 type termiusImportRunMsg struct {
@@ -46,26 +44,24 @@ type termiusImportResultMsg struct {
 	err      error
 }
 
-// importHostEntry is one row in the host list overlay.
 type importHostEntry struct {
 	rec          parser.HostRecord
 	sshParsed    *sshconfig.ParsedHost
 	selected     bool
-	blocked      bool // exact duplicate - not selectable
-	nameConflict bool // same alias, different content - must rename before import
+	blocked      bool
+	nameConflict bool
 	chosenAlias  string
 	exportID     uint
 	existing     bool
 }
 
-// importKeyEntry is one row in the key list overlay.
 type importKeyEntry struct {
 	rec          parser.KeyRecord
 	sshInfo      *sshKeyFileInfo
 	selected     bool
-	blocked      bool // exact duplicate - not selectable
-	locked       bool // required by a selected host - cannot deselect
-	nameConflict bool // same name, different fingerprint - must rename
+	blocked      bool
+	locked       bool
+	nameConflict bool
 	chosenAlias  string
 	fingerprint  string
 	existingID   uint
@@ -111,7 +107,6 @@ func loadSSHConfigData() tea.Cmd {
 	}
 }
 
-// buildHostItems checks each HostRecord against the DB and returns importHostEntry rows.
 func buildHostItems(database *gorm.DB, hosts []parser.HostRecord) []importHostEntry {
 	items := make([]importHostEntry, 0, len(hosts))
 	for _, h := range hosts {
@@ -161,7 +156,6 @@ func buildSSHHostItems(database *gorm.DB, parsed []sshconfig.ParsedHost, hosts [
 	return items
 }
 
-// buildKeyItems checks each KeyRecord against the DB and returns importKeyEntry rows.
 func buildKeyItems(database *gorm.DB, keys []parser.KeyRecord) []importKeyEntry {
 	fps := make([]string, len(keys))
 	for i, k := range keys {
@@ -188,7 +182,6 @@ func buildSSHKeyItems(database *gorm.DB, keys []parser.KeyRecord) []importKeyEnt
 	return items
 }
 
-// buildKeyItemsWithFP is the testable version that accepts pre-computed fingerprints.
 func buildKeyItemsWithFP(database *gorm.DB, keys []parser.KeyRecord, fps []string) []importKeyEntry {
 	items := make([]importKeyEntry, 0, len(keys))
 	for i, k := range keys {
@@ -227,7 +220,6 @@ func buildKeyItemsWithFP(database *gorm.DB, keys []parser.KeyRecord, fps []strin
 	return items
 }
 
-// lockRequiredKeys marks keys that are referenced by selected hosts as locked=true.
 func lockRequiredKeys(hosts []importHostEntry, keys []importKeyEntry) []importKeyEntry {
 	needed := make(map[string]bool)
 	for _, h := range hosts {
@@ -296,7 +288,6 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 				skipped++
 				continue
 			}
-			// Remove any soft-deleted record with the same name before re-creating.
 			database.Unscoped().Where("name = ? AND deleted_at IS NOT NULL", ki.chosenAlias).Delete(&db.SSHKey{})
 			k := db.SSHKey{
 				SyncID:         fmt.Sprintf("termius-%s", ki.chosenAlias),
@@ -338,8 +329,6 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 			if keyID != nil {
 				authMethod = "key"
 			} else if hi.rec.KeyID > 0 || hi.rec.KeyName != "" {
-				// Key referenced but not found/imported — mark as key auth so the
-				// user sees the correct method.
 				authMethod = "key"
 			} else if hi.rec.Password != "" {
 				authMethod = "password"
@@ -350,7 +339,6 @@ func runTermiusImport(database *gorm.DB, masterKey *security.MasterKeyManager, h
 					encPassword = enc
 				}
 			}
-			// Remove any soft-deleted host with the same alias before re-creating.
 			database.Unscoped().Where("alias = ? AND deleted_at IS NOT NULL", hi.chosenAlias).Delete(&db.Host{})
 			h := db.Host{
 				SyncID:     fmt.Sprintf("termius-%s", hi.chosenAlias),

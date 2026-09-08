@@ -41,12 +41,11 @@ const (
 	deepgramFinalTimeout = 8 * time.Second
 )
 
-// DeepgramConfig configures the Deepgram realtime ASR engine.
 type DeepgramConfig struct {
 	APIKey   string
-	Model    string // default nova-2-general
-	Language string // default zh
-	URL      string // default defaultDeepgramURL
+	Model    string
+	Language string
+	URL      string
 }
 
 func (c DeepgramConfig) wsURL() string {
@@ -73,9 +72,6 @@ func (c DeepgramConfig) wsURL() string {
 	return base + "?" + q.Encode()
 }
 
-// DeepgramEngine is one Deepgram realtime stream: 16kHz mono S16LE PCM in
-// via WriteAudio, interim transcripts out as partials, the final transcript
-// emitted on Stop (CloseStream).
 type DeepgramEngine struct {
 	cfg DeepgramConfig
 
@@ -85,13 +81,13 @@ type DeepgramEngine struct {
 	closed    bool
 	stopping  bool
 	sentAudio bool
-	finals    []string // is_final transcript segments
-	interim   string   // last interim transcript
+	finals    []string
+	interim   string
 
 	events  chan Event
 	done    chan struct{}
 	wg      sync.WaitGroup
-	finalCh chan struct{} // closed when the stream drains during Stop
+	finalCh chan struct{}
 }
 
 func NewDeepgramEngine(cfg DeepgramConfig) *DeepgramEngine {
@@ -154,8 +150,6 @@ func (e *DeepgramEngine) WriteAudio(pcm []byte) error {
 	return nil
 }
 
-// Stop sends CloseStream and waits for the stream to drain; the final
-// transcript surfaces as a final event from the read loop.
 func (e *DeepgramEngine) Stop() error {
 	e.mu.Lock()
 	if !e.started {
@@ -188,7 +182,6 @@ func (e *DeepgramEngine) Stop() error {
 }
 
 func (e *DeepgramEngine) SetVAD(VADParams) error {
-	// Endpointing is client-side (helper VAD); nothing to apply.
 	return nil
 }
 
@@ -269,8 +262,6 @@ func (e *DeepgramEngine) readLoop(conn *websocket.Conn, finalCh chan struct{}) {
 	}
 }
 
-// finish emits the drained final transcript once the stream ends during Stop
-// and releases the Stop wait.
 func (e *DeepgramEngine) finish(finalCh chan struct{}, once *sync.Once) {
 	once.Do(func() {
 		e.mu.Lock()
@@ -287,7 +278,6 @@ func (e *DeepgramEngine) finish(finalCh chan struct{}, once *sync.Once) {
 	})
 }
 
-// streamSession is one per-utterance cloud ASR stream (deepgram, assemblyai).
 type streamSession interface {
 	Start(ctx context.Context) error
 	WriteAudio(pcm []byte) error
@@ -296,17 +286,13 @@ type streamSession interface {
 	Events() <-chan Event
 }
 
-// streamFeedEngine routes helper passthrough audio into per-utterance stream
-// sessions: the helper VAD marks utterance ends, each utterance gets its own
-// session, then a fresh connection is dialed for the next. Mirrors
-// VolcanoFeedEngine (feed.go) with the session type abstracted.
 type streamFeedEngine struct {
 	dial func() streamSession
 	hcfg LocalConfig
 
 	mu      sync.Mutex
 	helper  *LocalEngine
-	sess    streamSession // current utterance session; nil while redialing
+	sess    streamSession
 	started bool
 	closed  bool
 	idleCh  chan struct{}
@@ -360,8 +346,6 @@ func (e *streamFeedEngine) Start(ctx context.Context) error {
 		e.helper = NewLocalEngine(hcfg)
 	}
 
-	// expose the session before the helper starts streaming so the first
-	// audio chunks are not dropped
 	e.sess = sess
 	e.idleCh = make(chan struct{}, 1)
 	e.started = true
@@ -373,7 +357,6 @@ func (e *streamFeedEngine) Start(ctx context.Context) error {
 	}
 
 	if !e.pumped {
-		// the helper persists across sessions, so pump it once
 		e.pumped = true
 		e.wg.Add(1)
 		go e.pumpHelper(e.helper.Events())
@@ -383,8 +366,6 @@ func (e *streamFeedEngine) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the session: the helper flushes its tail audio, then the current
-// stream session is finalized and closed.
 func (e *streamFeedEngine) Stop() error {
 	e.mu.Lock()
 	if !e.started {
@@ -398,7 +379,6 @@ func (e *streamFeedEngine) Stop() error {
 
 	if helper != nil {
 		_ = helper.Stop()
-		// wait for the stop flush (tail audio + state idle) before finalizing
 		select {
 		case <-idleCh:
 		default:
@@ -432,7 +412,6 @@ func (e *streamFeedEngine) SetVAD(p VADParams) error {
 	return helper.SetVAD(p)
 }
 
-// SetModel is a no-op: the passthrough helper does no local ASR.
 func (e *streamFeedEngine) SetModel(string, string) error { return nil }
 
 func (e *streamFeedEngine) Close() error {
@@ -449,7 +428,7 @@ func (e *streamFeedEngine) Close() error {
 	e.mu.Unlock()
 
 	close(e.done)
-	e.cancel() // abort an in-flight redial on the helper read loop
+	e.cancel()
 	if helper != nil {
 		helper.Close()
 	}
@@ -461,8 +440,6 @@ func (e *streamFeedEngine) Close() error {
 	return nil
 }
 
-// onAudio streams one helper PCM chunk into the current stream session.
-// Runs on the helper read loop, serialized with onUtteranceEnd.
 func (e *streamFeedEngine) onAudio(pcm []byte) {
 	e.mu.Lock()
 	if e.closed {
@@ -474,20 +451,16 @@ func (e *streamFeedEngine) onAudio(pcm []byte) {
 	if sess == nil {
 		return
 	}
-	// a dead session is reported by its own read loop
 	_ = sess.WriteAudio(pcm)
 }
 
-// onUtteranceEnd finalizes the current stream session and dials the next.
-// The redial overlaps the final wait so a slow server does not widen the
-// inter-utterance gap; it is cancelled by Close.
 func (e *streamFeedEngine) onUtteranceEnd() {
 	e.mu.Lock()
 	if !e.started || e.closed {
 		e.mu.Unlock()
 		return
 	}
-	old := e.sess // stays assigned so Stop/Close can abort its final wait
+	old := e.sess
 	e.mu.Unlock()
 
 	type redial struct {
@@ -504,7 +477,7 @@ func (e *streamFeedEngine) onUtteranceEnd() {
 	}()
 
 	if old != nil {
-		old.Stop() // finalizes the stream; transcript drains through its pump
+		old.Stop()
 		old.Close()
 	}
 
@@ -537,7 +510,6 @@ func (e *streamFeedEngine) emit(ev Event) {
 	}
 }
 
-// pump forwards one stream session's events until its channel closes.
 func (e *streamFeedEngine) pump(ch <-chan Event) {
 	defer e.wg.Done()
 	for ev := range ch {
@@ -545,8 +517,6 @@ func (e *streamFeedEngine) pump(ch <-chan Event) {
 	}
 }
 
-// pumpHelper forwards helper events and signals the idle that ends a stop
-// flush (and any mid-session cancel).
 func (e *streamFeedEngine) pumpHelper(ch <-chan Event) {
 	defer e.wg.Done()
 	for ev := range ch {

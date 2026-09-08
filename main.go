@@ -137,7 +137,6 @@ func main() {
 		a = app.NewApp(database, masterKey).SetLoginModel(loginModel).SetNoUpdateCheck(noUpdateCheck).SetForceUpdateCheck(forceUpdateCheck)
 	}
 
-	// CLI direct connect: eterm [user@]host[:port] [-p port]
 	if args := flag.Args(); len(args) > 0 {
 		hostname, port, username := parseQuickConnect(args[0])
 		if *portFlag > 0 {
@@ -162,7 +161,6 @@ func splitUpgradeCommand(args []string) (bool, []string) {
 	return true, args[1:]
 }
 
-// parseQuickConnect parses [user@]host[:port] into components.
 func parseQuickConnect(raw string) (hostname string, port int, username string) {
 	port = 22
 	username = "root"

@@ -11,15 +11,14 @@ var (
 
 	SubtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666"))
 
-	// Match charm bubbles list.DefaultStyles().Title (list header pill).
 	ActiveTabStyle = lipgloss.NewStyle().
-		Background(lipgloss.Color("62")).
-		Foreground(lipgloss.Color("230")).
-		Padding(0, 1)
+			Background(lipgloss.Color("62")).
+			Foreground(lipgloss.Color("230")).
+			Padding(0, 1)
 
 	InactiveTabStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#8a8a8a")).
-		Padding(0, 1)
+				Foreground(lipgloss.Color("#8a8a8a")).
+				Padding(0, 1)
 
 	StatusBarStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("#333")).

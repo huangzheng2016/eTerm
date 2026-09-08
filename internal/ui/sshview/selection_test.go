@@ -170,19 +170,16 @@ func TestWheelBottomPadStateTransitions(t *testing.T) {
 	e := mkEmu(20, 5, "L0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\n")
 	m := &Model{emu: e}
 
-	// At live bottom, scrolling down enters bottomPad (clamped to max).
 	m.Update(wheel(tea.MouseWheelDown))
 	if m.bottomPad != bottomPadMax || m.scrollOffset != 0 {
 		t.Fatalf("after down: bottomPad=%d scrollOffset=%d", m.bottomPad, m.scrollOffset)
 	}
 
-	// Scrolling up first collapses bottomPad before touching scrollback.
 	m.Update(wheel(tea.MouseWheelUp))
 	if m.bottomPad != 0 || m.scrollOffset != 0 {
 		t.Fatalf("after up #1: bottomPad=%d scrollOffset=%d", m.bottomPad, m.scrollOffset)
 	}
 
-	// Next up enters scrollback history.
 	m.Update(wheel(tea.MouseWheelUp))
 	if m.scrollOffset == 0 {
 		t.Fatalf("after up #2: expected scrollOffset>0, got %d", m.scrollOffset)
@@ -442,14 +439,12 @@ func TestVisibleAbsLineScrolled(t *testing.T) {
 		t.Skip("need scrollback")
 	}
 	m := &Model{emu: e, scrollOffset: 2}
-	// Top 2 visible rows come from scrollback (oldest of the shown window).
 	if got := m.visibleAbsLine(0); got != sbLen-2 {
 		t.Fatalf("visibleAbsLine(0) = %d want %d", got, sbLen-2)
 	}
 	if got := m.visibleAbsLine(1); got != sbLen-1 {
 		t.Fatalf("visibleAbsLine(1) = %d want %d", got, sbLen-1)
 	}
-	// Row 2 is first screen line.
 	if got := m.visibleAbsLine(2); got != sbLen {
 		t.Fatalf("visibleAbsLine(2) = %d want %d", got, sbLen)
 	}

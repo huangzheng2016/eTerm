@@ -13,8 +13,6 @@ import (
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 )
 
-// An explicit no_speech_timeout of 0 disables the cancel (dictation runs
-// until the app stops it); a positive value overrides the default.
 func TestSetVADParamsNoSpeechTimeout(t *testing.T) {
 	var buf bytes.Buffer
 	ev := newEventWriter(&buf)
@@ -60,9 +58,6 @@ func TestSetModelValidatesKind(t *testing.T) {
 	}
 }
 
-// Integration test for the VAD state machine with the real silero model and
-// SenseVoice ASR. Skipped unless VOICEHELPER_TEST_MODELS points at a model
-// dir containing silero_vad.onnx and the SenseVoice model dir.
 func TestVADStateMachine(t *testing.T) {
 	root := os.Getenv("VOICEHELPER_TEST_MODELS")
 	if root == "" {
@@ -102,11 +97,10 @@ func TestVADStateMachine(t *testing.T) {
 	eng.listenSince = now
 	eng.state = "listening"
 
-	chunk := 320 // 20ms at 16kHz
+	chunk := 320
 	advance := func() { now = now.Add(20 * time.Millisecond) }
 	silence := make([]float32, chunk)
 
-	// 6s of silence: no-speech timeout (default 5s) must cancel to idle
 	for i := 0; i < 300; i++ {
 		advance()
 		eng.onChunk(silence, now)
@@ -115,9 +109,6 @@ func TestVADStateMachine(t *testing.T) {
 		t.Fatalf("expected idle after no-speech timeout, got %s", eng.state)
 	}
 
-	// new session: feed the speech wav in 20ms chunks. Disable the
-	// no-speech timeout here: a finalize mid-wav would otherwise start a
-	// fresh 5s window that the remaining silence can exceed.
 	eng.params.noSpeechTimeout = 3600
 	eng.listenSince = now
 	eng.state = "listening"
@@ -137,7 +128,6 @@ func TestVADStateMachine(t *testing.T) {
 		t.Fatal("VAD never detected speech in the test wav")
 	}
 
-	// 2s of trailing silence: must finalize with decoded text
 	for i := 0; i < 100; i++ {
 		advance()
 		eng.onChunk(silence, now)

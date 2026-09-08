@@ -76,7 +76,6 @@ func TestMergePreservesRemoteUpdatedAt(t *testing.T) {
 		t.Fatalf("updated_at = %v, want %v", got.UpdatedAt, remoteTime)
 	}
 
-	// A merged record must not be collected as dirty again (no echo push).
 	dirty, err := CollectDirty(database, mk, "sync-passphrase", "device-a", time.Now().Add(-30*time.Second))
 	if err != nil {
 		t.Fatal(err)

@@ -1,5 +1,3 @@
-// Package shellintegr injects OSC 133 command lifecycle markers into
-// interactive shells (zsh/bash/fish) via wrapper startup files.
 package shellintegr
 
 import (
@@ -8,13 +6,8 @@ import (
 	"strings"
 )
 
-// DisableEnv turns the injection off when set to a non-empty value.
 const DisableEnv = "ETERM_NO_SHELL_INTEGRATION"
 
-// Wrap returns extra argv and KEY=VALUE env entries to start shell with
-// OSC 133 integration. ok is false when the shell is unsupported, integration
-// is disabled, or the wrapper files cannot be written; callers must then
-// start the plain shell.
 func Wrap(shell string) (args []string, env []string, ok bool) {
 	if os.Getenv(DisableEnv) != "" {
 		return nil, nil, false
@@ -39,8 +32,6 @@ func Wrap(shell string) (args []string, env []string, ok bool) {
 	return nil, nil, false
 }
 
-// TmuxCommand returns a shell-command string for `tmux new-session` that
-// starts the user's $SHELL with OSC 133 integration.
 func TmuxCommand() (string, bool) {
 	shell := strings.TrimSpace(os.Getenv("SHELL"))
 	if shell == "" {
@@ -52,8 +43,6 @@ func TmuxCommand() (string, bool) {
 	}
 	var b strings.Builder
 	for _, kv := range env {
-		// Quote only the value: a fully quoted 'KEY=value' word is not an
-		// assignment to the shell and would be executed as a command.
 		k, v, _ := strings.Cut(kv, "=")
 		b.WriteString(k)
 		b.WriteByte('=')
@@ -65,7 +54,6 @@ func TmuxCommand() (string, bool) {
 	}
 	b.WriteString("exec ")
 	b.WriteString(shQuote(shell))
-	// tmux starts a login shell by default; keep that for zsh/fish.
 	switch shellName(shell) {
 	case "zsh", "fish":
 		b.WriteString(" -l")

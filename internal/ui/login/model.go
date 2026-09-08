@@ -47,9 +47,7 @@ func New(masterKey *security.MasterKeyManager, isSetup bool) Model {
 	return out
 }
 
-// syncPasswordInputWidths avoids bubbles textinput showing only the first placeholder character when Width<=0.
 func (m *Model) syncPasswordInputWidths() {
-	// boxStyle.Width(50) minus Padding(2,4) → inner ~42
 	iw := 42
 	if m.width > 0 {
 		iw = min(42, max(24, m.width-16))

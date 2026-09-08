@@ -13,7 +13,7 @@ type openSSHUITabMsg struct {
 	hostID          uint
 	historyID       uint
 	initialCommands []string
-	replaceTabAt    int // append when < 0; otherwise replace a.tabs[replaceTabAt]
+	replaceTabAt    int
 }
 
 type sftpOpenedMsg struct {
@@ -31,10 +31,10 @@ type remoteTerminalOpenedMsg struct {
 	is           *internalssh.InteractiveSession
 	title        string
 	tabType      TabType
-	replaceTabAt int // append when < 0; otherwise replace a.tabs[replaceTabAt]
+	replaceTabAt int
 	reconnect    *types.RemoteReconnect
 	background   bool
-	resume       bool // reattach to the existing tab model, keeping scrollback
+	resume       bool
 }
 
 type remoteTmuxRenameAppliedMsg struct {
@@ -57,12 +57,8 @@ type voiceTickMsg struct{ seq int }
 type voiceEngineClosedMsg struct{}
 type openVoiceSettingsMsg struct{}
 
-// voiceDownloadRequestMsg asks the app to download a setup artifact: the
-// helper binary ("helper") or a catalog model (target = model ID).
 type voiceDownloadRequestMsg struct{ target string }
 
-// voiceDownloadMsg is one progress update for a download; the last one per
-// download has done set (err non-nil on failure).
 type voiceDownloadMsg struct {
 	target string
 	pct    float64
@@ -70,24 +66,16 @@ type voiceDownloadMsg struct {
 	done   bool
 }
 
-// voiceTestRequestMsg starts (or with stop, cancels) a settings-panel test
-// recording.
 type voiceTestRequestMsg struct{ stop bool }
 type voiceTestTimeoutMsg struct{ seq int }
 
-// voiceHelperUpdateCheckRequestMsg asks the app to query the latest helper
-// release tag (network call, runs as a command).
 type voiceHelperUpdateCheckRequestMsg struct{}
 
-// voiceHelperUpdateCheckMsg carries the latest-tag check result back to the
-// settings panel.
 type voiceHelperUpdateCheckMsg struct {
 	tag string
 	err error
 }
 
-// voiceSettingsChangedMsg carries a saved voice config; keepEngine avoids an
-// engine rebuild when only delivery-time or VAD settings changed.
 type voiceSettingsChangedMsg struct {
 	cfg        voiceSettings
 	keepEngine bool

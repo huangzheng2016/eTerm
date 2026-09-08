@@ -31,7 +31,6 @@ func encryptField(plaintext string, mk *security.MasterKeyManager) (string, erro
 	return enc, nil
 }
 
-// mustEncrypt calls encryptField and accumulates errors. Returns "" on failure.
 type encAccum struct {
 	mk  *security.MasterKeyManager
 	err error

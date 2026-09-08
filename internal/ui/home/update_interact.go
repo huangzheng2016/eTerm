@@ -13,7 +13,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
-// handleGridMouse returns done=true when Update should return immediately.
 func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if m.list.FilterState() != list.Unfiltered {
 		return m, nil, false
@@ -81,7 +80,6 @@ func (m Model) handleGridMouse(msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-// handleHomeKeyPress returns done=true when Update should return immediately.
 func (m Model) handleHomeKeyPress(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	logKeyPress("KeyPress", fmt.Sprint(m.list.FilterState()), len(m.list.Items()), msg)
 

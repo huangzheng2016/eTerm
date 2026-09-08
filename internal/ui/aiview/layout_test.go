@@ -9,9 +9,6 @@ import (
 
 func viewRows(s string) int { return strings.Count(s, "\n") + 1 }
 
-// The AI panel box must fill the frame exactly: app renders the content at
-// (0,0) and maps mouse coords via overlayBounds (centered). Any size gap
-// shifts every mouse hit and makes edge clicks dismiss the panel.
 func TestViewFillsFrameWidth(t *testing.T) {
 	sizes := [][2]int{{80, 24}, {100, 32}, {120, 40}, {60, 20}}
 	for _, sz := range sizes {
@@ -25,7 +22,6 @@ func TestViewFillsFrameWidth(t *testing.T) {
 	}
 }
 
-// fillConversation loads a long mixed-kind conversation with wide lines.
 func fillConversation(m *Model) {
 	long := strings.Repeat("word ", 40)
 	url := "https://example.com/" + strings.Repeat("u", 180)
@@ -41,8 +37,6 @@ func fillConversation(m *Model) {
 	m.renderAll()
 }
 
-// The AI panel renders fullscreen: the view must always be exactly the
-// terminal height, or rows get pushed off screen.
 func TestViewNeverExceedsFrame(t *testing.T) {
 	sizes := [][2]int{{80, 24}, {100, 32}, {120, 40}, {60, 20}}
 	for _, sz := range sizes {
@@ -61,7 +55,6 @@ func TestViewNeverExceedsFrame(t *testing.T) {
 			t.Errorf("conversation %dx%d: view height = %d, want %d", w, h, n, h)
 		}
 
-		// Streaming (non-final) assistant block.
 		m.blocks = append(m.blocks, block{kind: blockAssistant, text: strings.Repeat("partial ", 30)})
 		m.renderBlock(len(m.blocks) - 1)
 		m.rebuild()
@@ -69,7 +62,6 @@ func TestViewNeverExceedsFrame(t *testing.T) {
 			t.Errorf("streaming %dx%d: view height = %d, want %d", w, h, n, h)
 		}
 
-		// Error line with a full conversation.
 		m.status = statusError
 		m.errMsg = "provider unreachable: " + strings.Repeat("detail ", 20)
 		if n := viewRows(m.View().Content); n != h {
@@ -78,13 +70,11 @@ func TestViewNeverExceedsFrame(t *testing.T) {
 		m.status = statusIdle
 		m.errMsg = ""
 
-		// Long multi-word input text.
 		m.input.SetValue(strings.Repeat("word ", 60))
 		if n := viewRows(m.View().Content); n != h {
 			t.Errorf("input %dx%d: view height = %d, want %d", w, h, n, h)
 		}
 
-		// Expanded tool output.
 		m.expandTools = true
 		m.renderAll()
 		if n := viewRows(m.View().Content); n != h {
@@ -124,7 +114,7 @@ func TestMultiLineErrorStaysOneRow(t *testing.T) {
 func TestCJKModelNameStaysInFrame(t *testing.T) {
 	fake := NewFakeRunner()
 	fake.Delay = 0
-	name := strings.Repeat("モデル名", 12) // 48 runes, 96 cells
+	name := strings.Repeat("モデル名", 12)
 	fake.Add(Provider{Name: name, Type: "openai"})
 	fake.Switch(name, "x")
 	m := New(fake, fake, fake)

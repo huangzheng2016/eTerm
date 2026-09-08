@@ -6,25 +6,19 @@ import (
 	"sync"
 )
 
-// ParamSpec describes one engine parameter row in the settings panel.
 type ParamSpec struct {
-	Key      string // persisted inside the per-engine params blob
-	Label    string // panel row label
-	Secret   bool   // masked display in the panel
-	Required bool   // counts toward readiness
+	Key      string
+	Label    string
+	Secret   bool
+	Required bool
 	Default  string
 }
 
-// FeedDeps carries the assembly dependencies an engine needs from the app:
-// endpoint tuning and progress reporting for a helper-driven audio feed.
 type FeedDeps struct {
 	VAD                VADParams
 	OnDownloadProgress func(pct float64)
 }
 
-// EngineDescriptor describes one registered engine: panel metadata, the
-// parameter-readiness check behind ctrl+r gating, and the engine factory.
-// params holds the persisted per-engine values (ParamSpec defaults applied).
 type EngineDescriptor struct {
 	ID     string
 	Label  string
@@ -38,8 +32,6 @@ var (
 	registry   = map[string]EngineDescriptor{}
 )
 
-// RegisterEngine adds an engine descriptor; engines self-register via init().
-// An empty or duplicate ID panics (a programming error caught at startup).
 func RegisterEngine(d EngineDescriptor) {
 	if d.ID == "" || d.New == nil || d.Ready == nil {
 		panic(fmt.Sprintf("voice: invalid engine descriptor %+v", d))
@@ -52,7 +44,6 @@ func RegisterEngine(d EngineDescriptor) {
 	registry[d.ID] = d
 }
 
-// EngineDescriptorByID resolves a registered engine.
 func EngineDescriptorByID(id string) (EngineDescriptor, bool) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -60,7 +51,6 @@ func EngineDescriptorByID(id string) (EngineDescriptor, bool) {
 	return d, ok
 }
 
-// EngineDescriptors lists all registered engines sorted by ID.
 func EngineDescriptors() []EngineDescriptor {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -72,8 +62,6 @@ func EngineDescriptors() []EngineDescriptor {
 	return out
 }
 
-// FirstMissingParam returns the label of the first required parameter
-// without a value, for setup-incomplete guidance.
 func FirstMissingParam(d EngineDescriptor, params map[string]string) string {
 	for _, p := range d.Params {
 		if p.Required && params[p.Key] == "" {

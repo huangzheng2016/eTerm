@@ -105,7 +105,6 @@ func (c *capture) stop() {
 	c.ctx = nil
 }
 
-// pcmBytes converts float32 samples back to 16kHz mono S16LE for streaming.
 func pcmBytes(samples []float32) []byte {
 	b := make([]byte, 2*len(samples))
 	for i, s := range samples {
@@ -121,7 +120,7 @@ type asrEngine struct {
 
 	modelRoot string
 	asrDir    string
-	asrKind   string // recognizer family; empty = sensevoice
+	asrKind   string
 	vadPath   string
 
 	rec *sherpa.OfflineRecognizer
@@ -129,7 +128,7 @@ type asrEngine struct {
 
 	cap *capture
 
-	passthrough bool // capture+VAD only: stream PCM, no local ASR
+	passthrough bool
 
 	state       string
 	accumText   string
@@ -217,12 +216,8 @@ func (e *asrEngine) setState(s string) {
 	}
 }
 
-// start begins a listening session, downloading models on first use.
 func (e *asrEngine) start(ctx context.Context) { e.startMode(ctx, false) }
 
-// startPassthrough begins a capture+VAD session without local ASR: raw PCM
-// chunks stream out as audio events and VAD finalizes emit utterance_end.
-// Only the VAD model is needed.
 func (e *asrEngine) startPassthrough(ctx context.Context) { e.startMode(ctx, true) }
 
 func (e *asrEngine) startMode(ctx context.Context, passthrough bool) {
@@ -268,7 +263,6 @@ func (e *asrEngine) startMode(ctx context.Context, passthrough bool) {
 	}
 	e.passthrough = passthrough
 	e.resetAccum()
-	// drop stale chunks from a previous session
 	for {
 		select {
 		case <-e.cap.chunks:
@@ -291,7 +285,6 @@ func (e *asrEngine) resetAccum() {
 	e.speechSeen = false
 }
 
-// stop ends the session, flushing and decoding any pending speech.
 func (e *asrEngine) stop() {
 	if e.state == "idle" {
 		return
@@ -327,9 +320,6 @@ func (e *asrEngine) decode(samples []float32) string {
 	return result.Text
 }
 
-// drainSegments decodes all finished VAD segments and appends their text.
-// Passthrough mode only tracks segment duration (for max_segment); the PCM
-// already streamed out as audio events.
 func (e *asrEngine) drainSegments() {
 	if e.vad == nil {
 		return
@@ -360,8 +350,6 @@ func (e *asrEngine) finalize() {
 	e.setState("listening")
 }
 
-// onChunk feeds one audio chunk through the VAD state machine. A nil chunk
-// is a timer tick: only timeout checks run.
 func (e *asrEngine) onChunk(samples []float32, now time.Time) {
 	if e.state == "idle" || e.vad == nil {
 		return
@@ -453,8 +441,6 @@ func (e *asrEngine) setVADParams(cmd Command) {
 	}
 	e.params = p
 
-	// threshold/min silence/min speech are baked into the sherpa VAD at
-	// construction time, so rebuild it if a session is active.
 	if e.state != "idle" && e.vadPath != "" {
 		if err := e.loadVAD(); err != nil {
 			e.ev.errorf("set_vad_params: %v", err)
@@ -474,8 +460,6 @@ func (e *asrEngine) close() {
 	}
 }
 
-// decodeFile recognizes a wav file and emits the result as a final event.
-// Used by the -decode smoke-test flag.
 func decodeFile(path, modelRoot string, ev *eventWriter) {
 	ctx := context.Background()
 	asrDir, _, err := ensureModels(ctx, modelRoot, ev)

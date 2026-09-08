@@ -38,7 +38,6 @@ func TestModelCatalog(t *testing.T) {
 	if ModelByID(catalog[1].ID).ID != catalog[1].ID {
 		t.Fatal("known id not resolved")
 	}
-	// Pre-merge catalog ids resolve to the merged entry with their precision.
 	if id, int8, legacy := LegacyModelID("sensevoice-int8"); !legacy || id != catalog[0].ID || !int8 {
 		t.Fatalf("LegacyModelID(sensevoice-int8) = %q,%v,%v", id, int8, legacy)
 	}
@@ -145,7 +144,6 @@ func TestEngineRegistry(t *testing.T) {
 	}
 	veng.Close()
 
-	// the list is sorted by id and a self-registered engine shows up
 	RegisterEngine(EngineDescriptor{
 		ID:    "zz-test-engine",
 		Label: "Test",
@@ -234,7 +232,6 @@ func TestDownloadModelInstalls(t *testing.T) {
 	if len(pcts) == 0 || pcts[len(pcts)-1] != 100 {
 		t.Fatalf("progress: %v", pcts)
 	}
-	// no leftover staging or archive entries
 	entries, _ := os.ReadDir(root)
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".") {
@@ -282,8 +279,6 @@ func TestDownloadModelHTTPError(t *testing.T) {
 	}
 }
 
-// The first-install guard keeps an existing helper install; the update path
-// (DownloadHelper) must replace it.
 func TestDownloadAndExtractReplaceSemantics(t *testing.T) {
 	tarball := makeTarGz(t, map[string]string{helperBinaryName(): "new-binary"})
 	srv := serveBytes(t, tarball)
@@ -298,7 +293,6 @@ func TestDownloadAndExtractReplaceSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// first-install path (ensureHelperBinary): existing install wins
 	if err := downloadAndExtract(context.Background(), srv.URL, cacheDir, "", false, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +300,6 @@ func TestDownloadAndExtractReplaceSemantics(t *testing.T) {
 		t.Fatalf("first-install guard clobbered the binary: %q", got)
 	}
 
-	// update path (DownloadHelper): the new binary replaces the old
 	if err := downloadAndExtract(context.Background(), srv.URL, cacheDir, "", true, nil); err != nil {
 		t.Fatal(err)
 	}

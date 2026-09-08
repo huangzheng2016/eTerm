@@ -93,7 +93,6 @@ func TestTmuxSessionInfoDaemonJSON(t *testing.T) {
 		t.Fatalf("got %+v", out)
 	}
 
-	// Real tmux entries carry no daemon flag; it must parse as false.
 	var plain []TmuxSessionInfo
 	if err := json.Unmarshal([]byte(`[{"name":"ops","created_unix":1,"attached":false}]`), &plain); err != nil {
 		t.Fatal(err)

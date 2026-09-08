@@ -10,8 +10,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 )
 
-// The AI panel replaces the whole frame; the app must not add or drop rows,
-// or the bottom border/input land off screen.
 func TestAIOverlayFillsFrameExactly(t *testing.T) {
 	for _, sz := range [][2]int{{80, 24}, {100, 32}} {
 		w, h := sz[0], sz[1]
@@ -37,7 +35,6 @@ func TestAIOverlayFillsFrameExactly(t *testing.T) {
 	}
 }
 
-// drainAI feeds command results back into the overlay until the run settles.
 func drainAI(t *testing.T, av *aiview.Model, cmd tea.Cmd) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -73,8 +70,7 @@ func TestAIOverlayForwardsDragSelection(t *testing.T) {
 	}
 	av := aiview.New(fake, fake, fake)
 	av.SetSize(80, 24)
-	av.Init() // focuses the input
-	// Load a conversation through the public API (paste prompt, enter, drain).
+	av.Init()
 	av.Update(tea.PasteMsg{Content: "hello ai"})
 	_, cmd := av.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	drainAI(t, av, cmd)
@@ -91,8 +87,6 @@ func TestAIOverlayForwardsDragSelection(t *testing.T) {
 		aiVisible: true,
 	}
 
-	// Drag over the conversation area: screen (4,3) is content line 0 col 2
-	// (overlay origin 1,0; border+padding 2; border+title+blank 3).
 	upd, _ := a.Update(tea.MouseClickMsg(tea.Mouse{X: 4, Y: 3, Button: tea.MouseLeft}))
 	a = upd.(App)
 	upd, _ = a.Update(tea.MouseMotionMsg(tea.Mouse{X: 12, Y: 3, Button: tea.MouseLeft}))

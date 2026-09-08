@@ -7,7 +7,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// Terminal represents a virtual terminal interface.
 type Terminal interface {
 	BackgroundColor() color.Color
 	Blur()

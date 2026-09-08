@@ -33,8 +33,6 @@ func TestAlignBreaksMixedParagraph(t *testing.T) {
 	}
 }
 
-// The wrapper re-inserts its indent (document margin, list hanging indent)
-// on continuation lines; the skip must be recorded so copies drop it.
 func TestAlignBreaksSkipsInsertedIndent(t *testing.T) {
 	breaks := alignBreaks(
 		[]string{"  https://lon", "  gword"},

@@ -63,7 +63,6 @@ func (m *MasterKeyManager) Unlock(password []byte) bool {
 	return true
 }
 
-// VerifyPassword checks the password against the stored verifier without changing unlock state.
 func (m *MasterKeyManager) VerifyPassword(password []byte) bool {
 	m.mu.RLock()
 	salt := m.salt
@@ -77,7 +76,6 @@ func (m *MasterKeyManager) VerifyPassword(password []byte) bool {
 	return ok
 }
 
-// ReplaceAfterRotation installs new salt/verifier and key material after DB re-encryption.
 func (m *MasterKeyManager) ReplaceAfterRotation(salt []byte, verifier []byte, key *SecureBytes) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

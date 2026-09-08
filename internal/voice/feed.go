@@ -35,30 +35,24 @@ func init() {
 	})
 }
 
-// VolcanoFeedConfig configures the volcano feed engine: a passthrough helper
-// (capture+VAD) streaming PCM into Volcano cloud ASR sessions.
 type VolcanoFeedConfig struct {
 	Volcano VolcanoConfig
-	Helper  LocalConfig // Passthrough/OnAudio/OnUtteranceEnd are managed internally
+	Helper  LocalConfig
 }
 
-// VolcanoFeedEngine routes helper passthrough audio to VolcanoEngine.WriteAudio.
-// The helper VAD marks utterance ends; each utterance gets its own volcano
-// session (negative-seq final frame, final transcript collected), then a
-// fresh connection is dialed for the next utterance.
 type VolcanoFeedEngine struct {
 	vcfg VolcanoConfig
 	hcfg LocalConfig
 
 	mu      sync.Mutex
 	helper  *LocalEngine
-	vol     *VolcanoEngine // current utterance session; nil while redialing
+	vol     *VolcanoEngine
 	started bool
 	closed  bool
-	idleCh  chan struct{} // helper state-idle signal, ends the stop flush
-	pumped  bool          // helper pump goroutine is running
+	idleCh  chan struct{}
+	pumped  bool
 
-	ctx    context.Context // engine lifetime; Close cancels in-flight redials
+	ctx    context.Context
 	cancel context.CancelFunc
 	events chan Event
 	done   chan struct{}
@@ -102,8 +96,6 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 		e.helper = NewLocalEngine(hcfg)
 	}
 
-	// expose the session before the helper starts streaming so the first
-	// audio chunks are not dropped
 	e.vol = vol
 	e.idleCh = make(chan struct{}, 1)
 	e.started = true
@@ -115,7 +107,6 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 	}
 
 	if !e.pumped {
-		// the helper persists across sessions, so pump it once
 		e.pumped = true
 		e.wg.Add(1)
 		go e.pumpHelper(e.helper.Events())
@@ -125,8 +116,6 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends the session: the helper flushes its tail audio, then the current
-// volcano session is finalized (negative-seq frame) and closed.
 func (e *VolcanoFeedEngine) Stop() error {
 	e.mu.Lock()
 	if !e.started {
@@ -140,7 +129,6 @@ func (e *VolcanoFeedEngine) Stop() error {
 
 	if helper != nil {
 		_ = helper.Stop()
-		// wait for the stop flush (tail audio + state idle) before finalizing
 		select {
 		case <-idleCh:
 		default:
@@ -174,7 +162,6 @@ func (e *VolcanoFeedEngine) SetVAD(p VADParams) error {
 	return helper.SetVAD(p)
 }
 
-// SetModel is a no-op: the passthrough helper does no local ASR.
 func (e *VolcanoFeedEngine) SetModel(string, string) error { return nil }
 
 func (e *VolcanoFeedEngine) Close() error {
@@ -191,7 +178,7 @@ func (e *VolcanoFeedEngine) Close() error {
 	e.mu.Unlock()
 
 	close(e.done)
-	e.cancel() // abort an in-flight redial on the helper read loop
+	e.cancel()
 	if helper != nil {
 		helper.Close()
 	}
@@ -203,8 +190,6 @@ func (e *VolcanoFeedEngine) Close() error {
 	return nil
 }
 
-// onAudio streams one helper PCM chunk into the current volcano session.
-// Runs on the helper read loop, serialized with onUtteranceEnd.
 func (e *VolcanoFeedEngine) onAudio(pcm []byte) {
 	e.mu.Lock()
 	if e.closed {
@@ -216,20 +201,16 @@ func (e *VolcanoFeedEngine) onAudio(pcm []byte) {
 	if vol == nil {
 		return
 	}
-	// a dead session is reported by its own read loop
 	_ = vol.WriteAudio(pcm)
 }
 
-// onUtteranceEnd finalizes the current volcano session and dials the next.
-// The redial overlaps the final wait so a slow server does not widen the
-// inter-utterance gap; it is cancelled by Close.
 func (e *VolcanoFeedEngine) onUtteranceEnd() {
 	e.mu.Lock()
 	if !e.started || e.closed {
 		e.mu.Unlock()
 		return
 	}
-	old := e.vol // stays assigned so Stop/Close can abort its final wait
+	old := e.vol
 	e.mu.Unlock()
 
 	type redial struct {
@@ -246,7 +227,7 @@ func (e *VolcanoFeedEngine) onUtteranceEnd() {
 	}()
 
 	if old != nil {
-		old.Stop() // negative-seq final; transcript drains through its pump
+		old.Stop()
 		old.Close()
 	}
 
@@ -279,7 +260,6 @@ func (e *VolcanoFeedEngine) emit(ev Event) {
 	}
 }
 
-// pump forwards one volcano session's events until its channel closes.
 func (e *VolcanoFeedEngine) pump(ch <-chan Event) {
 	defer e.wg.Done()
 	for ev := range ch {
@@ -287,8 +267,6 @@ func (e *VolcanoFeedEngine) pump(ch <-chan Event) {
 	}
 }
 
-// pumpHelper forwards helper events and signals the idle that ends a stop
-// flush (and any mid-session cancel).
 func (e *VolcanoFeedEngine) pumpHelper(ch <-chan Event) {
 	defer e.wg.Done()
 	for ev := range ch {

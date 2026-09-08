@@ -31,8 +31,6 @@ func parseTunnelTestHost(s string) (user, host string, port int) {
 	return
 }
 
-// Requires ETERM_SYNC_TEST_HOST (e.g. root@mock.example.com:2222) and an
-// etermsyncd HTTP listener on the remote (ETERM_SYNC_TEST_PORT, default 18443).
 func TestOpenTunnelPing(t *testing.T) {
 	hostEnv := os.Getenv("ETERM_SYNC_TEST_HOST")
 	if hostEnv == "" {

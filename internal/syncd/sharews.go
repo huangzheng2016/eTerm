@@ -15,22 +15,15 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
-// shareStateIdleTTL exceeds the daemon's 10 minute detached-stream TTL, so a
-// pruned state would fail resume on the daemon anyway.
 const shareStateIdleTTL = 11 * time.Minute
 
-// shareStreamState carries a guest stream across connections of the same
-// share token: the relay stream ID and the cumulative acked offset the guest
-// has displayed, so a reconnecting guest resumes where it left off.
 type shareStreamState struct {
 	streamID  uint32
 	acked     atomic.Uint64
-	turn      chan struct{} // capacity 1; holds a value while no bridge owns the stream
-	idleSince time.Time     // last bridge teardown, for pruning
+	turn      chan struct{}
+	idleSince time.Time
 }
 
-// shareState returns the stream state for token, creating it (and pruning
-// long-idle states) on first use. created reports whether it is fresh.
 func (h *RelayHub) shareState(token string) (st *shareStreamState, created bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -54,8 +47,6 @@ func (h *RelayHub) shareState(token string) (st *shareStreamState, created bool)
 	return st, true
 }
 
-// dropShareState removes the state only if st is still the current state for
-// token, so a stale owner cannot delete a newer guest's state.
 func (h *RelayHub) dropShareState(token string, st *shareStreamState) {
 	h.mu.Lock()
 	if h.shareStates[token] == st {
@@ -64,9 +55,6 @@ func (h *RelayHub) dropShareState(token string, st *shareStreamState) {
 	h.mu.Unlock()
 }
 
-// registerShareConn claims the single active guest connection for token; a
-// previous connection's channel is closed so it exits with reason "replaced".
-// The returned release func drops the claim if it is still current.
 func (h *RelayHub) registerShareConn(token string) (<-chan struct{}, func()) {
 	h.mu.Lock()
 	if old, ok := h.shareConns[token]; ok {
@@ -109,20 +97,12 @@ type shareHostMsg struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// Teardown causes decide what happens to the remote shell when a guest
-// connection ends.
 const (
-	shareExitGuest    = iota // browser went away: detach, keep the PTY for resume
-	shareExitReplaced        // a newer connection owns the stream now
-	shareExitFatal           // share expired / session over: kill the PTY
+	shareExitGuest = iota
+	shareExitReplaced
+	shareExitFatal
 )
 
-// shareWS bridges a browser guest (JSON text frames) to a daemon peer as a
-// relay client. The guest token is the only credential. Guest disconnects
-// detach the remote shell (daemon keeps the PTY and buffers output); a
-// reconnect for the same token resumes the same stream from the last acked
-// offset. A second concurrent connection replaces the first and takes over
-// the stream.
 func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	share, err := engine.GetShareByToken(token)
@@ -186,15 +166,11 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 	streamID := st.streamID
 	resumeFrom := st.acked.Load()
 	defer func() {
-		// Rejoin dieWith so a cause set by the forwarder goroutine is
-		// visible here through the Once.
 		dieWith(shareExitGuest)
 		h.closeSession(streamID)
 		q.close()
 		switch cause {
 		case shareExitReplaced:
-			// The replacing connection resumes the stream; leave the
-			// daemon side untouched.
 		case shareExitGuest:
 			peer.Send.sendCtl(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: []byte(relay.CloseClientDisconnected)})
 		default:
@@ -207,7 +183,6 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 		st.turn <- struct{}{}
 	}()
 
-	// openAndWait sends FrameOpen and waits for the daemon's OpenOK/OpenErr.
 	openAndWait := func() (relay.Frame, bool) {
 		open, _ := json.Marshal(relay.OpenRequest{
 			PeerID:        share.PeerID,
@@ -245,8 +220,6 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 
 	f, opened := openAndWait()
 	if opened && f.Type == relay.FrameOpenErr && !fresh {
-		// Resume refused (unknown stream or offset outside the retained
-		// ring): fall back to a brand new session on a new stream ID.
 		h.closeSession(streamID)
 		id, err := randomStreamID()
 		if err != nil {
@@ -263,7 +236,6 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 	if !opened {
 		select {
 		case <-dead:
-			// Replaced or shutting down; cause already set.
 		default:
 			writeShareMsg(ctx, c, shareHostMsg{T: "exit", Reason: "peer offline"})
 			dieWith(shareExitFatal)
@@ -311,10 +283,6 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// shareForward drains relay frames from the daemon, translates them to guest
-// JSON messages, acks consumed output, and ends the session at the share's
-// fixed expiry. It never blocks on a stuck browser: writes carry a timeout
-// and failure tears the connection down.
 func (h *RelayHub) shareForward(ctx context.Context, c *websocket.Conn, q *laneQueue, daemon *laneQueue, st *shareStreamState, streamID uint32, expiresAt time.Time, replaced <-chan struct{}, dead <-chan struct{}, dieWith func(int)) {
 	expiry := time.NewTimer(time.Until(expiresAt))
 	defer expiry.Stop()

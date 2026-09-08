@@ -59,8 +59,6 @@ func validate(data []byte) (*Image, error) {
 	return &Image{Data: data, Mime: mime, Filename: "clipboard" + ext}, nil
 }
 
-// CompressJPEG re-encodes a PNG/JPEG as JPEG quality 70, flattened onto
-// white. Returns nil when decoding fails or the result is not smaller.
 func CompressJPEG(data []byte) []byte {
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {

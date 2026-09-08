@@ -15,8 +15,6 @@ const (
 	UpdateCheckMinInterval       = 6 * time.Hour
 )
 
-// PollLatestRelease queries GitHub when allowed: not disabled, DB throttle elapsed, env clear.
-// On HTTP 200 and successful JSON decode, records the check time in AppSetting (even if already up to date).
 func PollLatestRelease(gdb *gorm.DB, disabled bool) (tag, url string, err error) {
 	if disabled {
 		return "", "", nil

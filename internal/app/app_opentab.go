@@ -94,7 +94,6 @@ func (a App) openSessionReplayTab(historyID uint, title string) (App, tea.Cmd) {
 }
 
 func (a App) openSettingsTab() (App, tea.Cmd) {
-	// Check if settings tab already exists
 	for i, tab := range a.tabs {
 		if tab.Type == SettingsTab {
 			a.activeTab = i

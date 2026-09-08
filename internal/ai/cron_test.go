@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
-// cronTestStore is a map-backed CronStore.
 type cronTestStore struct {
 	mu   sync.Mutex
 	jobs map[string]CronJob
@@ -76,8 +75,6 @@ func (s *cronTestStore) count() int {
 	return len(s.jobs)
 }
 
-// cronTestScheduler builds a scheduler without the ticker goroutine: tests
-// drive fireDue directly against the fake clock.
 func cronTestScheduler(store CronStore, now time.Time, fires *[]string) *CronScheduler {
 	return &CronScheduler{
 		jobs:    map[string]*CronJob{},
@@ -102,7 +99,7 @@ func TestCronOneShotFiresOnceAndDeletes(t *testing.T) {
 		t.Fatal("job not persisted")
 	}
 
-	s.fireDue() // not yet due
+	s.fireDue()
 	if len(fires) != 0 {
 		t.Fatalf("fired early: %v", fires)
 	}
@@ -135,7 +132,6 @@ func TestCronRecurringCoalescesMissedFires(t *testing.T) {
 	if _, err := s.Create("report tab 1", 0, 5); err != nil {
 		t.Fatal(err)
 	}
-	// 12 minutes past the first ideal fire: 3 ideal fires collapse into one.
 	s.now = func() time.Time { return now.Add(17 * time.Minute) }
 	s.fireDue()
 	if len(fires) != 1 {
@@ -156,7 +152,6 @@ func TestCronRecurringCoalescesMissedFires(t *testing.T) {
 		t.Fatalf("reschedule not persisted: %+v", stored)
 	}
 
-	// On-time fire reports no coalescing.
 	s.now = func() time.Time { return now.Add(23 * time.Minute) }
 	s.fireDue()
 	if len(fires) != 2 || strings.Contains(fires[1], "coalesced") {
@@ -198,13 +193,11 @@ func TestCronPersistenceRoundTrip(t *testing.T) {
 	if _, err := s1.Create("one", 5, 0); err != nil {
 		t.Fatal(err)
 	}
-	// Distinct timestamps keep the List order deterministic (CreatedAt sort).
 	s1.now = func() time.Time { return now.Add(time.Minute) }
 	if _, err := s1.Create("two", 0, 10); err != nil {
 		t.Fatal(err)
 	}
 
-	// A fresh scheduler on the same store sees the jobs after SetSession.
 	s2 := cronTestScheduler(store, now, &fires)
 	if n := len(s2.List()); n != 0 {
 		t.Fatalf("jobs leaked across sessions: %d", n)
@@ -215,14 +208,12 @@ func TestCronPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("loaded jobs: %+v", jobs)
 	}
 
-	// Jobs of another session stay out.
 	s2.SetSession("other")
 	if n := len(s2.List()); n != 0 {
 		t.Fatalf("wrong session jobs loaded: %d", n)
 	}
 }
 
-// Jobs sharing a CreatedAt sort deterministically by id.
 func TestCronListSameTimestampTieBreak(t *testing.T) {
 	var fires []string
 	s := cronTestScheduler(nil, time.Now(), &fires)
@@ -243,8 +234,6 @@ func TestCronListSameTimestampTieBreak(t *testing.T) {
 	}
 }
 
-// Jobs created before the first save (session "") are re-homed to the first
-// real session id, in store and in memory.
 func TestCronSetSessionAdoptsUnsavedJobs(t *testing.T) {
 	store := newCronTestStore()
 	var fires []string
@@ -261,7 +250,6 @@ func TestCronSetSessionAdoptsUnsavedJobs(t *testing.T) {
 	if len(stored) != 1 {
 		t.Fatalf("adoption not persisted: %+v", stored)
 	}
-	// A later switch does not re-adopt.
 	s.SetSession("s2")
 	if n := len(s.List()); n != 0 {
 		t.Fatalf("s2 must be empty: %d", n)
@@ -271,14 +259,11 @@ func TestCronSetSessionAdoptsUnsavedJobs(t *testing.T) {
 	}
 }
 
-// AbandonSession wipes the active session's jobs from memory and the store,
-// including jobs of the unsaved session (""); other sessions are untouched.
 func TestCronAbandonSessionWipesJobs(t *testing.T) {
 	store := newCronTestStore()
 	var fires []string
 	s := cronTestScheduler(store, time.Now(), &fires)
 
-	// Jobs created before the first save (session "").
 	if _, err := s.Create("pre-save", 5, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +272,6 @@ func TestCronAbandonSessionWipesJobs(t *testing.T) {
 		t.Fatalf("unsaved jobs not wiped: mem %d, store %d", n, store.count())
 	}
 
-	// Jobs of a saved session; a second session's jobs must survive.
 	s.SetSession("s1")
 	if _, err := s.Create("s1 job", 5, 0); err != nil {
 		t.Fatal(err)
@@ -307,7 +291,6 @@ func TestCronAbandonSessionWipesJobs(t *testing.T) {
 		t.Fatalf("other session jobs wiped: %+v", stored)
 	}
 
-	// The wiped session stays empty when re-entered.
 	s.SetSession("s2")
 	if n := len(s.List()); n != 0 {
 		t.Fatalf("wiped jobs came back: %d", n)

@@ -4,10 +4,6 @@ import (
 	"charm.land/bubbles/v2/list"
 )
 
-// Mouse Y is already offset by App (tab row + divider line); do not subtract again.
-
-// listMouseDefaults match bubbles list.NewDefaultDelegate(): Height 2, Spacing 1, and
-// populatedView inserts (Spacing+1) newlines between items.
 const (
 	defaultDelegateItemHeight = 2
 	defaultDelegateSpacing    = 1
@@ -18,9 +14,6 @@ func stridePerListItem() int {
 	return defaultDelegateItemHeight + gapNL
 }
 
-// globalIndexAtMouse returns the global index in VisibleItems for a cell-Y inside the
-// connection list, after app-level Y offset (tab bar). localContentY is 0-based within
-// the tab body (below tabs, above status bar).
 func (m Model) globalIndexAtMouse(localContentY int) (int, bool) {
 	listH := m.height - 2
 	if listH < 1 {

@@ -10,7 +10,6 @@ func (e *Emulator) handleMode(params ansi.Params, set, isAnsi bool) {
 	for _, p := range params {
 		param := p.Param(-1)
 		if param == -1 {
-			// Missing parameter, ignore
 			continue
 		}
 
@@ -21,7 +20,6 @@ func (e *Emulator) handleMode(params ansi.Params, set, isAnsi bool) {
 
 		setting := e.modes[mode]
 		if setting == ansi.ModePermanentlyReset || setting == ansi.ModePermanentlySet {
-			// Permanently set modes are ignored.
 			continue
 		}
 
@@ -34,10 +32,8 @@ func (e *Emulator) handleMode(params ansi.Params, set, isAnsi bool) {
 	}
 }
 
-// setAltScreenMode sets the alternate screen mode.
 func (e *Emulator) setAltScreenMode(on bool) {
 	if (on && e.scr == &e.scrs[1]) || (!on && e.scr == &e.scrs[0]) {
-		// Already in alternate screen mode, or normal screen, do nothing.
 		return
 	}
 	if on {
@@ -57,17 +53,14 @@ func (e *Emulator) setAltScreenMode(on bool) {
 	}
 }
 
-// saveCursor saves the cursor position.
 func (e *Emulator) saveCursor() {
 	e.scr.SaveCursor()
 }
 
-// restoreCursor restores the cursor position.
 func (e *Emulator) restoreCursor() {
 	e.scr.RestoreCursor()
 }
 
-// setMode sets the mode to the given value.
 func (e *Emulator) setMode(mode ansi.Mode, setting ansi.ModeSetting) {
 	e.logf("setting mode %T(%v) to %v", mode, mode, setting)
 	e.modes[mode] = setting
@@ -82,10 +75,7 @@ func (e *Emulator) setMode(mode ansi.Mode, setting ansi.ModeSetting) {
 		} else {
 			e.restoreCursor()
 		}
-	case ansi.ModeAltScreenSaveCursor: // Alternate Screen Save Cursor (1047 & 1048)
-		// Save primary screen cursor position
-		// Switch to alternate screen
-		// Doesn't support scrollback
+	case ansi.ModeAltScreenSaveCursor:
 		if setting.IsSet() {
 			e.saveCursor()
 		}
@@ -106,7 +96,6 @@ func (e *Emulator) setMode(mode ansi.Mode, setting ansi.ModeSetting) {
 	}
 }
 
-// isModeSet returns true if the mode is set.
 func (e *Emulator) isModeSet(mode ansi.Mode) bool {
 	m, ok := e.modes[mode]
 	return ok && m.IsSet()

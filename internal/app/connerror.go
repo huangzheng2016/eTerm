@@ -74,7 +74,6 @@ func (a App) handleConnErrorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// connErrorMouse toggles the detail panel when the card is clicked.
 func (a App) connErrorMouse(lx, ly int) (tea.Model, tea.Cmd) {
 	if a.connError == nil {
 		return a, nil

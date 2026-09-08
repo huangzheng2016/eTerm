@@ -10,14 +10,14 @@ import (
 
 type Config struct {
 	Enabled     bool
-	Mode        string // "http", "ssh"
+	Mode        string
 	SSHHostID   uint
 	RemotePort  int
 	ServerURL   string
 	InsecureTLS bool
-	APIKey      string // plaintext
-	Passphrase  string // plaintext
-	Interval    int    // seconds
+	APIKey      string
+	Passphrase  string
+	Interval    int
 	DeviceID    string
 	LastRev     int64
 }

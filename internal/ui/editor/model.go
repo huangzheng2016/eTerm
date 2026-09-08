@@ -39,12 +39,8 @@ const (
 	advancedField      = 23
 )
 
-// inputCount is the number of textinput.Model instances in the inputs array.
-// This is less than the total field constants above because selector fields
-// (authMethodField, keyIDField, jumpHostField, proxyTypeField, gssapiSourceField) don't use a textinput.
 const inputCount = 15
 
-// editorInputInnerWidth matches view formStyle width(60) minus Padding(1,3) and label column — see bubbles textinput.placeholderView when Width<=0.
 const editorInputInnerWidth = 39
 
 var authOptions = []string{"password", "key", "agent", "interactive", "gssapi"}
@@ -102,7 +98,7 @@ type Model struct {
 	keyOptions      []db.SSHKey
 	keyIdx          int
 	jumpHostOptions []db.Host
-	jumpIdx         int // -1 = none
+	jumpIdx         int
 	proxyTypeIdx    int
 	gssapiSourceIdx int
 	forwardAgentIdx int
@@ -157,7 +153,6 @@ func fieldUsesSelector(field int) bool {
 	}
 }
 
-// syncInputWidths sets bubbles textinput width. If Width stays 0, placeholderView only renders the first rune of Placeholder (looks like stray default characters).
 func (m *Model) syncInputWidths() {
 	w := editorInputInnerWidth
 	if m.width > 0 && m.width < 58 {
@@ -213,7 +208,7 @@ func (m Model) mainVisibleFields() []int {
 		fields = append(fields, keyIDField)
 	case "gssapi":
 		fields = append(fields, gssapiSourceField)
-		if m.gssapiSourceIdx == 1 { // keytab
+		if m.gssapiSourceIdx == 1 {
 			fields = append(fields, krbPrincipalField, gssapiKeytabField)
 		}
 	}
@@ -344,7 +339,6 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, host *db.Host)
 			}
 		}
 
-		// GSSAPI fields
 		gssapiSourceIdx = gssapiSourceFromDB(host.GSSAPISource)
 		inputs[12].SetValue(host.KrbPrincipal)
 		inputs[13].SetValue(host.GSSAPIKeytab)

@@ -8,8 +8,6 @@ Capabilities, exposed as tools:
 - list_hosts / open_ssh: list saved SSH hosts (name, address, tags) and open one in a new tab by name; returns the new tab id. The connect can take a while and may fail (auth, network); on a wait timeout, say so.
 - list_tmux_sessions / open_tmux: list local tmux sessions and attach to one in a new tab; returns the new tab id.`
 
-// daemonToolsPrompt is included only when at least one remote daemon is
-// registered: without daemons these tools cannot do anything.
 const daemonToolsPrompt = `
 - list_daemons / list_daemon_sessions: discover registered remote daemons and the tmux sessions on them.
 - enter_daemon / create_session / rename_session / kill_session: open a shell tab into a daemon session and manage daemon sessions.`
@@ -37,7 +35,6 @@ const promptOutro = `
 
 Reply concisely in plain text. Report what you did and what you observed; do not dump raw terminal output unless the user asks for it.`
 
-// localToolsPrompt documents the local-machine tools; they are always bound.
 const localToolsPrompt = `
 
 Local machine tools:

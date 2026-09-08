@@ -34,8 +34,6 @@ func NewClient(sshClient *ssh.Client) (*Client, error) {
 	}, nil
 }
 
-// AddClosers attaches resources (jump host chain, agent socket) to be
-// released with the client.
 func (c *Client) AddClosers(cl ...io.Closer) {
 	c.closers = append(c.closers, cl...)
 }

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var version = "dev" // release builds inject the tag via -ldflags -X
+var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -96,8 +96,6 @@ func main() {
 		case chunk := <-eng.cap.chunks:
 			eng.onChunk(chunk, time.Now())
 		case <-ticker.C:
-			// timer checks (trailing silence, no-speech timeout) run even
-			// when no audio arrives
 			eng.onChunk(nil, time.Now())
 		}
 	}

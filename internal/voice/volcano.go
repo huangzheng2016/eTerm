@@ -18,22 +18,17 @@ const (
 	volcanoFinalTimeout   = 8 * time.Second
 )
 
-// VolcanoConfig configures the Volcano Engine cloud ASR engine. Auth uses
-// either APIKey (X-Api-Key) or AppKey+AccessKey (X-Api-App-Key /
-// X-Api-Access-Key).
 type VolcanoConfig struct {
 	APIKey      string
 	AppKey      string
 	AccessKey   string
-	ResourceID  string // default ResourceIDSeedASR
-	URL         string // default defaultVolcanoURL
-	Language    string // default zh-CN
-	SampleRate  int    // default 16000
-	SmartFormat bool   // enable_itn + enable_punc
+	ResourceID  string
+	URL         string
+	Language    string
+	SampleRate  int
+	SmartFormat bool
 }
 
-// VolcanoEngine is an in-process Volcano Engine realtime ASR client. Audio
-// is fed by the caller via WriteAudio as 16kHz mono S16LE PCM.
 type VolcanoEngine struct {
 	cfg VolcanoConfig
 
@@ -47,7 +42,7 @@ type VolcanoEngine struct {
 	events  chan Event
 	done    chan struct{}
 	wg      sync.WaitGroup
-	finalCh chan struct{} // closed when a final/error/close arrives during Stop
+	finalCh chan struct{}
 }
 
 func NewVolcanoEngine(cfg VolcanoConfig) *VolcanoEngine {
@@ -214,7 +209,6 @@ func abs32(v int32) int32 {
 }
 
 func (e *VolcanoEngine) SetVAD(p VADParams) error {
-	// Endpointing is server-side for Volcano; nothing to apply.
 	return nil
 }
 

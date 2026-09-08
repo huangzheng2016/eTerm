@@ -40,8 +40,6 @@ func newDaemonSink() *daemonFrameSink {
 	return &daemonFrameSink{frames: make(chan relay.Frame, 256)}
 }
 
-// newTestSender drains a frameSender into a sink with the same control-first
-// priority as frameSender.run.
 func newTestSender() (*frameSender, *daemonFrameSink) {
 	s := newFrameSender()
 	sink := newDaemonSink()
@@ -438,7 +436,6 @@ func TestHandleOpenResumesFromRetainedOffset(t *testing.T) {
 		t.Fatalf("data = %q", data)
 	}
 
-	// Connection drops; output continues into the ring.
 	mgr.clearSender(sender)
 	go func() { _, _ = fake.stdout.Write([]byte("world")) }()
 	deadline := time.Now().Add(2 * time.Second)
@@ -455,7 +452,6 @@ func TestHandleOpenResumesFromRetainedOffset(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// Client reconnects having consumed only "hel".
 	sender2, out2 := newTestSender()
 	mgr.setSender(sender2)
 	payload, _ := json.Marshal(relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 3})
@@ -543,8 +539,6 @@ func TestHandleFrameRoutesDataResizeAckAndCloseToSession(t *testing.T) {
 	sr.sent = 3
 	sr.mu.Unlock()
 	handleFrame(rt, relay.Frame{Type: relay.FrameData, StreamID: 31, Payload: []byte("input")}, mgr, nil, context.Background())
-	// Input is written by the stream's input pump; wait for it before the
-	// close below shuts the pump down.
 	deadline := time.Now().Add(2 * time.Second)
 	for fake.stdin.String() != "input" {
 		if time.Now().After(deadline) {
@@ -752,7 +746,6 @@ func TestOutputRingOverflowDropsOldest(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Fatal("ring content mismatch after overflow")
 	}
-	// Offsets older than base clamp to base.
 	if got := r.ReadFrom(0, 3); !bytes.Equal(got, bytes.Repeat([]byte("a"), 3)) {
 		t.Fatalf("clamped read = %q", got[:3])
 	}
@@ -777,7 +770,7 @@ func TestOutputRingLargeWriteKeepsTail(t *testing.T) {
 
 func TestPumpKeepsEndedStreamForResume(t *testing.T) {
 	fake := newDaemonFakeSession()
-	mgr := newSessionManager() // no sender: client detached
+	mgr := newSessionManager()
 	sr := newStreamRelay(fake.is)
 	mgr.add(70, sr)
 
@@ -798,7 +791,6 @@ func TestPumpKeepsEndedStreamForResume(t *testing.T) {
 	}
 	_ = fake.stdout.Close()
 
-	// Ended while detached: the stream stays registered with its ring.
 	time.Sleep(50 * time.Millisecond)
 	if mgr.get(70) == nil {
 		t.Fatal("ended detached stream was removed")

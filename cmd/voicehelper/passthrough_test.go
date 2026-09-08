@@ -57,7 +57,6 @@ func TestAudioEventShape(t *testing.T) {
 	}
 }
 
-// stop in passthrough mode marks utterance end instead of decoding.
 func TestPassthroughStopEmitsUtteranceEnd(t *testing.T) {
 	var buf bytes.Buffer
 	ev := newEventWriter(&buf)
@@ -74,7 +73,6 @@ func TestPassthroughStopEmitsUtteranceEnd(t *testing.T) {
 	}
 }
 
-// stop without speech stays quiet (no utterance_end, no final).
 func TestPassthroughStopWithoutSpeech(t *testing.T) {
 	var buf bytes.Buffer
 	ev := newEventWriter(&buf)
@@ -90,7 +88,6 @@ func TestPassthroughStopWithoutSpeech(t *testing.T) {
 	}
 }
 
-// finalize in passthrough mode emits utterance_end and keeps listening.
 func TestPassthroughFinalizeEmitsUtteranceEnd(t *testing.T) {
 	var buf bytes.Buffer
 	ev := newEventWriter(&buf)
@@ -107,7 +104,6 @@ func TestPassthroughFinalizeEmitsUtteranceEnd(t *testing.T) {
 	}
 }
 
-// ASR mode is unchanged: stop emits the accumulated text as final.
 func TestASRStopStillEmitsFinal(t *testing.T) {
 	var buf bytes.Buffer
 	ev := newEventWriter(&buf)
@@ -124,7 +120,6 @@ func TestASRStopStillEmitsFinal(t *testing.T) {
 	}
 }
 
-// set_vad_params plumbs trailing_silence (the end-of-sentence setting).
 func TestSetVADParamsAppliesTrailingSilence(t *testing.T) {
 	var buf bytes.Buffer
 	eng := newASREngine(newEventWriter(&buf), t.TempDir())

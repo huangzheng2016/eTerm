@@ -6,8 +6,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// JumpChainPointsBackToHost reports whether following JumpHostID links from startID
-// eventually reaches editorHostID (a cycle back to the host being edited).
 func JumpChainPointsBackToHost(database *gorm.DB, editorHostID uint, startID uint) bool {
 	const maxHops = 32
 	cur := startID
@@ -27,7 +25,6 @@ func JumpChainPointsBackToHost(database *gorm.DB, editorHostID uint, startID uin
 	return true
 }
 
-// FirstProxyJumpHop returns the first hop in a ProxyJump value (comma-separated list ignored after first).
 func FirstProxyJumpHop(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -39,7 +36,6 @@ func FirstProxyJumpHop(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// HostPartFromProxyJump returns the host portion after user@ for ProxyJump hop matching.
 func HostPartFromProxyJump(proxyJump string) string {
 	hop := FirstProxyJumpHop(proxyJump)
 	if i := strings.LastIndex(hop, "@"); i >= 0 {
@@ -48,8 +44,6 @@ func HostPartFromProxyJump(proxyJump string) string {
 	return hop
 }
 
-// ResolveJumpHostID finds an existing Host ID for a ProxyJump string (first hop only).
-// Tries alias match first, then hostname match.
 func ResolveJumpHostID(database *gorm.DB, proxyJump string) *uint {
 	hop := FirstProxyJumpHop(proxyJump)
 	if hop == "" {
@@ -59,7 +53,6 @@ func ResolveJumpHostID(database *gorm.DB, proxyJump string) *uint {
 	hostPart := HostPartFromProxyJump(proxyJump)
 	hostPartLower := strings.ToLower(hostPart)
 
-	// Build candidate list (deduplicated)
 	candidates := []string{hopLower}
 	if hostPartLower != hopLower {
 		candidates = append(candidates, hostPartLower)
@@ -68,7 +61,6 @@ func ResolveJumpHostID(database *gorm.DB, proxyJump string) *uint {
 	var hosts []Host
 	database.Where("LOWER(alias) IN ? OR LOWER(hostname) IN ?", candidates, candidates).Find(&hosts)
 
-	// Prefer alias match over hostname match; prefer full hop over host-part-only.
 	for _, prio := range candidates {
 		for _, h := range hosts {
 			if strings.ToLower(h.Alias) == prio {

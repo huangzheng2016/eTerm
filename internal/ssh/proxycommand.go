@@ -10,17 +10,16 @@ import (
 	"time"
 )
 
-// proxyCommandConn wraps a subprocess whose stdin/stdout act as a network connection.
 type proxyCommandConn struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 }
 
-func (c *proxyCommandConn) Read(b []byte) (int, error)  { return c.stdout.Read(b) }
-func (c *proxyCommandConn) Write(b []byte) (int, error)  { return c.stdin.Write(b) }
-func (c *proxyCommandConn) LocalAddr() net.Addr           { return dummyAddr("proxycommand") }
-func (c *proxyCommandConn) RemoteAddr() net.Addr          { return dummyAddr("proxycommand") }
+func (c *proxyCommandConn) Read(b []byte) (int, error)         { return c.stdout.Read(b) }
+func (c *proxyCommandConn) Write(b []byte) (int, error)        { return c.stdin.Write(b) }
+func (c *proxyCommandConn) LocalAddr() net.Addr                { return dummyAddr("proxycommand") }
+func (c *proxyCommandConn) RemoteAddr() net.Addr               { return dummyAddr("proxycommand") }
 func (c *proxyCommandConn) SetDeadline(_ time.Time) error      { return nil }
 func (c *proxyCommandConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (c *proxyCommandConn) SetWriteDeadline(_ time.Time) error { return nil }
@@ -41,7 +40,6 @@ type dummyAddr string
 func (a dummyAddr) Network() string { return "proxycommand" }
 func (a dummyAddr) String() string  { return string(a) }
 
-// expandProxyCommand replaces %h, %p, and %% tokens in the command string.
 func expandProxyCommand(command, host string, port int) string {
 	r := strings.NewReplacer(
 		"%h", host,
@@ -51,7 +49,6 @@ func expandProxyCommand(command, host string, port int) string {
 	return r.Replace(command)
 }
 
-// dialProxyCommand starts a subprocess and returns a net.Conn backed by its stdin/stdout.
 func dialProxyCommand(command, host string, port int) (net.Conn, error) {
 	expanded := expandProxyCommand(command, host, port)
 	cmd := exec.Command("sh", "-c", expanded)

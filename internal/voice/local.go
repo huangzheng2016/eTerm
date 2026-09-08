@@ -19,18 +19,14 @@ const (
 	handshakeTimeout          = 10 * time.Second
 )
 
-// LocalConfig configures the local (voicehelper subprocess) engine.
 type LocalConfig struct {
-	BinPath     string // explicit helper binary path; skips lookup/download
-	ModelDir    string // passed as -model-dir; empty uses helper default
-	CacheDir    string // helper download cache; default os.UserCacheDir()/eterm
+	BinPath     string
+	ModelDir    string
+	CacheDir    string
 	DownloadURL string
-	SHA256Hex   string // expected sha256 of the downloaded binary; empty skips verify
+	SHA256Hex   string
 	VAD         VADParams
 
-	// Passthrough runs the helper as capture+VAD only (no local ASR): audio
-	// chunks (16kHz mono S16LE) go to OnAudio and VAD finalizes to
-	// OnUtteranceEnd instead of the event channel.
 	Passthrough    bool
 	OnAudio        func(pcm []byte)
 	OnUtteranceEnd func()
@@ -76,7 +72,6 @@ type helperEvent struct {
 	Pct      float64 `json:"pct"`
 }
 
-// LocalEngine drives the voicehelper subprocess over NDJSON stdin/stdout.
 type LocalEngine struct {
 	cfg LocalConfig
 
@@ -89,7 +84,7 @@ type LocalEngine struct {
 	restarts  int
 	spawnedAt time.Time
 	vad       VADParams
-	asrDir    string // selected model dir; sent as set_model on start
+	asrDir    string
 	asrKind   string
 
 	wg     sync.WaitGroup
@@ -150,7 +145,6 @@ func (e *LocalEngine) Stop() error {
 	e.started = false
 	e.restarts = 0
 	if e.cmd == nil {
-		// helper already gone (crashed); nothing to stop
 		return nil
 	}
 	return e.sendLocked(helperCommand{Cmd: "stop"})
@@ -166,8 +160,6 @@ func (e *LocalEngine) SetVAD(p VADParams) error {
 	return e.sendVADLocked()
 }
 
-// SetModel selects the ASR model directory and recognizer kind; it applies
-// to the running helper immediately and to future (re)spawns.
 func (e *LocalEngine) SetModel(dir, kind string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -199,7 +191,6 @@ func (e *LocalEngine) Close() error {
 	return nil
 }
 
-// spawnLocked starts the helper process and validates the handshake.
 func (e *LocalEngine) spawnLocked(ctx context.Context) error {
 	bin, err := ensureHelperBinary(ctx, e.cfg)
 	if err != nil {
@@ -284,8 +275,6 @@ func (e *LocalEngine) handshakeLocked() error {
 
 func (e *LocalEngine) sendVADLocked() error {
 	p := e.vad
-	// no_speech_timeout always goes out: 0 disables the helper-side cancel,
-	// while the other zero fields keep helper defaults.
 	cmd := helperCommand{Cmd: "set_vad_params", NoSpeechTimeout: &p.NoSpeechTimeout}
 	set := func(dst **float64, v float64) {
 		if v != 0 {
@@ -321,10 +310,6 @@ func (e *LocalEngine) emit(ev Event) {
 	}
 }
 
-// readLoop forwards helper events until the process exits, then restarts it
-// if the session was active and the restart budget remains. All sends to
-// e.events happen here (or in the restart chain), so Close can wait on e.wg
-// before closing the channel.
 func (e *LocalEngine) readLoop(cmd *exec.Cmd, out *bufio.Reader) {
 	defer e.wg.Done()
 	sc := bufio.NewScanner(out)
@@ -359,7 +344,6 @@ func (e *LocalEngine) readLoop(cmd *exec.Cmd, out *bufio.Reader) {
 	}
 	e.cmd = nil
 	e.stdin = nil
-	// a helper that survived a while earns a fresh restart budget
 	if time.Since(e.spawnedAt) > time.Minute {
 		e.restarts = 0
 	}
@@ -375,7 +359,7 @@ func (e *LocalEngine) readLoop(cmd *exec.Cmd, out *bufio.Reader) {
 		return
 	}
 	e.restarts++
-	e.started = false // let Start respawn and re-enter listening
+	e.started = false
 	e.mu.Unlock()
 
 	time.Sleep(500 * time.Millisecond)

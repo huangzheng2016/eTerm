@@ -7,7 +7,6 @@ import (
 
 var ErrUnsupportedPlatform = fmt.Errorf("no prebuilt release for this OS/CPU (try building from source)")
 
-// ReleaseArchiveNames returns CI artifact basename (without extension) and archive filename.
 func ReleaseArchiveNames() (archive string, inner string, ok bool) {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH

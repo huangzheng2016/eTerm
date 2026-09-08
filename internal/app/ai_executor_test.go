@@ -16,18 +16,18 @@ import (
 
 func TestDecodeSendKeys(t *testing.T) {
 	cases := map[string]string{
-		`\n`:            "\n",            // backslash+n -> one LF byte
-		`\\n`:           `\n`,            // escaped backslash -> literal backslash+n
-		"real\nnewline": "real\nnewline", // raw control bytes pass through
+		`\n`:            "\n",
+		`\\n`:           `\n`,
+		"real\nnewline": "real\nnewline",
 		`\t`:            "\t",
 		`\r`:            "\r",
 		`\\`:            `\`,
 		`\x41\x42`:      "AB",
 		`\x0a`:          "\n",
-		`\x4`:           `\x4`,  // incomplete hex passes through
-		`\xzz`:          `\xzz`, // invalid hex passes through
-		`\q`:            `\q`,   // unknown escape passes through
-		`a\`:            `a\`,   // trailing backslash
+		`\x4`:           `\x4`,
+		`\xzz`:          `\xzz`,
+		`\q`:            `\q`,
+		`a\`:            `a\`,
 		"plain":         "plain",
 	}
 	for in, want := range cases {
@@ -157,7 +157,6 @@ func TestAIStorePersistenceRoundTrip(t *testing.T) {
 	}
 	bridge.persistActive()
 
-	// The stored blob must not contain plaintext keys.
 	v, err := db.GetSetting(database, aiProvidersSettingKey)
 	if err != nil || v == "" {
 		t.Fatalf("providers setting missing: %v", err)
@@ -166,7 +165,6 @@ func TestAIStorePersistenceRoundTrip(t *testing.T) {
 		t.Fatal("provider keys stored in plaintext")
 	}
 
-	// Only user-added providers are persisted; kimi-sourced ones are not.
 	k := mk.GetKey()
 	plain, err := security.Decrypt(v, k.Bytes())
 	k.Clear()
@@ -205,7 +203,6 @@ func TestBridgeModelsAndSwitch(t *testing.T) {
 	}
 	bridge := &aiBridge{store: store, db: database, mk: security.NewMasterKeyManager(nil, nil, 0)}
 
-	// The aliased provider appears only as its alias; the unaliased one as itself.
 	models := bridge.Models()
 	if len(models) != 2 {
 		t.Fatalf("Models() = %v", models)
@@ -236,7 +233,6 @@ func TestBridgeModelsAndSwitch(t *testing.T) {
 }
 
 func TestMigrateAIKeyBindings(t *testing.T) {
-	// Saved pre-AI config: palette on ctrl+k, forwards on ctrl+p, no ai_overlay.
 	cfg := DefaultKeyBindingConfig()
 	cfg.CommandPalette = []string{"ctrl+k"}
 	cfg.ForwardTab = []string{"ctrl+p"}
@@ -251,7 +247,6 @@ func TestMigrateAIKeyBindings(t *testing.T) {
 		t.Fatalf("ai = %v", cfg.AIOverlay)
 	}
 
-	// Windows migration uses the windows forwards default.
 	cfg = DefaultKeyBindingConfig()
 	cfg.CommandPalette = []string{"ctrl+k"}
 	cfg.ForwardTab = []string{"ctrl+p"}
@@ -260,7 +255,6 @@ func TestMigrateAIKeyBindings(t *testing.T) {
 		t.Fatalf("windows forward = %v", cfg.ForwardTab)
 	}
 
-	// Custom bindings without conflicts stay untouched.
 	cfg = DefaultKeyBindingConfig()
 	cfg.CommandPalette = []string{"f1"}
 	migrateAIKeyBindings(&cfg, "linux")

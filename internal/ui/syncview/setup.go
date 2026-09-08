@@ -92,7 +92,6 @@ func (m *Model) loadFromDB() {
 	m.inputs[inPassphrase].SetValue(m.loadedPass)
 	m.inputs[inInterval].SetValue(get("sync_interval", ""))
 
-	// Load hosts for selector
 	m.db.Order("alias").Find(&m.hostOpts)
 	hostIDStr := get("sync_ssh_host_id", "0")
 	if hid, err := strconv.ParseUint(hostIDStr, 10, 64); err == nil && hid > 0 {

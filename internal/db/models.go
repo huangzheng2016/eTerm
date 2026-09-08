@@ -8,35 +8,31 @@ import (
 
 type Host struct {
 	gorm.Model
-	SyncID      string `gorm:"uniqueIndex;size:36"`
-	SyncRev     int64  `gorm:"default:0"`
-	SyncDel     bool   `gorm:"default:false"`
-	Alias       string `gorm:"index"`
-	Hostname    string `gorm:"not null"`
-	Port        int    `gorm:"default:22"`
-	Username    string `gorm:"not null"`
-	AuthMethod  string `gorm:"not null;default:'key'"`
-	Password    string
-	KeyID       *uint
-	Key         SSHKey `gorm:"foreignKey:KeyID"`
-	Passphrase  string
-	JumpHostID  *uint
-	JumpHost    *Host `gorm:"foreignKey:JumpHostID"`
-	Tags        string
-	Description string
-	Group       string `gorm:"index;default:''"`
-	// Proxy: empty = direct TCP; "http" = HTTP CONNECT; "socks5" = SOCKS5.
-	ProxyType     string `gorm:"default:''"`
-	ProxyHost     string
-	ProxyPort     int `gorm:"default:0"`
-	ProxyUser     string
-	ProxyPassword string // encrypted (same as Password)
-	// GSSAPI/Kerberos: "ccache" (default, uses kinit ticket) or "keytab".
-	GSSAPISource string `gorm:"default:''"`
-	GSSAPIKeytab string // keytab file path (keytab mode)
-	KrbPrincipal string // e.g. "user@REALM" (keytab mode, required)
-	// ProxyCommand: if set, takes priority over ProxyType/JumpHost.
-	// Tokens: %h = hostname, %p = port, %% = literal %.
+	SyncID          string `gorm:"uniqueIndex;size:36"`
+	SyncRev         int64  `gorm:"default:0"`
+	SyncDel         bool   `gorm:"default:false"`
+	Alias           string `gorm:"index"`
+	Hostname        string `gorm:"not null"`
+	Port            int    `gorm:"default:22"`
+	Username        string `gorm:"not null"`
+	AuthMethod      string `gorm:"not null;default:'key'"`
+	Password        string
+	KeyID           *uint
+	Key             SSHKey `gorm:"foreignKey:KeyID"`
+	Passphrase      string
+	JumpHostID      *uint
+	JumpHost        *Host `gorm:"foreignKey:JumpHostID"`
+	Tags            string
+	Description     string
+	Group           string `gorm:"index;default:''"`
+	ProxyType       string `gorm:"default:''"`
+	ProxyHost       string
+	ProxyPort       int `gorm:"default:0"`
+	ProxyUser       string
+	ProxyPassword   string
+	GSSAPISource    string `gorm:"default:''"`
+	GSSAPIKeytab    string
+	KrbPrincipal    string
 	ProxyCommand    string
 	ForwardAgent    bool   `gorm:"default:false"`
 	RemoteCommand   string `gorm:"type:text"`
@@ -86,7 +82,6 @@ type ConnectionHistory struct {
 	ConnectedAt    time.Time
 	DisconnectedAt *time.Time
 	Status         string `gorm:"default:'success'"`
-	// Transcript is optional plain-text session capture (scrollback + screen), truncated at save time.
 	Transcript     string `gorm:"type:text"`
 	ANSITranscript string `gorm:"type:text"`
 	ReplayData     []byte `gorm:"type:blob"`
@@ -114,5 +109,5 @@ type PortForward struct {
 	LocalPort  int    `gorm:"not null"`
 	RemoteHost string `gorm:"not null;default:'localhost'"`
 	RemotePort int    `gorm:"not null"`
-	Direction  string `gorm:"not null;default:'local'"` // "local" or "remote"
+	Direction  string `gorm:"not null;default:'local'"`
 }

@@ -19,7 +19,6 @@ func TestOSC8HyperlinkLandsInCells(t *testing.T) {
 		t.Fatalf("link leaked past reset: %+v", c.Link)
 	}
 
-	// Params survive the round trip.
 	term.WriteString("\x1b]8;id=1;https://example.com/2\aX\x1b]8;;\a")
 	c := term.CellAt(5, 0)
 	if c == nil || c.Link.URL != "https://example.com/2" || c.Link.Params != "id=1" {

@@ -32,8 +32,6 @@ func WSURLCandidates(raw, path string) []string {
 	return out
 }
 
-// insecureTransport is shared by all InsecureTLS clients so keep-alive
-// connections are pooled instead of leaking one idle conn per request.
 var insecureTransport = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }

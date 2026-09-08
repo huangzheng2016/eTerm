@@ -9,8 +9,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// RotateMasterPassword re-encrypts all ciphertext in the DB and replaces the master key verifier.
-// When noPassword is true (no-password mode), currentPassword is ignored.
 func RotateMasterPassword(gdb *gorm.DB, mkm *MasterKeyManager, currentPassword, newPassword []byte, noPassword bool) error {
 	if len(newPassword) == 0 {
 		return errors.New("new password cannot be empty")

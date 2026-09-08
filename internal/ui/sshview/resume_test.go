@@ -18,7 +18,6 @@ func TestResumeSessionDrainsPendingOutputAndContinues(t *testing.T) {
 	m := New(sess1, "t", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = m.Close() })
 	m.SetSize(80, 24)
-	// Output acked and queued in the chunk channel but never rendered.
 	m.ch <- []byte("queued")
 	m.closeChFor(m.ch)
 	m.disconnected = true

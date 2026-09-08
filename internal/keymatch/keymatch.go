@@ -1,19 +1,15 @@
-// Package keymatch matches host-list shortcuts without relying on charm bubbles
-// key.Matches, which compares msg.String(): for many keys String() returns Key.Text,
-// so Enter can be "\r" instead of "enter". Prefer Keystroke() and ultraviolet.MatchString.
 package keymatch
 
 import (
 	"strings"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// Config holds configurable key targets for host-list shortcuts.
 type Config struct {
-	ConnectKeys []string // e.g. ["enter"]
-	SFTPKeys    []string // e.g. ["ctrl+f", "s"]
+	ConnectKeys []string
+	SFTPKeys    []string
 	NewHostKey  rune
 	NewHostName string
 	EditKey     rune
@@ -26,7 +22,6 @@ type Config struct {
 	SearchName  string
 }
 
-// DefaultConfig returns the default keymatch configuration.
 func DefaultConfig() Config {
 	return Config{
 		ConnectKeys: []string{"enter"},
@@ -48,12 +43,10 @@ func teaKey(k tea.Key) uv.Key {
 	return uv.Key(k)
 }
 
-// noHostileChord is true when Ctrl/Alt/Meta are not held (plain Enter / line break).
 func noHostileChord(m tea.KeyMod) bool {
 	return !m.Contains(tea.ModCtrl) && !m.Contains(tea.ModAlt) && !m.Contains(tea.ModMeta)
 }
 
-// MatchConnect reports whether msg should trigger SSH connect on the host list.
 func (c Config) MatchConnect(msg tea.KeyPressMsg) bool {
 	k := msg.Key()
 	uk := teaKey(k)
@@ -68,7 +61,6 @@ func (c Config) MatchConnect(msg tea.KeyPressMsg) bool {
 		}
 	}
 
-	// Enter-specific fallbacks for terminal compatibility
 	if containsKey(c.ConnectKeys, "enter") {
 		if k.Code == tea.KeyEnter || k.Code == tea.KeyKpEnter {
 			return noHostileChord(k.Mod)
@@ -98,13 +90,11 @@ func (c Config) MatchConnect(msg tea.KeyPressMsg) bool {
 	return false
 }
 
-// MatchSFTP reports whether msg should open SFTP on the host list.
 func (c Config) MatchSFTP(msg tea.KeyPressMsg) bool {
 	k := msg.Key()
 	uk := teaKey(k)
 	ks := k.Keystroke()
 
-	// ctrl+s is terminal XOFF, never match it
 	if ks == "ctrl+s" {
 		return false
 	}
@@ -113,7 +103,6 @@ func (c Config) MatchSFTP(msg tea.KeyPressMsg) bool {
 		if uk.MatchString(target) || ks == target {
 			return true
 		}
-		// Check modifier-aware matching
 		if strings.HasPrefix(target, "ctrl+") {
 			letter := strings.TrimPrefix(target, "ctrl+")
 			if len(letter) == 1 && k.Code == rune(letter[0]) && k.Mod.Contains(tea.ModCtrl) {
@@ -130,7 +119,6 @@ func (c Config) MatchSFTP(msg tea.KeyPressMsg) bool {
 	return false
 }
 
-// plainUnmodifiedKey matches a single-key list shortcut without any modifier (Ctrl/Alt/Meta/Shift).
 func plainUnmodifiedKey(msg tea.KeyPressMsg, code rune, name string) bool {
 	k := msg.Key()
 	if k.Mod.Contains(tea.ModCtrl) || k.Mod.Contains(tea.ModAlt) || k.Mod.Contains(tea.ModMeta) || k.Mod.Contains(tea.ModShift) {
@@ -182,12 +170,10 @@ func containsKey(keys []string, target string) bool {
 	return false
 }
 
-// Package-level convenience functions using DefaultConfig for backward compatibility.
-
-func MatchConnect(msg tea.KeyPressMsg) bool  { return DefaultConfig().MatchConnect(msg) }
-func MatchSFTP(msg tea.KeyPressMsg) bool     { return DefaultConfig().MatchSFTP(msg) }
-func MatchNewHost(msg tea.KeyPressMsg) bool   { return DefaultConfig().MatchNewHost(msg) }
-func MatchEdit(msg tea.KeyPressMsg) bool      { return DefaultConfig().MatchEdit(msg) }
-func MatchDelete(msg tea.KeyPressMsg) bool    { return DefaultConfig().MatchDelete(msg) }
-func MatchCopy(msg tea.KeyPressMsg) bool      { return DefaultConfig().MatchCopy(msg) }
-func MatchSearch(msg tea.KeyPressMsg) bool    { return DefaultConfig().MatchSearch(msg) }
+func MatchConnect(msg tea.KeyPressMsg) bool { return DefaultConfig().MatchConnect(msg) }
+func MatchSFTP(msg tea.KeyPressMsg) bool    { return DefaultConfig().MatchSFTP(msg) }
+func MatchNewHost(msg tea.KeyPressMsg) bool { return DefaultConfig().MatchNewHost(msg) }
+func MatchEdit(msg tea.KeyPressMsg) bool    { return DefaultConfig().MatchEdit(msg) }
+func MatchDelete(msg tea.KeyPressMsg) bool  { return DefaultConfig().MatchDelete(msg) }
+func MatchCopy(msg tea.KeyPressMsg) bool    { return DefaultConfig().MatchCopy(msg) }
+func MatchSearch(msg tea.KeyPressMsg) bool  { return DefaultConfig().MatchSearch(msg) }

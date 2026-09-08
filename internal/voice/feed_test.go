@@ -15,17 +15,14 @@ import (
 	"github.com/coder/websocket"
 )
 
-// feedServer is a fake volcano endpoint. Every session serves audio frames
-// until the client closes; a negative-seq final frame gets a final
-// transcript. conn2 signals that a redialed session arrived.
 type feedServer struct {
 	t          *testing.T
-	connN      int32 // atomic
+	connN      int32
 	audio      chan []byte
 	final      chan int32
 	conn2      chan struct{}
-	finalDelay time.Duration // hold the final transcript this long
-	hangSecond bool          // connection 2 never answers (blackhole)
+	finalDelay time.Duration
+	hangSecond bool
 }
 
 func newFeedServer(t *testing.T) *feedServer {
@@ -49,11 +46,10 @@ func (s *feedServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if n == 2 && s.hangSecond {
 		close(s.conn2)
-		conn.Read(ctx) // blackhole: hold until the client gives up
+		conn.Read(ctx)
 		return
 	}
 
-	// full client request, then initial response
 	if _, _, err := conn.Read(ctx); err != nil {
 		return
 	}
@@ -106,10 +102,6 @@ func waitFeedEvent(t *testing.T, ch <-chan Event, match func(Event) bool) Event 
 	}
 }
 
-// Passthrough flow: fake helper audio events land as volcano audio frames,
-// utterance_end sends the negative-seq final, the transcript surfaces as a
-// final event, and the next utterance gets a fresh connection. The second
-// cycle reuses the long-lived helper.
 func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
@@ -164,7 +156,6 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// second session: the helper persists and streams again
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +180,6 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 	}
 }
 
-// The session is exposed before the helper starts streaming, so audio fed
-// the moment Start returns is not dropped.
 func TestVolcanoFeedFirstChunkLands(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
@@ -224,8 +213,6 @@ func TestVolcanoFeedFirstChunkLands(t *testing.T) {
 	}
 }
 
-// Close must abort a redial blocked on an unresponsive server; the helper
-// read loop (and with it LocalEngine.Close) cannot stall on the dial.
 func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
@@ -244,7 +231,6 @@ func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// wait for the utterance_end redial to block on the hanging session
 	select {
 	case <-srv.conn2:
 	case <-time.After(5 * time.Second):
@@ -263,8 +249,6 @@ func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
 	}
 }
 
-// The redial for the next utterance overlaps the current session's final
-// wait, so a slow server does not widen the inter-utterance gap.
 func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
@@ -283,13 +267,11 @@ func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// the negative final frame arrived; the server holds the transcript 2s
 	select {
 	case <-srv.final:
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not receive final frame")
 	}
-	// the next session must dial well before the slow final arrives
 	select {
 	case <-srv.conn2:
 	case <-time.After(1500 * time.Millisecond):
@@ -306,7 +288,6 @@ func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
 	eng.Close()
 }
 
-// A helper too old for passthrough (protocol < 2) fails the handshake.
 func TestVolcanoFeedRejectsOldHelper(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "1")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")

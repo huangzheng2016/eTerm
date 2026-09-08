@@ -12,7 +12,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// gatedModel blocks its stream until release is closed, then answers.
 type gatedModel struct {
 	release chan struct{}
 	entered chan struct{}
@@ -69,7 +68,6 @@ func TestTaskManagerSpawnWaitList(t *testing.T) {
 		t.Fatalf("list: got %+v", listOut.Agents)
 	}
 
-	// Still gated: wait times out with status running.
 	waitOut, err := tm.wait(context.Background(), &WaitAgentInput{ID: "task-1", TimeoutSeconds: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +76,6 @@ func TestTaskManagerSpawnWaitList(t *testing.T) {
 		t.Fatalf("wait while running: got %+v", waitOut)
 	}
 
-	// Canceled ctx must unblock wait immediately.
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	start := time.Now()
@@ -133,10 +130,8 @@ func TestTaskManagerRejectsBeyondMaxConcurrent(t *testing.T) {
 	}
 }
 
-// Agent.Close must cancel running tasks so they cannot outlive the Agent
-// (provider/model switch); blocked wait_agent callers unblock as cancelled.
 func TestTaskManagerCancelAllOnClose(t *testing.T) {
-	m := &gatedModel{release: make(chan struct{})} // never released
+	m := &gatedModel{release: make(chan struct{})}
 	tm := NewTaskManager(testFactory(m))
 	a := &Agent{tasks: tm}
 
@@ -222,7 +217,7 @@ func TestTaskActivityTailCapped(t *testing.T) {
 }
 
 func TestTaskManagerCancelTask(t *testing.T) {
-	m := &gatedModel{release: make(chan struct{})} // never released
+	m := &gatedModel{release: make(chan struct{})}
 	tm := NewTaskManager(testFactory(m))
 
 	out1, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "one"})

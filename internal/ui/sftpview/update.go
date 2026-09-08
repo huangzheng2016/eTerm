@@ -108,7 +108,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Handle confirmation prompt
 		if m.confirmMsg != "" {
 			switch msg.String() {
 			case "y", "Y":

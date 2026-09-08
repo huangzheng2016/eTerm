@@ -14,27 +14,19 @@ type FakeRunner struct {
 	providers []Provider
 	active    string
 
-	// Queued collects Enqueue calls; a run acks each one with EventSteer at
-	// the next event boundary, like the real agent's step-boundary injection.
 	mu         sync.Mutex
 	Queued     []string
 	EnqueueErr error
 
-	// CompactResult/CompactErr stub the runner's compaction; CompactCalls
-	// counts invocations.
 	CompactResult CompactStats
 	CompactErr    error
 	CompactCalls  int
 
-	// In-memory SessionStore: History stands in for the agent's exported
-	// history; sessions is ordered most-recent-first like the SQL query.
 	History   []byte
 	sessions  []fakeSession
 	undoCalls int
 	resets    int
 
-	// TaskList stands in for the agent's background tasks; CancelTask flips
-	// the matching entry to cancelled like the real TaskManager.
 	TaskList       []TaskEntry
 	cancelledTasks []string
 }
@@ -61,8 +53,6 @@ func (f *FakeRunner) Run(ctx context.Context, prompt string) (<-chan AgentEvent,
 	if events == nil {
 		events = demoEvents(prompt)
 	}
-	// A real run grows the agent history; mirror that so SaveSession has
-	// something to persist.
 	f.History = []byte("turn")
 	ch := make(chan AgentEvent, 64)
 	go func() {
@@ -81,7 +71,6 @@ func (f *FakeRunner) Run(ctx context.Context, prompt string) (<-chan AgentEvent,
 			case <-ctx.Done():
 				return
 			}
-			// Ack anything queued since the last event (step boundary).
 			for {
 				f.mu.Lock()
 				if steered >= len(f.Queued) {
@@ -118,7 +107,6 @@ func (f *FakeRunner) ClearQueue() {
 	f.Queued = nil
 }
 
-// DequeueLast removes the newest queued message (queue recall).
 func (f *FakeRunner) DequeueLast() (string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

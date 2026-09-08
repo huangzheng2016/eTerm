@@ -12,8 +12,6 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// BuildAuthMethods returns auth methods and a slice of io.Closers that must be
-// closed when the SSH session ends (e.g. the unix socket for ssh-agent).
 func BuildAuthMethods(host *db.Host, key *db.SSHKey, masterKey *security.MasterKeyManager) ([]ssh.AuthMethod, []io.Closer, error) {
 	switch host.AuthMethod {
 	case "password":
@@ -164,7 +162,6 @@ func LoadPrivateKey(key *db.SSHKey, masterKey *security.MasterKeyManager) (ssh.S
 	return certSigner, nil
 }
 
-// buildGSSAPIClient creates a gssAPIClient based on the host's GSSAPISource setting.
 func buildGSSAPIClient(host *db.Host) (*gssAPIClient, error) {
 	switch host.GSSAPISource {
 	case "keytab":
@@ -175,7 +172,7 @@ func buildGSSAPIClient(host *db.Host) (*gssAPIClient, error) {
 			return nil, fmt.Errorf("kerberos principal not configured")
 		}
 		return NewGSSAPIFromKeytab(host.KrbPrincipal, host.GSSAPIKeytab, "")
-	default: // "ccache" or ""
+	default:
 		return NewGSSAPIFromCCache("", "")
 	}
 }

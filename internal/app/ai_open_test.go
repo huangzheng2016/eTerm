@@ -30,9 +30,6 @@ func aiTestDB(t *testing.T) *gorm.DB {
 	return database
 }
 
-// The AI overlay key toggles the panel closed without touching the draft or
-// the conversation: it must not fall through to the textarea (where ctrl+k
-// kills the line).
 func TestAIOverlayKeyTogglesWithoutClearing(t *testing.T) {
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	fake := aiview.NewFakeRunner()
@@ -88,11 +85,6 @@ func TestListHostsTool(t *testing.T) {
 	}
 }
 
-// serveOpenRequests emulates the UI side for the open_* ops: the open request
-// is handled (and its connect cmd dropped); when landTab is set, a tab for the
-// host materializes right after, like applyOpenSSHUITab would. The tab title
-// is deliberately NOT the host alias (a remote OSC 0/2 can retitle the tab
-// before the poll sees it); matching must rely on the host id.
 func serveOpenRequests(a App, ch <-chan aiToolRequest, landTab bool) {
 	for req := range ch {
 		_, cmd := a.handleAIToolRequest(req)
@@ -118,7 +110,6 @@ func TestOpenSSHLandsNewTabID(t *testing.T) {
 	go serveOpenRequests(a, ch, true)
 	defer close(ch)
 
-	// The tab lands already retitled; the host-id match must still find it.
 	id, err := exec.OpenSSH(context.Background(), "prod")
 	if err != nil {
 		t.Fatal(err)
@@ -199,14 +190,11 @@ func TestFindFreshAITab(t *testing.T) {
 	if got := a.findFreshAITab("tmux", "other", nil); got != "" {
 		t.Fatalf("wrong session matched: %q", got)
 	}
-	// The tmux tab is LocalTab too; the local matcher must skip it.
 	if got := a.findFreshAITab("local", "", nil); got != streamID(localTab) {
 		t.Fatalf("local match = %q, want %s", got, streamID(localTab))
 	}
 }
 
-// The returned connect cmd must be an SSHConnectMsg for the resolved host,
-// i.e. the same message the command palette emits.
 func TestOpenSSHRequestEmitsPaletteConnectMsg(t *testing.T) {
 	database := aiTestDB(t)
 	database.Create(&db.Host{Alias: "prod", Hostname: "prod.internal", Port: 22, Username: "deploy"})

@@ -163,7 +163,6 @@ func TestImportKimi(t *testing.T) {
 		}
 	}
 
-	// Aliases for skipped providers (managed:kimi-code oauth, openai_responses) are dropped.
 	if len(s.Models) != 2 {
 		t.Fatalf("imported aliases: got %d, want 2 (%+v)", len(s.Models), s.Models)
 	}
@@ -173,7 +172,6 @@ func TestImportKimi(t *testing.T) {
 		}
 	}
 
-	// default_provider absent: derived from the default_model alias.
 	if s.ActiveProvider != "free-tokens_kimi" || s.ActiveModel != "free-tokens_kimi/kimi-k3-0829" {
 		t.Fatalf("active: %s / %s", s.ActiveProvider, s.ActiveModel)
 	}

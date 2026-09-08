@@ -114,7 +114,6 @@ func TestSlashUndoRewindsOneTurn(t *testing.T) {
 	if users != 1 {
 		t.Fatalf("got %d user blocks, want 1", users)
 	}
-	// The undo is persisted: the stored history is updated too.
 	if len(fake.sessions) != 1 || fake.sessions[0].entry.Title != "first" {
 		t.Fatalf("session not saved after undo: %+v", fake.sessions)
 	}
@@ -232,8 +231,6 @@ func TestSlashForkFlushesPendingSave(t *testing.T) {
 			break
 		}
 	}
-	// Fork inside the debounce window: the pending tick has not fired, so
-	// without a flush the parent's last turn would never be saved.
 	sendSlash(t, m, "/fork")
 	forkID := m.sessionID
 	m.Update(saveTickMsg{seq: m.saveSeq})
@@ -314,7 +311,6 @@ func TestAutosaveScheduledOnRunEnd(t *testing.T) {
 	if m.saveSeq != 1 {
 		t.Fatalf("saveSeq = %d, want 1 after run end", m.saveSeq)
 	}
-	// Stale ticks are ignored; the matching one saves.
 	m.Update(saveTickMsg{seq: 0})
 	if len(fake.sessions) != 0 {
 		t.Fatal("stale tick triggered a save")
@@ -407,7 +403,7 @@ func TestSlashMenuEnterCompletesThenRuns(t *testing.T) {
 
 func TestSlashMenuEscDismisses(t *testing.T) {
 	m := newTestModel(nil)
-	m.Init() // focus the textarea so it accepts typed keys
+	m.Init()
 	m.input.SetValue("/mo")
 	_, cmd := m.Update(keyMsg(tea.KeyEscape, 0))
 	if cmd != nil {
@@ -416,7 +412,7 @@ func TestSlashMenuEscDismisses(t *testing.T) {
 	if out := plain(m.View().Content); strings.Contains(out, "/model") {
 		t.Fatal("menu still visible after esc")
 	}
-	m.Update(keyMsg('d', 0)) // any edit re-arms the menu
+	m.Update(keyMsg('d', 0))
 	if out := plain(m.View().Content); !strings.Contains(out, "/model") {
 		t.Fatal("menu did not reappear after an edit")
 	}

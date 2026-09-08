@@ -22,18 +22,12 @@ type Selection struct {
 
 var selectedStyle = lipgloss.NewStyle().Reverse(true)
 
-// Line break kinds for TextJoined, indexed by content line (line 0 is always
-// BreakNewline): how a line connects to the previous one.
 const (
-	BreakNewline   = byte(iota) // real break: join with "\n"
-	BreakJoin                   // soft-wrap continuation: join with ""
-	BreakJoinSpace              // soft-wrap continuation: join with " "
+	BreakNewline = byte(iota)
+	BreakJoin
+	BreakJoinSpace
 )
 
-// LineBreak describes how a content line connects to the previous one.
-// Skip is the number of leading cells the wrapper inserted on a continuation
-// line (e.g. a document margin or list hanging indent); they are dropped
-// when the line is joined into a selection copy.
 type LineBreak struct {
 	Kind byte
 	Skip int
@@ -65,9 +59,6 @@ func (s Selection) Text(lines []string) string {
 	return s.TextJoined(lines, nil)
 }
 
-// TextJoined is Text with per-line break kinds (see the Break* constants):
-// soft-wrap continuations join without a newline, matching how the terminal
-// view copies wrapped lines. Nil breaks means every line is a real break.
 func (s Selection) TextJoined(lines []string, breaks []LineBreak) string {
 	if !s.Active || len(lines) == 0 {
 		return ""
@@ -150,20 +141,13 @@ func runeAtCell(runes []rune, col int) int {
 	return len(runes)
 }
 
-// AutoScroll tracks edge-drag auto-scrolling for a drag selection: while the
-// pointer sits in the top or bottom edge band, the owning view scrolls on a
-// timer and extends the caret.
 type AutoScroll struct {
-	Dir    int // -1 toward the top, +1 toward the bottom, 0 off
+	Dir    int
 	Queued bool
 }
 
-// EdgeBand is the height in rows of the top/bottom band that starts
-// auto-scrolling during a drag selection.
 func EdgeBand(height int) int { return max(2, height/20) }
 
-// Update sets Dir from the pointer row y inside a height-row area and reports
-// whether auto-scrolling should be ticking.
 func (a *AutoScroll) Update(y, height int) bool {
 	if height <= 0 {
 		a.Dir = 0
@@ -181,7 +165,6 @@ func (a *AutoScroll) Update(y, height int) bool {
 	return a.Dir != 0
 }
 
-// Stop cancels auto-scrolling on drag end or selection clear.
 func (a *AutoScroll) Stop() {
 	a.Dir = 0
 	a.Queued = false

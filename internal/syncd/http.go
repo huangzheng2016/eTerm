@@ -96,7 +96,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 	}))
 
 	mux.HandleFunc("POST /api/v1/records", auth(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MB
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 		var body struct {
 			Records []syncRecordWire `json:"records"`
 		}

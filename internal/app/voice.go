@@ -28,34 +28,27 @@ const (
 	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
 	voiceModelSettingKey       = "voice_model"
-	voiceModelInt8SettingKey   = "voice_model_int8"   // "1"/"0": run the quantized SenseVoice weights
-	voiceCustomModelSettingKey = "voice_custom_model" // absolute dir, local engine
+	voiceModelInt8SettingKey   = "voice_model_int8"
+	voiceCustomModelSettingKey = "voice_custom_model"
 	voiceVerifiedSettingKey    = "voice_verified"
-	voiceParamsSettingPrefix   = "voice_params_" // + engine id: encrypted JSON params blob
-	voiceVolcanoSettingKey     = "voice_volcano" // legacy: migrated into voice_params_volcano
+	voiceParamsSettingPrefix   = "voice_params_"
+	voiceVolcanoSettingKey     = "voice_volcano"
 
-	// voiceTestNoSpeechSecs bounds the settings-panel test recording when no
-	// speech arrives; dictation itself never auto-stops on silence.
 	voiceTestNoSpeechSecs = 5.0
 )
 
-// voiceSettings holds the voice input configuration. VADThreshold 0 keeps the
-// engine default. Params carries the per-engine values described by each
-// engine descriptor (defaults applied on load).
 type voiceSettings struct {
 	Engine         string
 	VADThreshold   float64
-	VADSilenceMs   int // trailing silence that ends an utterance, milliseconds
+	VADSilenceMs   int
 	SentenceEnd    voice.SentenceEnd
-	Params         map[string]map[string]string // engine id -> param key -> value
-	ModelID        string                       // offline model catalog id (local engine)
-	ModelInt8      bool                         // run the quantized weights (SenseVoice catalog model)
-	CustomModelDir string                       // validated custom model dir; overrides ModelID when set
-	Verified       bool                         // a test recording succeeded with this setup
+	Params         map[string]map[string]string
+	ModelID        string
+	ModelInt8      bool
+	CustomModelDir string
+	Verified       bool
 }
 
-// defaultEngineParams seeds every registered engine with its ParamSpec
-// defaults so a missing stored blob falls back cleanly.
 func defaultEngineParams() map[string]map[string]string {
 	out := map[string]map[string]string{}
 	for _, d := range voice.EngineDescriptors() {
@@ -80,8 +73,6 @@ func defaultVoiceSettings() voiceSettings {
 	}
 }
 
-// engineParams returns the configured values for one engine (descriptor
-// defaults when nothing was loaded).
 func (cfg voiceSettings) engineParams(id string) map[string]string {
 	if p := cfg.Params[id]; p != nil {
 		return p
@@ -123,7 +114,6 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 	}
 	migrateLegacyVolcanoParams(database, mk)
 	if v, err := db.GetSetting(database, voiceEngineSettingKey); err == nil && v != "" {
-		// unregistered ids are kept so the panel can render them generically
 		cfg.Engine = v
 	}
 	if v, err := db.GetSetting(database, voiceVADSettingKey); err == nil && v != "" {
@@ -169,8 +159,6 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 	return cfg
 }
 
-// loadEngineParams reads and decrypts the voice_params_<id> blob; nil when
-// absent or unreadable (defaults then apply).
 func loadEngineParams(database *gorm.DB, mk *security.MasterKeyManager, id string) map[string]string {
 	enc, err := db.GetSetting(database, voiceParamsSettingPrefix+id)
 	if err != nil || enc == "" || mk == nil {
@@ -192,9 +180,6 @@ func loadEngineParams(database *gorm.DB, mk *security.MasterKeyManager, id strin
 	return params
 }
 
-// migrateLegacyVolcanoParams moves the old voice_volcano key blob into the
-// voice_params_volcano schema, then deletes the old key. A no-op when the
-// new blob already exists or the master key is unavailable.
 func migrateLegacyVolcanoParams(database *gorm.DB, mk *security.MasterKeyManager) {
 	if _, err := db.GetSetting(database, voiceParamsSettingPrefix+voiceEngineVolcano); err == nil {
 		return
@@ -267,7 +252,7 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	for id, params := range cfg.Params {
 		if len(params) == 0 {
 			if d, ok := voice.EngineDescriptorByID(id); ok && len(d.Params) == 0 {
-				continue // param-less engine: no blob to store
+				continue
 			}
 		}
 		if err := persistEngineParams(database, mk, id, params); err != nil {
@@ -277,8 +262,6 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	return nil
 }
 
-// persistEngineParams encrypts and stores one engine's params blob. Without
-// an unlocked master key the stored blob is left untouched.
 func persistEngineParams(database *gorm.DB, mk *security.MasterKeyManager, id string, params map[string]string) error {
 	data, err := json.Marshal(params)
 	if err != nil {
@@ -299,9 +282,6 @@ func persistEngineParams(database *gorm.DB, mk *security.MasterKeyManager, id st
 	return db.SetSetting(database, voiceParamsSettingPrefix+id, enc)
 }
 
-// defaultVoiceEngine builds the configured engine from its registered
-// descriptor; onProgress reports the helper binary download (the model
-// download arrives as engine events).
 func defaultVoiceEngine(cfg voiceSettings, onProgress func(float64)) (voice.Engine, error) {
 	d, ok := voice.EngineDescriptorByID(cfg.Engine)
 	if !ok {
@@ -313,16 +293,10 @@ func defaultVoiceEngine(cfg voiceSettings, onProgress func(float64)) (voice.Engi
 	})
 }
 
-// helperInstalledFn reports whether the helper binary is installed; a
-// package var so tests can fake it (the dev machine may have a real helper).
 var helperInstalledFn = voice.HelperInstalled
 
-// latestHelperVersionFn queries the latest helper release tag; a package var
-// so tests can fake the network call.
 var latestHelperVersionFn = voice.LatestHelperVersion
 
-// localModelTarget returns the model dir/kind for set_model: the custom
-// directory when configured, else the selected catalog model.
 func localModelTarget(cfg voiceSettings, modelsRoot string) (dir, kind string) {
 	if cfg.CustomModelDir != "" {
 		kind = voice.ModelKindSenseVoice
@@ -339,8 +313,6 @@ func localModelTarget(cfg voiceSettings, modelsRoot string) (dir, kind string) {
 	return spec.ModelDir(modelsRoot), kind
 }
 
-// localModelReady reports whether the local engine has a usable model: a
-// valid custom directory counts as present.
 func localModelReady(cfg voiceSettings, modelsRoot string) bool {
 	if cfg.CustomModelDir != "" {
 		return voice.ValidCustomModelDir(cfg.CustomModelDir)
@@ -348,14 +320,10 @@ func localModelReady(cfg voiceSettings, modelsRoot string) bool {
 	return voice.ModelByID(cfg.ModelID).Installed(modelsRoot)
 }
 
-// voiceSetupReady reports whether ctrl+r can record directly: the engine
-// descriptor's params must be ready; local additionally needs the helper
-// binary and a model on disk.
 func voiceSetupReady(cfg voiceSettings, modelsRoot string) bool {
 	return voiceSetupIssue(cfg, modelsRoot) == ""
 }
 
-// voiceSetupIssue describes the first unmet setup step, "" when ready.
 func voiceSetupIssue(cfg voiceSettings, modelsRoot string) string {
 	d, ok := voice.EngineDescriptorByID(cfg.Engine)
 	if !ok {
@@ -381,7 +349,6 @@ func voiceSetupIssue(cfg voiceSettings, modelsRoot string) string {
 	return ""
 }
 
-// voiceReadyFn returns the readiness check (a.voiceReady overrides in tests).
 func (a App) voiceReadyFn() func(voiceSettings) bool {
 	if a.voiceReady != nil {
 		return a.voiceReady
@@ -389,8 +356,6 @@ func (a App) voiceReadyFn() func(voiceSettings) bool {
 	return func(cfg voiceSettings) bool { return voiceSetupReady(cfg, voice.ModelsRoot()) }
 }
 
-// defaultVoiceDownload fetches the helper binary or a catalog model,
-// reporting progress. target is "helper" or a model ID.
 func defaultVoiceDownload(target string, onProgress func(float64)) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -423,8 +388,6 @@ func (a App) ensureVoiceCfg() App {
 	return a
 }
 
-// ensureVoice builds the voice engine once (it persists across toggles and
-// page switches) and arms the event/progress pumps.
 func (a App) ensureVoice() (App, tea.Cmd) {
 	if a.voiceEngine != nil {
 		return a, nil
@@ -485,8 +448,6 @@ func voiceTick(seq int) tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return voiceTickMsg{seq: seq} })
 }
 
-// voiceStartCmd starts the engine; the 5-minute ctx covers the first-use
-// helper+model download.
 func voiceStartCmd(eng voice.Engine) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -507,11 +468,6 @@ func voiceStopCmd(eng voice.Engine) tea.Cmd {
 	}
 }
 
-// toggleVoice flips the recording intent. Only one engine op runs at a time
-// (voiceBusy); a toggle during an in-flight op just records the intent and
-// the completion handler reconciles, so Start and Stop can never run out of
-// order. When the setup is incomplete the hotkey opens the settings panel
-// instead of starting (and failing) a recording.
 func (a App) toggleVoice() (App, tea.Cmd) {
 	if !a.voiceRec {
 		a = a.ensureVoiceCfg()
@@ -521,8 +477,6 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 			return a, nil
 		}
 		if a.voiceTest {
-			// orphan test session (panel closed mid-test): its flush must
-			// not be delivered as dictated text
 			a.voiceTest = false
 			a.voiceTestSeq++
 			a.voiceSwallowFinal = true
@@ -556,15 +510,11 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	a.voiceBusy = true
 	a.voiceStartedAt = time.Now()
 	a.voiceTickSeq++
-	// re-assert dictation VAD params: a test recording may have left a
-	// no-speech timeout on the shared engine
 	_ = a.voiceEngine.SetVAD(a.voiceCfg.vadParams())
 	cmds = append(cmds, voiceStartCmd(a.voiceEngine), voiceTick(a.voiceTickSeq))
 	return a, tea.Batch(cmds...)
 }
 
-// stopVoice ends an active recording (lock path); the engine stays alive for
-// the next toggle. Safe to call when idle.
 func (a App) stopVoice() (App, tea.Cmd) {
 	if !a.voiceRec {
 		return a, nil
@@ -575,7 +525,6 @@ func (a App) stopVoice() (App, tea.Cmd) {
 		a.aiView.SetVoiceActive(false)
 	}
 	if a.voiceBusy {
-		// A start is in flight; its completion handler issues the stop.
 		return a, nil
 	}
 	a.voiceBusy = true
@@ -596,7 +545,6 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 	case voice.EventFinal:
 		a.voicePartial = ""
 		if a.voiceTest {
-			// test recording done: show the transcript, mark verified, stop
 			a.voiceTest = false
 			a.voiceTestSeq++
 			a.voiceCfg.Verified = true
@@ -625,8 +573,6 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 		a.toast, tc = a.toast.Show(fmt.Sprintf("Downloading voice model %.0f%%", msg.ev.Pct), components.ToastInfo, 30*time.Second)
 		cmd = tc
 	case voice.EventState:
-		// a cancelled test session ends with state idle (after any flushed
-		// final); from here on finals are legitimate dictation again
 		if a.voiceSwallowFinal && msg.ev.State == voice.StateIdle {
 			a.voiceSwallowFinal = false
 		}
@@ -657,15 +603,11 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 	return a, cmd
 }
 
-// handleVoiceTestRequest starts a settings-panel test recording (or cancels
-// it when stop is set). The test reuses the shared engine; its events route
-// to the panel instead of text delivery.
 func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	if a.voiceTest || msg.stop {
 		return a.endVoiceTest()
 	}
 	if a.voiceRec {
-		// a test would hijack the live dictation event stream
 		if a.voiceSettingsView != nil {
 			a.voiceSettingsView.testError("stop dictation (ctrl+r) before running the test")
 		}
@@ -691,7 +633,6 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	if a.voiceSettingsView != nil {
 		a.voiceSettingsView.testStarted()
 	}
-	// the test keeps the no-speech timeout so a silent mic reports promptly
 	p := a.voiceCfg.vadParams()
 	p.NoSpeechTimeout = voiceTestNoSpeechSecs
 	_ = a.voiceEngine.SetVAD(p)
@@ -699,8 +640,6 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// endVoiceTest cancels the test recording intent. The final flushed by the
-// stop is swallowed, not delivered as dictated text.
 func (a App) endVoiceTest() (App, tea.Cmd) {
 	if !a.voiceTest {
 		return a, nil
@@ -712,15 +651,12 @@ func (a App) endVoiceTest() (App, tea.Cmd) {
 		a.voiceSettingsView.testStopped()
 	}
 	if a.voiceBusy || a.voiceEngine == nil {
-		// start still in flight; voiceStartedMsg reconciles into a stop
 		return a, nil
 	}
 	a.voiceBusy = true
 	return a, voiceStopCmd(a.voiceEngine)
 }
 
-// handleVoiceDownloadRequest runs the helper/model download in the
-// background; progress streams back as voiceDownloadMsg.
 func (a App) handleVoiceDownloadRequest(msg voiceDownloadRequestMsg) (App, tea.Cmd) {
 	if a.voiceDlActive {
 		return a, nil
@@ -760,9 +696,6 @@ func (a App) handleVoiceDownload(msg voiceDownloadMsg) (App, tea.Cmd) {
 	return a, waitVoiceDownload(a.voiceDlCh)
 }
 
-// deliverVoiceText routes a finalized sentence: into the AI panel input when
-// the overlay is open (enter submits), else typed into the active terminal.
-// Finals in flight at lock time are dropped (Stop finalizes pending speech).
 func (a App) deliverVoiceText(text string) tea.Cmd {
 	if a.viewState != MainView {
 		return nil
@@ -784,7 +717,6 @@ func (a App) deliverVoiceText(text string) tea.Cmd {
 	return nil
 }
 
-// withVoiceStatusHint prepends the recording indicator.
 func (a App) withVoiceStatusHint(hint string) string {
 	if !a.voiceRec {
 		return hint

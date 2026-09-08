@@ -109,7 +109,6 @@ func TestDropShareStateIdentity(t *testing.T) {
 		t.Fatal("idle state not pruned and recreated")
 	}
 
-	// A stale owner tearing down must not delete the new guest's state.
 	h.dropShareState("tok", old)
 	if got := h.shareStates["tok"]; got != fresh {
 		t.Fatal("stale dropShareState removed the current state")
@@ -192,7 +191,6 @@ func TestShareWSBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Guest input -> daemon FrameData (raw payload, no seq).
 	in, _ := json.Marshal(shareGuestMsg{T: "in", D: base64.StdEncoding.EncodeToString([]byte("ls"))})
 	if err := guest.Write(ctx, websocket.MessageText, in); err != nil {
 		t.Fatal(err)
@@ -202,7 +200,6 @@ func TestShareWSBridge(t *testing.T) {
 		t.Fatalf("got frame %#v payload %q, want DATA ls", f, f.Payload)
 	}
 
-	// Daemon output -> guest out frame, then guest ack back to daemon.
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: relay.DataPayload(0, []byte("hello"))})); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +217,6 @@ func TestShareWSBridge(t *testing.T) {
 		t.Fatalf("got frame %#v, want ACK 5", f)
 	}
 
-	// Guest resize -> daemon FrameResize.
 	rsz, _ := json.Marshal(shareGuestMsg{T: "resize", Rows: 40, Cols: 100})
 	if err := guest.Write(ctx, websocket.MessageText, rsz); err != nil {
 		t.Fatal(err)
@@ -231,7 +227,6 @@ func TestShareWSBridge(t *testing.T) {
 		t.Fatalf("got frame %#v, want RESIZE 40x100", f)
 	}
 
-	// Daemon close -> guest exit frame with reason.
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: []byte("shell exited")})); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +283,6 @@ func TestShareWSSecondConnectionReplacesFirst(t *testing.T) {
 		t.Fatalf("guest1 msg = %+v, want exit/replaced", msg)
 	}
 
-	// The replacement connection is functional.
 	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f2.StreamID})); err != nil {
 		t.Fatal(err)
 	}
@@ -326,14 +320,12 @@ func TestShareWSGuestDisconnectResumes(t *testing.T) {
 		t.Fatalf("got frame %#v, want ACK 5", f)
 	}
 
-	// Guest drops: the daemon must be told to keep the PTY, not kill it.
 	guest1.CloseNow()
 	f = shareDaemonFrame(t, ctx, daemon)
 	if f.Type != relay.FrameClose || f.StreamID != f1.StreamID || string(f.Payload) != relay.CloseClientDisconnected {
 		t.Fatalf("got frame %#v payload %q, want CLOSE client-disconnected", f, f.Payload)
 	}
 
-	// Reconnect: same stream, resume from the acked offset.
 	guest2 := shareGuestDial(t, ctx, server, share.Token)
 	f2 := shareDaemonFrame(t, ctx, daemon)
 	if f2.Type != relay.FrameOpen || f2.StreamID != f1.StreamID {
@@ -393,7 +385,6 @@ func TestShareWSResumeUnavailableFallsBack(t *testing.T) {
 		t.Fatalf("got frame %#v, want CLOSE client-disconnected", f)
 	}
 
-	// Reconnect, but the daemon no longer retains the stream.
 	guest2 := shareGuestDial(t, ctx, server, share.Token)
 	f2 := shareDaemonFrame(t, ctx, daemon)
 	if f2.Type != relay.FrameOpen || f2.StreamID != f1.StreamID {
@@ -403,7 +394,6 @@ func TestShareWSResumeUnavailableFallsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The bridge falls back to a fresh session on a new stream ID.
 	f3 := shareDaemonFrame(t, ctx, daemon)
 	if f3.Type != relay.FrameOpen || f3.StreamID == f1.StreamID {
 		t.Fatalf("got frame %#v, want OPEN on a new stream", f3)
