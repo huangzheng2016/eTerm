@@ -212,11 +212,18 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 
 		startPortForwards(database, client.Client, hostID, is)
 
-		alias := hostDisplayName(host)
+		alias := sshReconnectAlias(a.tabs[idx].Title, hostDisplayName(host), tmuxSession)
 		initialCommands := sshReconnectInitialCommands(database, client, &host, tmuxSession)
 		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx, initialCommands: initialCommands, tmuxSession: tmuxSession}
 	}
 	return a, tea.Batch(progressCmd, dial)
+}
+
+func sshReconnectAlias(tabTitle, hostAlias, tmuxSession string) string {
+	if tmuxSession != "" {
+		return tabTitle
+	}
+	return hostAlias
 }
 
 func sshReconnectInitialCommands(database *gorm.DB, client *internalssh.ConnectResult, host *db.Host, tmuxSession string) []string {

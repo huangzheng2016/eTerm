@@ -145,6 +145,10 @@ func probeSSHTmuxHost(database *gorm.DB, mk *security.MasterKeyManager, hostID u
 func (a App) applySSHTmuxMenuReady(msg sshTmuxMenuReadyMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
 	if msg.err != nil {
+		if a.tmuxMenu != nil && a.tmuxMenu.HostID() == msg.hostID {
+			a.tmuxMenu.SetError(msg.err.Error())
+			return a, nil
+		}
 		var tc tea.Cmd
 		a.toast, tc = a.toast.Show(msg.err.Error(), components.ToastError, 6*time.Second)
 		return a, tea.Batch(tc, reflowWindow(a))

@@ -11,6 +11,7 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/tmux"
 	"github.com/huangzheng2016/eTerm/internal/types"
+	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
@@ -206,6 +207,51 @@ func TestSSHReconnectInitialCommandsPlain(t *testing.T) {
 
 	if len(cmds) != 1 || cmds[0] != "uptime" {
 		t.Fatalf("cmds = %#v", cmds)
+	}
+}
+
+func TestApplySSHTmuxMenuReadyErrorSetsMenuError(t *testing.T) {
+	a := App{tmuxMenu: tmuxmenu.NewSSH(1, "prod")}
+	a.tmuxMenu.SetLoading(true)
+
+	next, cmd := a.applySSHTmuxMenuReady(sshTmuxMenuReadyMsg{hostID: 1, hostLabel: "prod", err: errors.New("dial failed")})
+	a = next
+
+	if cmd != nil {
+		t.Fatal("menu-open error must render inline, not toast")
+	}
+	if a.tmuxMenu == nil {
+		t.Fatal("menu must stay open")
+	}
+	view := a.tmuxMenu.View()
+	if !strings.Contains(view, "dial failed") {
+		t.Fatalf("menu missing inline error:\n%s", view)
+	}
+	if strings.Contains(view, "Loading") {
+		t.Fatalf("menu stuck in loading state:\n%s", view)
+	}
+}
+
+func TestApplySSHTmuxMenuReadyErrorToastsWithoutMenu(t *testing.T) {
+	a := App{}
+
+	next, cmd := a.applySSHTmuxMenuReady(sshTmuxMenuReadyMsg{hostID: 1, hostLabel: "prod", err: errors.New("dial failed")})
+	a = next
+
+	if a.tmuxMenu != nil {
+		t.Fatal("menu must stay closed")
+	}
+	if cmd == nil {
+		t.Fatal("expected toast command for the error")
+	}
+}
+
+func TestSSHReconnectAlias(t *testing.T) {
+	if got := sshReconnectAlias("[T]prod-work", "prod", "work"); got != "[T]prod-work" {
+		t.Fatalf("tmux tab title not preserved: %q", got)
+	}
+	if got := sshReconnectAlias("prod", "prod", ""); got != "prod" {
+		t.Fatalf("plain reconnect alias = %q", got)
 	}
 }
 
