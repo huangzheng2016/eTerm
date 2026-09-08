@@ -486,8 +486,8 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	if a.aiView != nil {
 		a.aiView.SetVoiceActive(a.voiceRec)
 	}
-	if !a.voiceRec {
-		a.voicePartial = ""
+	if a.voiceRec {
+		a.voiceDropNotified = false
 	}
 	if a.voiceBusy {
 		return a, nil
@@ -520,7 +520,6 @@ func (a App) stopVoice() (App, tea.Cmd) {
 		return a, nil
 	}
 	a.voiceRec = false
-	a.voicePartial = ""
 	if a.aiView != nil {
 		a.aiView.SetVoiceActive(false)
 	}
@@ -535,15 +534,10 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.ev.Type {
 	case voice.EventPartial:
-		if a.voiceTest {
-			if a.voiceSettingsView != nil {
-				a.voiceSettingsView.testPartial(msg.ev.Text)
-			}
-		} else {
-			a.voicePartial = msg.ev.Text
+		if a.voiceTest && a.voiceSettingsView != nil {
+			a.voiceSettingsView.testPartial(msg.ev.Text)
 		}
 	case voice.EventFinal:
-		a.voicePartial = ""
 		if a.voiceTest {
 			a.voiceTest = false
 			a.voiceTestSeq++
@@ -566,7 +560,7 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 		} else if a.voiceSwallowFinal {
 			a.voiceSwallowFinal = false
 		} else if strings.TrimSpace(msg.ev.Text) != "" {
-			cmd = a.deliverVoiceText(msg.ev.Text)
+			a, cmd = a.deliverVoiceText(msg.ev.Text)
 		}
 	case voice.EventDownloadProgress:
 		var tc tea.Cmd
@@ -696,25 +690,32 @@ func (a App) handleVoiceDownload(msg voiceDownloadMsg) (App, tea.Cmd) {
 	return a, waitVoiceDownload(a.voiceDlCh)
 }
 
-func (a App) deliverVoiceText(text string) tea.Cmd {
+func (a App) deliverVoiceText(text string) (App, tea.Cmd) {
 	if a.viewState != MainView {
-		return nil
+		return a, nil
 	}
 	end := a.voiceCfg.SentenceEnd
 	if a.aiVisible && a.aiView != nil {
 		if end == voice.SentenceEndEnter {
 			a.aiView.InsertText(text)
-			return a.aiView.SubmitInput()
+			return a, a.aiView.SubmitInput()
 		}
 		a.aiView.InsertText(end.Apply(text))
-		return nil
+		return a, nil
 	}
 	if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isTerminalTab(a.tabs[a.activeTab].Type) {
 		if m, ok := a.tabs[a.activeTab].Model.(interface{ PasteText(string) }); ok {
 			m.PasteText(end.Apply(text))
 		}
+		return a, nil
 	}
-	return nil
+	if a.voiceDropNotified {
+		return a, nil
+	}
+	a.voiceDropNotified = true
+	t, cmd := a.toast.Show("Voice: no active terminal tab", components.ToastInfo, 4*time.Second)
+	a.toast = t
+	return a, cmd
 }
 
 func (a App) withVoiceStatusHint(hint string) string {

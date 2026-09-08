@@ -19,6 +19,7 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/voice"
 )
@@ -192,10 +193,66 @@ func TestVoiceStatusHintShowsRecording(t *testing.T) {
 	a.voiceRec = true
 	a.voiceStartedAt = time.Now().Add(-5 * time.Second)
 	a.voiceName = voiceEngineLocal
-	a.voicePartial = "hello wor"
-	got := a.withVoiceStatusHint("hint")
-	if want := ui.ErrorStyle.Render("REC") + " · hint"; got != want {
+	if got, want := a.withVoiceStatusHint("hint"), ui.ErrorStyle.Render("REC")+" · hint"; got != want {
 		t.Fatalf("recording hint = %q, want %q", got, want)
+	}
+	bar := components.NewStatusBar().SetWidth(60).SetText(a.withVoiceStatusHint("hint")).View()
+	if !strings.Contains(bar, ui.ErrorStyle.Render("REC")) {
+		t.Fatalf("status bar missing REC: %q", bar)
+	}
+}
+
+func TestVoicePartialNeverReachesTerminal(t *testing.T) {
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+
+	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
+	a.voiceRec = true
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+
+	upd, _ := a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "hel"}})
+	a = upd.(App)
+	time.Sleep(50 * time.Millisecond)
+	if sink.String() != "" {
+		t.Fatalf("partial reached pty: %q", sink.String())
+	}
+}
+
+func TestVoiceFinalWithoutTerminalToastsOnce(t *testing.T) {
+	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
+	a.voiceRec = true
+
+	upd, cmd := a.Update(voiceFinalMsg("ls"))
+	a = upd.(App)
+	if cmd == nil {
+		t.Fatal("expected toast command")
+	}
+	if !strings.Contains(a.toast.View(), "no active terminal tab") {
+		t.Fatalf("toast = %q", a.toast.View())
+	}
+	if !a.voiceDropNotified {
+		t.Fatal("drop not marked notified")
+	}
+
+	upd, cmd = a.Update(voiceFinalMsg("ls again"))
+	a = upd.(App)
+	if cmd != nil {
+		t.Fatal("duplicate toast on second drop")
+	}
+
+	a2, tcmd := a.toggleVoice()
+	a = a2
+	if tcmd != nil {
+		tcmd()
+	}
+	a3, _ := a.toggleVoice()
+	a = a3
+	if !a.voiceRec {
+		t.Fatal("second toggle did not restart dictation")
+	}
+	if a.voiceDropNotified {
+		t.Fatal("notified flag not reset on new dictation")
 	}
 }
 
@@ -1450,9 +1507,6 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	if a.voiceSettingsView.testText != "ni hao" {
 		t.Fatalf("partial = %q", a.voiceSettingsView.testText)
 	}
-	if a.voicePartial != "" {
-		t.Fatal("partial leaked to recording state")
-	}
 
 	sink := &syncWriteCloser{}
 	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
@@ -1740,9 +1794,6 @@ func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "dictating"}})
 	a = upd.(App)
-	if a.voicePartial != "dictating" {
-		t.Fatalf("dictation partial hijacked: %q", a.voicePartial)
-	}
 	if a.voiceSettingsView.testText != "" {
 		t.Fatal("partial leaked into the panel")
 	}

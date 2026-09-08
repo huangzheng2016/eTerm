@@ -2,6 +2,7 @@ package voice
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"compress/bzip2"
 	"compress/gzip"
@@ -19,7 +20,14 @@ import (
 	"strings"
 )
 
-const DefaultHelperURL = "https://github.com/huangzheng2016/eTerm/releases/latest/download/voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz"
+func helperArchiveExt(goos string) string {
+	if goos == "windows" {
+		return ".zip"
+	}
+	return ".tar.gz"
+}
+
+var DefaultHelperURL = "https://github.com/huangzheng2016/eTerm/releases/latest/download/voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + helperArchiveExt(runtime.GOOS)
 
 func helperBinaryName() string {
 	if runtime.GOOS == "windows" {
@@ -142,7 +150,7 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 }
 
 func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, replace bool, onProgress func(pct float64)) error {
-	tmp := filepath.Join(cacheDir, ".voicehelper.tar.gz.tmp")
+	tmp := filepath.Join(cacheDir, ".voicehelper-archive.tmp")
 	defer os.Remove(tmp)
 	if err := downloadFile(ctx, url, tmp, sha256Hex, onProgress); err != nil {
 		return err
@@ -151,7 +159,7 @@ func downloadAndExtract(ctx context.Context, url, cacheDir, sha256Hex string, re
 	staging := filepath.Join(cacheDir, ".voicehelper-staging")
 	os.RemoveAll(staging)
 	defer os.RemoveAll(staging)
-	if err := untar(tmp, staging); err != nil {
+	if err := extractHelperArchive(tmp, staging); err != nil {
 		return err
 	}
 
@@ -226,6 +234,67 @@ func downloadFile(ctx context.Context, url, dest, sha256Hex string, onProgress f
 		}
 	}
 	return os.Rename(tmp, dest)
+}
+
+func extractHelperArchive(archive, destDir string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	magic := make([]byte, 2)
+	n, _ := io.ReadFull(f, magic)
+	f.Close()
+	if n == 2 && magic[0] == 'P' && magic[1] == 'K' {
+		return unzip(archive, destDir)
+	}
+	return untar(archive, destDir)
+}
+
+func unzip(archive, destDir string) error {
+	zr, err := zip.OpenReader(archive)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	for _, zf := range zr.File {
+		name := filepath.Clean(zf.Name)
+		if name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("unsafe path in archive: %s", zf.Name)
+		}
+		target := filepath.Join(destDir, name)
+		if zf.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		mode := zf.Mode() & 0o755
+		if mode == 0 {
+			mode = 0o644
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		if _, err := io.Copy(out, rc); err != nil {
+			out.Close()
+			rc.Close()
+			return err
+		}
+		rc.Close()
+		if err := out.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func untar(archive, destDir string) error {
