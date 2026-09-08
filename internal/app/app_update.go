@@ -34,10 +34,43 @@ import (
 )
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	prev := a.activeSSHView()
+	next, cmd := a.update(msg)
+	na, ok := next.(App)
+	if !ok {
+		return next, cmd
+	}
+	na.refocusSessionOnTabSwitch(prev)
+	return na, cmd
+}
+
+func (a App) activeSSHView() *sshview.Model {
+	if a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return nil
+	}
+	m, _ := a.tabs[a.activeTab].Model.(*sshview.Model)
+	return m
+}
+
+func (a App) refocusSessionOnTabSwitch(prev *sshview.Model) {
+	if !a.winFocused {
+		return
+	}
+	cur := a.activeSSHView()
+	if cur == prev {
+		return
+	}
+	if prev != nil {
+		prev.BlurSession()
+	}
+	if cur != nil {
+		cur.FocusSession()
+	}
+}
+
+func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
-	// Agent events, spinner ticks and size changes reach the AI overlay even
-	// while it is hidden; interactive input goes through the chains below.
 	if a.aiView != nil && !aiSkipForward(msg) {
 		if cmd := a.updateAIView(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -175,6 +208,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case connectProgressMsg:
 		return a.applyConnectProgress(msg)
 
+	case tea.FocusMsg:
+		a.winFocused = true
+
+	case tea.BlurMsg:
+		a.winFocused = false
+
 	case tea.KeyPressMsg:
 		if a.confirm.IsActive() {
 			wasActive := true
@@ -190,7 +229,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(cmds...)
 		}
 
-		// Quick connect overlay intercepts all keys when active
 		if a.quickConnect != nil {
 			return a.handleQuickConnectKey(msg)
 		}
@@ -226,17 +264,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
-		// Voice toggle works in every tab and inside the AI overlay. The
-		// Settings tab keeps the key for its own reset-to-defaults.
 		if a.viewState == MainView && !a.activeTabIsSettings() && key.Matches(msg, a.keyMap.VoiceInput) {
 			return a.toggleVoice()
 		}
 
-		// AI overlay intercepts all keys when visible; esc emits aiview.CloseMsg.
 		if a.aiVisible && a.aiView != nil {
 			if key.Matches(msg, a.keyMap.AIOverlay) {
-				// The open key toggles the overlay closed; it never reaches the
-				// panel, so it cannot kill the input draft or the session.
 				a.aiVisible = false
 				return a, nil
 			}
@@ -333,7 +366,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
-		// Snippet picker overlay intercepts all keys when active
 		if a.snippetPicker != nil {
 			return a.handleSnippetPickerKey(msg)
 		}
@@ -343,7 +375,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return next, uc
 		}
 
-		// ESC menu overlay intercepts all keys when active
 		if a.escMenu != nil {
 			closed, cmd := a.escMenu.Update(msg)
 			if closed {
@@ -356,7 +387,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.handleHelpOverlayKey(msg)
 		}
 
-		// Touch activity for auto-lock
 		if a.viewState == MainView {
 			a.masterKey.Touch()
 		}
@@ -375,7 +405,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
-		// ? opens full-help overlay (non-SSH); SSH keeps ? for the remote shell.
 		case key.Matches(msg, a.keyMap.Help):
 			if a.activeTabIsSSH() {
 				break
@@ -385,7 +414,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 			return a, nil
-		// Tab switching first so Ctrl+Tab / Ctrl+Shift+Tab always switch tabs (never leak to SSH PTY).
 		case matchAppNextTab(msg, a.keyMap):
 			if len(a.tabs) > 1 {
 				a.activeTab = (a.activeTab + 1) % len(a.tabs)
@@ -453,7 +481,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a.lockSession()
 		case viewkeys.MatchKey(msg, a.kbConfig.SnippetPicker):
-			// SSH tab handles this in sshview; elsewhere open snippet picker.
 			if a.activeTabIsSSH() {
 				break
 			}
@@ -463,14 +490,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.commandPalette.input.Focus()
 		case key.Matches(msg, a.keyMap.AIOverlay):
 			return a.openAIOverlay()
-		case matchCtrlShiftAnyOf(msg, a.keyMap.PasteImageURL) || key.Matches(msg, a.keyMap.PasteImageURL):
+		case key.Matches(msg, a.keyMap.Repaint):
+			return a.repaintActiveTab()
+		case matchCtrlShiftAnyOf(msg, a.keyMap.PasteBlobURL) || key.Matches(msg, a.keyMap.PasteBlobURL):
 			if !a.activeTabIsSSH() {
 				break
 			}
-			return a.startImageURLPaste(nil, true)
+			return a.startBlobURLPaste(nil, true)
 		}
 
-		// Alt+1..9 jumps to tab by number
 		if idx, ok := matchAltNumber(msg); ok && idx < len(a.tabs) {
 			a.activeTab = idx
 			a.tabBar = a.tabBar.SetActive(a.activeTab)
@@ -481,7 +509,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(layoutCmd, refreshCmd)
 		}
 
-		// Alt+s cycles through SSH tabs, Alt+f cycles through SFTP tabs
 		if k := msg.Key(); k.Mod.Contains(tea.ModAlt) && !k.Mod.Contains(tea.ModShift) {
 			var targetType TabType
 			switch k.Code {
@@ -533,8 +560,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if a.activeTabIsSSH() {
-			if a.imageUploadProgressCh == nil {
-				return a.startImageURLPaste(msg, false)
+			if a.blobUploadProgressCh == nil {
+				return a.startBlobURLPaste(msg, false)
 			}
 		}
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
@@ -547,7 +574,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.viewState == MainView {
 			a.masterKey.Touch()
 
-			// Overlay mouse handling -- intercept clicks when any overlay is active
 			if a.confirm.IsActive() {
 				return a.handleOverlayMouse(msg, a.confirm.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
 					a.confirm, _ = a.confirm.Update(tea.MouseClickMsg(adjustMouse(msg, lx, ly)))
@@ -617,12 +643,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 			if a.helpOverlay {
-				// Click anywhere dismisses help
 				a.helpOverlay = false
 				return a, nil
 			}
 
-			// Tab bar click
 			top := a.MainViewChromeTopLines()
 			if msg.Y >= 0 && msg.Y < top-1 && len(a.tabs) > 0 {
 				updated, changed := a.tabBar.HandleClick(msg.X)
@@ -654,8 +678,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMotionMsg, tea.MouseReleaseMsg:
-		// Drag-select in the AI conversation area; hidden overlay keeps the
-		// tab-level forwarding below.
 		if a.aiVisible && a.aiView != nil {
 			return a, a.updateAIView(a.aiOverlayMouse(msg))
 		}
@@ -916,7 +938,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if base == "" {
 				base = src.Hostname
 			}
-			// Find a unique suffix: "name (2)", "name (3)", ...
 			alias := base
 			for n := 2; ; n++ {
 				candidate := fmt.Sprintf("%s (%d)", base, n)
@@ -984,7 +1005,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			unlockCmds = append(unlockCmds, homeModel.Init())
 		}
-		// If CLI direct connect was requested, trigger it after home loads.
 		if a.pendingCLIConnect != nil {
 			info := a.pendingCLIConnect
 			a.pendingCLIConnect = nil
@@ -1002,7 +1022,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return types.UpdateCheckDoneMsg{Version: tag, URL: url, Err: err}
 			})
 		} else {
-			// Async version check (throttled in DB; ETERM_NO_UPDATE_CHECK / --no-update-check disables).
 			unlockCmds = append(unlockCmds, func() tea.Msg {
 				disabled := a.noUpdateCheck || os.Getenv("ETERM_NO_UPDATE_CHECK") != ""
 				tag, url, err := version.PollLatestRelease(a.db, disabled)
@@ -1012,7 +1031,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return types.UpdateAvailableMsg{Version: tag, URL: url}
 			})
 		}
-		// Start sync tick if enabled
 		unlockCmds = append(unlockCmds, syncTickCmd(a.db))
 		var aiCmd tea.Cmd
 		a, aiCmd = a.ensureAI()
@@ -1118,7 +1136,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case voiceStartedMsg:
 		a.voiceBusy = false
 		if !a.voiceRec && !a.voiceTest {
-			// Toggled off while the (downloading) start was in flight.
 			a.voiceBusy = true
 			return a, voiceStopCmd(a.voiceEngine)
 		}
@@ -1132,7 +1149,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case voiceStoppedMsg:
 		a.voiceBusy = false
 		if a.voiceRec {
-			// Toggled back on while stopping.
 			a.voiceBusy = true
 			a.voiceStartedAt = time.Now()
 			a.voiceTickSeq++
@@ -1301,7 +1317,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(tc, syncTickCmd(a.db), func() tea.Msg { return types.RefreshListMsg{} })
 
 	case types.SyncTestResultMsg:
-		// Forward to active sync tab if any
 		for _, tab := range a.tabs {
 			if tab.Type == SyncTab {
 				var cmd tea.Cmd
@@ -1326,7 +1341,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.SyncTickMsg:
 		if a.syncing {
-			return a, nil // skip, previous sync still running
+			return a, nil
 		}
 		cmd, inFlight := a.prepareSync(false)
 		if cmd == nil {
@@ -1338,7 +1353,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.KeyBindingsChangedMsg:
 		a.kbConfig = LoadKeyBindingConfig(a.db)
 		a.keyMap = BuildKeyMap(a.kbConfig)
-		// Propagate to all open tabs
 		for i := range a.tabs {
 			switch a.tabs[i].Type {
 			case HomeTab:
@@ -1437,39 +1451,39 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, func() tea.Msg { return types.SuccessMsg{Message: "Master password updated"} }
 
-	case types.ImageUploadProgressMsg:
+	case types.BlobUploadProgressMsg:
 		pct := 0.0
 		if msg.TotalBytes > 0 {
 			pct = float64(msg.SentBytes) / float64(msg.TotalBytes) * 100
 		}
 		var tc tea.Cmd
 		a.toast, tc = a.toast.Show(fmt.Sprintf("Uploading clipboard %.1f%%", pct), components.ToastInfo, 30*time.Second)
-		if a.imageUploadProgressCh != nil {
-			return a, tea.Batch(tc, waitImageUploadProgressCmd(a.imageUploadProgressCh, msg.StreamID))
+		if a.blobUploadProgressCh != nil {
+			return a, tea.Batch(tc, waitBlobUploadProgressCmd(a.blobUploadProgressCh, msg.StreamID))
 		}
 		return a, tc
 
-	case types.ImageUploadDoneMsg:
-		a.imageUploadProgressCh = nil
+	case types.BlobUploadDoneMsg:
+		a.blobUploadProgressCh = nil
 		if msg.Err != nil {
 			return a, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
 		}
 		if msg.CacheKey != "" && msg.URL != "" && msg.ExpiresAt.After(time.Now()) {
-			if a.imageURLCache == nil {
-				a.imageURLCache = make(map[string]imageURLCacheEntry)
+			if a.blobURLCache == nil {
+				a.blobURLCache = make(map[string]blobURLCacheEntry)
 			}
-			a.imageURLCache[msg.CacheKey] = imageURLCacheEntry{URL: msg.URL, Filename: msg.Filename, ExpiresAt: msg.ExpiresAt}
+			a.blobURLCache[msg.CacheKey] = blobURLCacheEntry{URL: msg.URL, Filename: msg.Filename, ExpiresAt: msg.ExpiresAt}
 		}
 		if m := sshViewByStreamID(&a, msg.StreamID); m != nil {
 			m.PasteText(markdownBlobLink(msg.Filename, msg.URL) + " ")
 		}
 		return a, func() tea.Msg { return types.SuccessMsg{Message: "URL pasted"} }
 
-	case types.PasteImageURLMsg:
-		return a.startImageURLPaste(nil, true)
+	case types.PasteBlobURLMsg:
+		return a.startBlobURLPaste(nil, true)
 
-	case imagePasteFallbackMsg:
-		a.imageUploadProgressCh = nil
+	case blobPasteFallbackMsg:
+		a.blobUploadProgressCh = nil
 		a.toast = a.toast.Dismiss()
 		if m := sshViewByStreamID(&a, msg.streamID); m != nil {
 			updated, cmd := m.Update(msg.msg)

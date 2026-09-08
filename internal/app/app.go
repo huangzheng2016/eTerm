@@ -53,9 +53,7 @@ type Tab struct {
 	Model         tea.Model
 	TmuxSession   string
 	tmuxRestoreID uint64
-	// userRenamed is set by the rename-tab flow; OSC 0/2 titles only apply
-	// while the user has not renamed the tab.
-	userRenamed bool
+	userRenamed   bool
 }
 
 type App struct {
@@ -65,6 +63,7 @@ type App struct {
 	viewState      ViewState
 	tabs           []Tab
 	activeTab      int
+	winFocused     bool
 	tabBar         components.TabsModel
 	statusBar      components.StatusBar
 	helpBubble     bubbleshelp.Model
@@ -76,7 +75,6 @@ type App struct {
 	loginModel     tea.Model
 	initCmd        tea.Cmd
 
-	// Pending confirm actions
 	pendingDeleteID        uint
 	pendingSnippetDeleteID uint
 	pendingFwdDeleteID     uint
@@ -87,31 +85,24 @@ type App struct {
 	pendingRemoteTmuxKill  *types.RemoteTmuxKillMsg
 	pendingTmuxKill        *types.TmuxKillMsg
 
-	// Quick connect overlay
 	quickConnect *quickConnectModel
 
-	// Snippet picker overlay
 	snippetPicker *snippetPickerModel
 
-	// Full help overlay (? toggles contextual FullHelp in a centered panel)
 	helpOverlay bool
 
-	// CLI direct connect (set before login, triggered after unlock)
 	pendingCLIConnect *CLIConnectInfo
 
-	// Port-forward tab: shared SSH sessions per host (see forwardrules.go).
 	forwardByHost map[uint]*hostForwardState
 
-	// ESC menu overlay
 	escMenu *escMenuModel
 
-	// Keybinding configuration
 	kbConfig KeyBindingConfig
 
 	noUpdateCheck    bool
 	forceUpdateCheck bool
 
-	syncing bool // true while runSync() is in flight
+	syncing bool
 
 	batchTag     *batchTagModel
 	batchActions *batchActionsModel
@@ -124,20 +115,18 @@ type App struct {
 
 	commandPalette *commandPaletteModel
 
-	// AI assistant overlay (built on first unlock; persists across page switches)
 	aiView    *aiview.Model
 	aiBridge  *aiBridge
 	aiVisible bool
 	aiToolCh  chan aiToolRequest
 	aiShared  *aiSharedState
 
-	// Voice input (engine built lazily on the first hotkey press)
 	voiceEngine        voice.Engine
 	voiceCfg           voiceSettings
 	voiceCfgLoaded     bool
 	voiceName          string
 	voiceRec           bool
-	voiceBusy          bool // engine start/stop in flight; toggles only flip voiceRec
+	voiceBusy          bool
 	voiceStartedAt     time.Time
 	voicePartial       string
 	voiceTickSeq       int
@@ -145,13 +134,13 @@ type App struct {
 	voiceProgressArmed bool
 	voiceMake          func(voiceSettings, func(float64)) (voice.Engine, error)
 	voiceSettingsView  *voiceSettingsModel
-	voiceTest          bool // settings-panel test recording active
+	voiceTest          bool
 	voiceTestSeq       int
-	voiceSwallowFinal  bool // drop one final flushed by a cancelled test
+	voiceSwallowFinal  bool
 	voiceDlCh          chan voiceDownloadMsg
 	voiceDlActive      bool
-	voiceReady         func(voiceSettings) bool          // test hook; nil = real check
-	voiceDownload      func(string, func(float64)) error // test hook; nil = real download
+	voiceReady         func(voiceSettings) bool
+	voiceDownload      func(string, func(float64)) error
 
 	connError *connErrorModel
 
@@ -167,12 +156,12 @@ type App struct {
 	pendingBatchSnippetHostIDs []uint
 	pendingBatchOpenHosts      []uint
 	pendingQuickConnect        *types.QuickConnectMsg
-	imageUploadProgressCh      chan syncblob.Progress
-	imageURLCache              map[string]imageURLCacheEntry
+	blobUploadProgressCh       chan syncblob.Progress
+	blobURLCache               map[string]blobURLCacheEntry
 	tmuxRestorePath            string
 }
 
-type imageURLCacheEntry struct {
+type blobURLCacheEntry struct {
 	URL       string
 	Filename  string
 	ExpiresAt time.Time
@@ -200,10 +189,10 @@ func NewApp(database *gorm.DB, masterKey *security.MasterKeyManager) App {
 		tmuxRestorePath: defaultTmuxRestorePath(),
 		aiToolCh:        make(chan aiToolRequest, 16),
 		aiShared:        &aiSharedState{},
+		winFocused:      true,
 	}
 }
 
-// newAppHelpBubble styles only FullHelp (? overlay); status-bar shortcuts use mainViewStatusBarHint.
 func newAppHelpBubble() bubbleshelp.Model {
 	m := bubbleshelp.New()
 	m.FullSeparator = "    "

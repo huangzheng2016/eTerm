@@ -40,7 +40,6 @@ func unwrapBatchFirstMsg(msg tea.Msg) tea.Msg {
 	return nil
 }
 
-// loadedModel returns a home Model with one host loaded from the same DB the host was stored in.
 func loadedModel(t *testing.T) (Model, *db.Host) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
@@ -163,7 +162,6 @@ func TestHomeShortcut_FilteringEnterNotSSH(t *testing.T) {
 	}
 }
 
-// At least one of keymatch or bubbles key.Matches should recognize a plain Enter for connect.
 func TestDualPath_EnterMatchesKeyOrKeymatch(t *testing.T) {
 	m, _ := loadedModel(t)
 	msg := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
@@ -268,6 +266,34 @@ func TestRemoteLoadErrorClearsStaleDaemonCards(t *testing.T) {
 	}
 	if msg := firstMsg(cmd); msg == nil {
 		t.Fatal("expected refresh tick command")
+	}
+}
+
+func TestRemoteDaemonRefreshTickDedup(t *testing.T) {
+	m, _ := loadedModel(t)
+
+	out, cmd := m.Update(types.RemoteDaemonLoadedMsg{})
+	m = out.(Model)
+	if cmd == nil || !m.remoteRefreshArmed {
+		t.Fatal("first load must arm the refresh tick")
+	}
+
+	out, cmd = m.Update(types.RemoteDaemonLoadedMsg{})
+	m = out.(Model)
+	if cmd != nil {
+		t.Fatal("concurrent second load must not arm another tick")
+	}
+
+	out, _ = m.Update(types.RemoteDaemonRefreshMsg{})
+	m = out.(Model)
+	if m.remoteRefreshArmed {
+		t.Fatal("refresh msg must clear the armed flag")
+	}
+
+	out, cmd = m.Update(types.RemoteDaemonLoadedMsg{})
+	m = out.(Model)
+	if cmd == nil || !m.remoteRefreshArmed {
+		t.Fatal("chain must re-arm after refresh cycle")
 	}
 }
 

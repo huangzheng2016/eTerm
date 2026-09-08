@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/key"
 )
 
-// statusBarShortcutParts builds the bottom status line.
 func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected bool, sshSession bool, detachable bool) []string {
 	closeLabel := " close tab"
 	if detachable {
@@ -27,7 +26,7 @@ func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected boo
 		parts = append(parts,
 			km.LockApp.Help().Key+" lock",
 			helpLabel(cfg.SSHSnippetPicker)+" snippet",
-			km.PasteImageURL.Help().Key+" paste",
+			km.PasteBlobURL.Help().Key+" paste",
 		)
 	}
 	if sshDisconnected {
@@ -58,7 +57,6 @@ func mainViewStatusBarHint(km KeyMap, cfg KeyBindingConfig, tabType TabType, ssh
 	return strings.Join(statusBarShortcutParts(km, cfg, false, false, false), " · ") + " · " + helpLabel(cfg.Help) + " all keys"
 }
 
-// homeStatusBarHint shows the host-list shortcuts inline so they are visible without opening full help.
 func homeStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
 	parts := []string{
 		km.SSHConnect.Help().Key + " connect",
@@ -111,7 +109,6 @@ func snippetStatusBarHint(cfg KeyBindingConfig) string {
 	return strings.Join(parts, " · ")
 }
 
-// dynamicBinding creates a key.Binding from config keys for help display.
 func dynamicBinding(keys []string, helpDesc string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(helpLabel(keys), helpDesc))
 }

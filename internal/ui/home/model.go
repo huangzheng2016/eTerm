@@ -26,7 +26,6 @@ type gridEntry struct {
 	host *db.Host
 }
 
-// displayGroupName is the label shown in the list; blank DB group means "Default".
 func displayGroupName(g string) string {
 	if strings.TrimSpace(g) == "" {
 		return "Default"
@@ -43,8 +42,6 @@ func groupPrefix(g string) string {
 }
 
 func (i hostItem) FilterValue() string {
-	// Must start with the same prefix as Title() so bubbles' filter highlight
-	// underlines the correct characters.
 	prefix := groupPrefix(i.host.Group)
 	name := i.host.Alias
 	if name == "" {
@@ -79,7 +76,7 @@ const (
 
 type tagItem struct {
 	name  string
-	count int // number of hosts with this tag
+	count int
 }
 
 func (t tagItem) FilterValue() string { return t.name }
@@ -95,23 +92,21 @@ type Model struct {
 	height       int
 	loaded       bool
 	lastClickAt  time.Time
-	lastClickIdx int // global visible index; -1 if none
+	lastClickIdx int
 
-	// Grid state
 	gridCursor int
 	gridLayout gridLayout
 
-	// Tag view state
-	mode        viewMode
-	allHosts    []db.Host  // cached hosts for tag filtering
-	allTags     []string   // deduplicated sorted tags
-	selectedTag string     // current tag filter; empty = show tag list
-	tagList     list.Model // list of tags to pick from
+	remoteRefreshArmed bool
 
-	// Hidden host toggle
+	mode        viewMode
+	allHosts    []db.Host
+	allTags     []string
+	selectedTag string
+	tagList     list.Model
+
 	showHidden bool
 
-	// Host online status (from TCP probe)
 	hostStatus              map[uint]HostStatus
 	lastConnectivityProbeAt time.Time
 	connectivityProbeSeq    uint64
@@ -119,10 +114,8 @@ type Model struct {
 	remotePeers []types.RemotePeer
 	remoteHosts []types.RemoteHost
 
-	// Configurable keymatch config
 	kmCfg keymatch.Config
 
-	// Configurable home-specific keys
 	helpKeys           []string
 	quickConnectKeys   []string
 	showHiddenKeys     []string
@@ -132,14 +125,11 @@ type Model struct {
 	batchTagKeys       []string
 	batchActionKeys    []string
 
-	// Multi-select (grid) for batch tag
 	selectedHosts map[uint]struct{}
 
-	// Grid status line: ON/OFF/? text next to probe dot (opt-in via app_settings grid_status_words).
 	gridStatusWords bool
 }
 
-// HomeKeyConfig holds all configurable keys for the home view.
 type HomeKeyConfig struct {
 	KmCfg          keymatch.Config
 	Keys           listKeyMap
@@ -159,15 +149,12 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.SetShowTitle(false)
 	l.SetFilteringEnabled(true)
-	// Built-in list help off — global shortcuts are on the app status bar; ? opens full overlay
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.KeyMap.Quit.SetEnabled(false)
 	l.KeyMap.ForceQuit.SetEnabled(false)
-	// Remove conflicting bindings: d/f are used by our own handlers
 	l.KeyMap.NextPage = key.NewBinding(key.WithKeys("pgdown"))
 	l.KeyMap.PrevPage = key.NewBinding(key.WithKeys("pgup"))
-	// Bind the configurable search key to the list filter trigger
 	l.KeyMap.Filter = hkc.Keys.Search
 	return Model{
 		list:               l,
@@ -189,7 +176,6 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 	}
 }
 
-// WithUpdatedKeys returns a copy of the model with updated keybinding configuration.
 func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
 	m.keys = hkc.Keys
 	m.list.KeyMap.Filter = hkc.Keys.Search
@@ -223,7 +209,6 @@ func (m *Model) resizeList() {
 	m.gridLayout = computeGrid(m.width, m.height)
 }
 
-// gridHosts returns the hosts currently visible (respects search filter).
 func (m Model) gridHosts() []db.Host {
 	vis := m.list.VisibleItems()
 	hosts := make([]db.Host, 0, len(vis))
@@ -381,7 +366,7 @@ func collectAllTags(hosts []db.Host) []string {
 	for _, h := range hosts {
 		for _, t := range parseTags(h.Tags) {
 			if strings.EqualFold(t, "hidden") {
-				continue // hidden is a special tag, not shown in tag list
+				continue
 			}
 			seen[t] = true
 		}
@@ -413,7 +398,6 @@ func tagCounts(hosts []db.Host) map[string]int {
 	return counts
 }
 
-// filterHidden removes hosts with the "hidden" tag unless showHidden is true.
 func (m *Model) filterHidden(hosts []db.Host) []db.Host {
 	if m.showHidden {
 		return hosts
@@ -427,7 +411,6 @@ func (m *Model) filterHidden(hosts []db.Host) []db.Host {
 	return out
 }
 
-// populateHostList fills the host list with the given hosts.
 func (m *Model) populateHostList(hosts []db.Host) {
 	hosts = m.filterHidden(hosts)
 	items := make([]list.Item, len(hosts))
@@ -441,7 +424,6 @@ func (m *Model) populateHostList(hosts []db.Host) {
 	m.gridCursor = 0
 }
 
-// populateTagList fills the tag list from allHosts.
 func (m *Model) populateTagList() {
 	counts := tagCounts(m.allHosts)
 	items := make([]list.Item, len(m.allTags))

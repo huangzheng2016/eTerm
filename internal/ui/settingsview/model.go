@@ -16,32 +16,31 @@ import (
 type editState int
 
 const (
-	stateNormal     editState = iota
-	stateCapture              // waiting for user to press a key (replaces)
-	stateAppend               // waiting for user to press a key (appends)
-	stateShell                // editing local terminal shell
-	stateTmuxConfig           // editing tmux config file
-	stateShareHours           // editing share link max hours
+	stateNormal editState = iota
+	stateCapture
+	stateAppend
+	stateShell
+	stateTmuxConfig
+	stateShareHours
 )
 
-// bindingEntry represents one configurable keybinding row.
 type bindingEntry struct {
-	Category string   // e.g. "Global", "Home", "SFTP"
-	Label    string   // e.g. "Quit App"
-	Field    string   // JSON field name, e.g. "quit_app"
-	Keys     []string // current key bindings
+	Category string
+	Label    string
+	Field    string
+	Keys     []string
 }
 
 type Model struct {
 	db           *gorm.DB
 	entries      []bindingEntry
-	cursor       int // 0-6 = prefs; 7+ = entries[cursor-bindingCursorBase]
+	cursor       int
 	state        editState
 	width        int
 	height       int
-	scroll       int // scroll offset for long lists
+	scroll       int
 	modified     bool
-	defaultsJSON []byte // default config for reset
+	defaultsJSON []byte
 
 	saveSessionTranscript bool
 	replaySessions        bool
@@ -142,7 +141,6 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
-// buildEntries creates the flat list of binding entries from config JSON.
 func buildEntries(configJSON []byte) []bindingEntry {
 	var cfg map[string]json.RawMessage
 	_ = json.Unmarshal(configJSON, &cfg)
@@ -154,7 +152,6 @@ func buildEntries(configJSON []byte) []bindingEntry {
 	}
 
 	defs := []fieldDef{
-		// Global
 		{"Global", "Quit App", "quit_app"},
 		{"Global", "Quit", "quit"},
 		{"Global", "Help", "help"},
@@ -172,8 +169,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Command Palette", "command_palette"},
 		{"Global", "Local Terminal", "local_terminal"},
 		{"Global", "Rename Tab", "rename_tab"},
-		{"Global", "Paste Image URL", "paste_image_url"},
-		// Home
+		{"Global", "Paste Blob URL", "paste_blob_url"},
 		{"Home", "SSH Connect", "ssh_connect"},
 		{"Home", "SFTP Open", "sftp_open"},
 		{"Home", "New Host", "new_host"},
@@ -192,7 +188,6 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Home", "Batch Tag", "batch_tag"},
 		{"Home", "Batch Actions", "batch_actions"},
 		{"Home", "tmux Menu", "tmux_menu"},
-		// SFTP
 		{"SFTP", "Upload", "sftp_upload"},
 		{"SFTP", "Download", "sftp_download"},
 		{"SFTP", "Delete", "sftp_delete"},
@@ -201,23 +196,19 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"SFTP", "Chmod", "sftp_chmod"},
 		{"SFTP", "Switch Left", "sftp_switch_left"},
 		{"SFTP", "Switch Right", "sftp_switch_right"},
-		// Keys
 		{"Keys", "New Key", "key_new"},
 		{"Keys", "Import Key", "key_import"},
 		{"Keys", "Edit Key", "key_edit"},
 		{"Keys", "Delete Key", "key_delete"},
 		{"Keys", "Copy Fingerprint", "key_copy"},
-		// Forward
 		{"Forward", "Start", "fwd_start"},
 		{"Forward", "Stop", "fwd_stop"},
 		{"Forward", "New Rule", "fwd_new"},
 		{"Forward", "Edit Rule", "fwd_edit"},
 		{"Forward", "Delete Rule", "fwd_delete"},
-		// Snippet
 		{"Snippet", "New Snippet", "snip_new"},
 		{"Snippet", "Edit Snippet", "snip_edit"},
 		{"Snippet", "Delete Snippet", "snip_delete"},
-		// SSH
 		{"SSH", "Reconnect", "ssh_reconnect"},
 		{"SSH", "Snippet Picker", "ssh_snippet_picker"},
 	}
@@ -238,7 +229,6 @@ func buildEntries(configJSON []byte) []bindingEntry {
 	return entries
 }
 
-// ConfigJSON returns the current config as JSON bytes.
 func (m *Model) ConfigJSON() []byte {
 	result := make(map[string][]string)
 	for _, e := range m.entries {
@@ -248,7 +238,6 @@ func (m *Model) ConfigJSON() []byte {
 	return data
 }
 
-// keyString converts a tea.KeyPressMsg to a human-readable key string.
 func keyString(msg tea.KeyPressMsg) string {
 	k := msg.Key()
 	if s := msg.String(); s != "" && s != " " {
@@ -261,9 +250,7 @@ func keyString(msg tea.KeyPressMsg) string {
 	return msg.String()
 }
 
-// visibleRows returns how many rows fit in the viewport.
 func (m *Model) visibleRows() int {
-	// Reserve 4 lines for header + footer
 	rows := m.height - 4
 	if rows < 5 {
 		rows = 5
@@ -271,7 +258,6 @@ func (m *Model) visibleRows() int {
 	return rows
 }
 
-// formatKeys formats a key list for display.
 func formatKeys(keys []string) string {
 	if len(keys) == 0 {
 		return "(none)"

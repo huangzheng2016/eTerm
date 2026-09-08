@@ -42,7 +42,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case tagView:
 			if m.selectedTag != "" {
-				// Re-filter with current tag
 				var filtered []db.Host
 				for _, h := range m.allHosts {
 					if hostHasTag(h, m.selectedTag) {
@@ -63,7 +62,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.remotePeers = nil
 			m.remoteHosts = nil
-			return m, remoteDaemonRefreshTick()
+			return m, m.armRemoteDaemonRefresh()
 		}
 		selectedHostID := uint(0)
 		if h := m.SelectedHost(); h != nil {
@@ -80,9 +79,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, remoteDaemonRefreshTick()
+		return m, m.armRemoteDaemonRefresh()
 
 	case types.RemoteDaemonRefreshMsg:
+		m.remoteRefreshArmed = false
 		return m, m.loadRemote(true)
 
 	case types.RefreshConnectivityMsg:
@@ -134,6 +134,14 @@ func (m Model) reloadHosts() tea.Cmd {
 		func() tea.Msg { return types.RemoteDaemonLoadingMsg{} },
 		m.loadRemote(false),
 	)
+}
+
+func (m *Model) armRemoteDaemonRefresh() tea.Cmd {
+	if m.remoteRefreshArmed {
+		return nil
+	}
+	m.remoteRefreshArmed = true
+	return remoteDaemonRefreshTick()
 }
 
 func remoteDaemonRefreshTick() tea.Cmd {

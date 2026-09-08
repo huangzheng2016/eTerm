@@ -16,9 +16,7 @@ import (
 
 const keybindingsSettingKey = "keybindings"
 
-// KeyBindingConfig holds all configurable keybindings as string slices (each entry is a key combo).
 type KeyBindingConfig struct {
-	// Global
 	QuitApp        []string `json:"quit_app"`
 	Quit           []string `json:"quit"`
 	Help           []string `json:"help"`
@@ -31,6 +29,7 @@ type KeyBindingConfig struct {
 	TabPageRight   []string `json:"tab_page_right"`
 	Lock           []string `json:"lock"`
 	LockApp        []string `json:"lock_app"`
+	Repaint        []string `json:"repaint"`
 	ForwardTab     []string `json:"forward_tab"`
 	SnippetsTab    []string `json:"snippets_tab"`
 	CommandPalette []string `json:"command_palette"`
@@ -38,9 +37,8 @@ type KeyBindingConfig struct {
 	VoiceInput     []string `json:"voice_input"`
 	LocalTerminal  []string `json:"local_terminal"`
 	RenameTab      []string `json:"rename_tab"`
-	PasteImageURL  []string `json:"paste_image_url"`
+	PasteBlobURL   []string `json:"paste_blob_url"`
 
-	// Home
 	SSHConnect     []string `json:"ssh_connect"`
 	SFTPOpen       []string `json:"sftp_open"`
 	NewHost        []string `json:"new_host"`
@@ -60,7 +58,6 @@ type KeyBindingConfig struct {
 	BatchActions   []string `json:"batch_actions"`
 	TmuxMenu       []string `json:"tmux_menu"`
 
-	// SFTP
 	SFTPUpload      []string `json:"sftp_upload"`
 	SFTPDownload    []string `json:"sftp_download"`
 	SFTPDelete      []string `json:"sftp_delete"`
@@ -70,26 +67,22 @@ type KeyBindingConfig struct {
 	SFTPSwitchLeft  []string `json:"sftp_switch_left"`
 	SFTPSwitchRight []string `json:"sftp_switch_right"`
 
-	// Key management
 	KeyNew    []string `json:"key_new"`
 	KeyImport []string `json:"key_import"`
 	KeyEdit   []string `json:"key_edit"`
 	KeyDelete []string `json:"key_delete"`
 	KeyCopy   []string `json:"key_copy"`
 
-	// Forward
 	FwdStart  []string `json:"fwd_start"`
 	FwdStop   []string `json:"fwd_stop"`
 	FwdNew    []string `json:"fwd_new"`
 	FwdEdit   []string `json:"fwd_edit"`
 	FwdDelete []string `json:"fwd_delete"`
 
-	// Snippet
 	SnipNew    []string `json:"snip_new"`
 	SnipEdit   []string `json:"snip_edit"`
 	SnipDelete []string `json:"snip_delete"`
 
-	// SSH
 	SSHReconnect     []string `json:"ssh_reconnect"`
 	SSHSnippetPicker []string `json:"ssh_snippet_picker"`
 }
@@ -100,7 +93,6 @@ func DefaultKeyBindingConfig() KeyBindingConfig {
 
 func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 	cfg := KeyBindingConfig{
-		// Global
 		QuitApp:        []string{"ctrl+shift+q", "ctrl+shift+c"},
 		Quit:           []string{"ctrl+c"},
 		Help:           []string{"?"},
@@ -113,6 +105,7 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		TabPageRight:   []string{"alt+shift+right"},
 		Lock:           []string{"ctrl+l"},
 		LockApp:        []string{"ctrl+shift+l"},
+		Repaint:        []string{"f5"},
 		ForwardTab:     []string{"ctrl+shift+f"},
 		SnippetsTab:    []string{"ctrl+shift+b"},
 		CommandPalette: []string{"ctrl+p"},
@@ -120,9 +113,8 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		VoiceInput:     []string{"ctrl+r"},
 		LocalTerminal:  []string{"ctrl+shift+t"},
 		RenameTab:      []string{"ctrl+shift+r"},
-		PasteImageURL:  []string{"ctrl+shift+i"},
+		PasteBlobURL:   []string{"ctrl+shift+i"},
 
-		// Home
 		SSHConnect:     []string{"enter"},
 		SFTPOpen:       []string{"ctrl+f", "s"},
 		NewHost:        []string{"n"},
@@ -142,7 +134,6 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		BatchActions:   []string{"ctrl+shift+m"},
 		TmuxMenu:       []string{"m"},
 
-		// SFTP
 		SFTPUpload:      []string{"u"},
 		SFTPDownload:    []string{"d"},
 		SFTPDelete:      []string{"delete", "x"},
@@ -152,26 +143,22 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		SFTPSwitchLeft:  []string{"left", "h"},
 		SFTPSwitchRight: []string{"right", "l"},
 
-		// Key management
 		KeyNew:    []string{"n"},
 		KeyImport: []string{"i"},
 		KeyEdit:   []string{"e"},
 		KeyDelete: []string{"d"},
 		KeyCopy:   []string{"c"},
 
-		// Forward
 		FwdStart:  []string{"enter"},
 		FwdStop:   []string{"x"},
 		FwdNew:    []string{"n"},
 		FwdEdit:   []string{"e"},
 		FwdDelete: []string{"d"},
 
-		// Snippet
 		SnipNew:    []string{"n"},
 		SnipEdit:   []string{"e"},
 		SnipDelete: []string{"d"},
 
-		// SSH
 		SSHReconnect:     []string{"r"},
 		SSHSnippetPicker: []string{"ctrl+shift+s", "ctrl+S"},
 	}
@@ -183,7 +170,7 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		cfg.SnippetsTab = []string{"alt+shift+b"}
 		cfg.LocalTerminal = []string{"alt+shift+t"}
 		cfg.RenameTab = []string{"alt+shift+r"}
-		cfg.PasteImageURL = []string{"alt+shift+i"}
+		cfg.PasteBlobURL = []string{"alt+shift+i"}
 		cfg.SnippetPicker = []string{"alt+shift+s"}
 		cfg.SessionHistory = []string{"alt+shift+h"}
 		cfg.BatchTag = []string{"alt+shift+g"}
@@ -199,15 +186,11 @@ func LoadKeyBindingConfig(database *gorm.DB) KeyBindingConfig {
 	if err != nil || val == "" {
 		return cfg
 	}
-	// Unmarshal on top of defaults so missing fields keep their default values.
 	_ = json.Unmarshal([]byte(val), &cfg)
 	migrateAIKeyBindings(&cfg, runtime.GOOS)
 	return cfg
 }
 
-// migrateAIKeyBindings resolves conflicts in configs saved before the AI
-// overlay took ctrl+k: the palette moves to ctrl+p and the forwards tab moves
-// off ctrl+p.
 func migrateAIKeyBindings(cfg *KeyBindingConfig, goos string) {
 	if slices.Contains(cfg.AIOverlay, "ctrl+k") && slices.Contains(cfg.CommandPalette, "ctrl+k") {
 		cfg.CommandPalette = []string{"ctrl+p"}
@@ -261,7 +244,6 @@ func shortKeyLabel(k string) string {
 	return strings.Join(parts, "-")
 }
 
-// BuildKeyMap constructs the global KeyMap from a KeyBindingConfig.
 func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 	return KeyMap{
 		QuitApp: key.NewBinding(
@@ -332,6 +314,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 			key.WithKeys(cfg.Lock...),
 			key.WithHelp(helpLabel(cfg.Lock), "lock"),
 		),
+		Repaint: key.NewBinding(
+			key.WithKeys(cfg.Repaint...),
+			key.WithHelp(helpLabel(cfg.Repaint), "repaint"),
+		),
 		LockApp: key.NewBinding(
 			key.WithKeys(cfg.LockApp...),
 			key.WithHelp(helpLabel(cfg.LockApp), "lock"),
@@ -364,14 +350,13 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 			key.WithKeys(cfg.RenameTab...),
 			key.WithHelp(helpLabel(cfg.RenameTab), "rename tab"),
 		),
-		PasteImageURL: key.NewBinding(
-			key.WithKeys(cfg.PasteImageURL...),
-			key.WithHelp(helpLabel(cfg.PasteImageURL), "paste url"),
+		PasteBlobURL: key.NewBinding(
+			key.WithKeys(cfg.PasteBlobURL...),
+			key.WithHelp(helpLabel(cfg.PasteBlobURL), "paste url"),
 		),
 	}
 }
 
-// BuildKeymatchConfig constructs a keymatch.Config from a KeyBindingConfig.
 func BuildKeymatchConfig(cfg KeyBindingConfig) keymatch.Config {
 	return keymatch.Config{
 		ConnectKeys: cfg.SSHConnect,
@@ -397,7 +382,6 @@ func firstRune(keys []string) rune {
 	return 0
 }
 
-// BuildHomeKeyConfig constructs the home view key config from a KeyBindingConfig.
 func BuildHomeKeyConfig(cfg KeyBindingConfig) home.HomeKeyConfig {
 	return home.HomeKeyConfig{
 		KmCfg: BuildKeymatchConfig(cfg),

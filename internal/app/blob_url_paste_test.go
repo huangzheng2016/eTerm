@@ -56,7 +56,7 @@ func (w *testWriteCloser) waitString(t *testing.T, want string) {
 	}
 }
 
-func TestImageUploadDonePastesIntoOriginalTab(t *testing.T) {
+func TestBlobUploadDonePastesIntoOriginalTab(t *testing.T) {
 	firstStdin := &testWriteCloser{}
 	secondStdin := &testWriteCloser{}
 	first := sshview.New(&internalssh.InteractiveSession{Stdin: firstStdin}, "first", 0, viewkeys.SSHKeys{})
@@ -73,7 +73,7 @@ func TestImageUploadDonePastesIntoOriginalTab(t *testing.T) {
 		},
 	}
 
-	updated, _ := a.Update(types.ImageUploadDoneMsg{StreamID: first.StreamID(), URL: "https://example.test/i.png", Filename: "i.png"})
+	updated, _ := a.Update(types.BlobUploadDoneMsg{StreamID: first.StreamID(), URL: "https://example.test/i.png", Filename: "i.png"})
 	a = updated.(App)
 
 	firstStdin.waitString(t, "[i.png](https://example.test/i.png) ")
@@ -82,7 +82,7 @@ func TestImageUploadDonePastesIntoOriginalTab(t *testing.T) {
 	}
 }
 
-func TestImageUploadDoneCachesURL(t *testing.T) {
+func TestBlobUploadDoneCachesURL(t *testing.T) {
 	stdin := &testWriteCloser{}
 	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "first", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
@@ -95,7 +95,7 @@ func TestImageUploadDoneCachesURL(t *testing.T) {
 		},
 	}
 
-	updated, _ := a.Update(types.ImageUploadDoneMsg{
+	updated, _ := a.Update(types.BlobUploadDoneMsg{
 		StreamID:  tab.StreamID(),
 		URL:       "https://example.test/b/abc",
 		Filename:  "archive.tar.gz",
@@ -104,10 +104,10 @@ func TestImageUploadDoneCachesURL(t *testing.T) {
 	})
 	a = updated.(App)
 
-	if got := a.imageURLCache["image-key"].URL; got != "https://example.test/b/abc" {
+	if got := a.blobURLCache["image-key"].URL; got != "https://example.test/b/abc" {
 		t.Fatalf("cached url = %q", got)
 	}
-	if got := a.imageURLCache["image-key"].Filename; got != "archive.tar.gz" {
+	if got := a.blobURLCache["image-key"].Filename; got != "archive.tar.gz" {
 		t.Fatalf("cached filename = %q", got)
 	}
 }
@@ -124,7 +124,7 @@ func TestImagePasteFallbackForwardsOriginalPasteMsg(t *testing.T) {
 		},
 	}
 
-	updated, _ := a.Update(imagePasteFallbackMsg{
+	updated, _ := a.Update(blobPasteFallbackMsg{
 		streamID: tab.StreamID(),
 		msg:      tea.PasteMsg{Content: "hello"},
 	})
@@ -157,7 +157,7 @@ func TestLocalFilePasteUsesFileURL(t *testing.T) {
 	}
 
 	ch := make(chan syncblob.Progress, 1)
-	msg := uploadImageURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, true)()
+	msg := uploadBlobURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, true)()
 	updated, _ := a.Update(msg)
 	a = updated.(App)
 
@@ -186,7 +186,7 @@ func TestLocalFolderPasteUsesFileURL(t *testing.T) {
 	}
 
 	ch := make(chan syncblob.Progress, 1)
-	msg := uploadImageURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, true)()
+	msg := uploadBlobURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, true)()
 	updated, _ := a.Update(msg)
 	a = updated.(App)
 
@@ -207,8 +207,8 @@ func TestFolderUploadOnSSHTabFails(t *testing.T) {
 	t.Cleanup(func() { _ = tab.Close() })
 
 	ch := make(chan syncblob.Progress, 1)
-	msg := uploadImageURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, false)()
-	done, ok := msg.(types.ImageUploadDoneMsg)
+	msg := uploadBlobURLCmd(ch, esync.Config{}, nil, nil, tab.StreamID(), nil, nil, false)()
+	done, ok := msg.(types.BlobUploadDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %T", msg)
 	}
@@ -245,8 +245,8 @@ func TestSSHModeUploadUsesTunnelAndRemoteLoopbackURL(t *testing.T) {
 
 	cfg := esync.Config{Enabled: true, Mode: "ssh", SSHHostID: 7, RemotePort: 18443, APIKey: "key", Passphrase: "p"}
 	ch := make(chan syncblob.Progress, 1)
-	msg := uploadImageURLCmd(ch, cfg, nil, nil, tab.StreamID(), nil, nil, false)()
-	done, ok := msg.(types.ImageUploadDoneMsg)
+	msg := uploadBlobURLCmd(ch, cfg, nil, nil, tab.StreamID(), nil, nil, false)()
+	done, ok := msg.(types.BlobUploadDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %T", msg)
 	}
@@ -270,8 +270,8 @@ func TestSSHModeUploadRequiresHost(t *testing.T) {
 
 	cfg := esync.Config{Enabled: true, Mode: "ssh", APIKey: "key", Passphrase: "p"}
 	ch := make(chan syncblob.Progress, 1)
-	msg := uploadImageURLCmd(ch, cfg, nil, nil, tab.StreamID(), nil, nil, false)()
-	done, ok := msg.(types.ImageUploadDoneMsg)
+	msg := uploadBlobURLCmd(ch, cfg, nil, nil, tab.StreamID(), nil, nil, false)()
+	done, ok := msg.(types.BlobUploadDoneMsg)
 	if !ok {
 		t.Fatalf("msg = %T", msg)
 	}
@@ -280,13 +280,13 @@ func TestSSHModeUploadRequiresHost(t *testing.T) {
 	}
 }
 
-func TestPasteImageURLMsgForcesUploadForLocalFiles(t *testing.T) {
+func TestPasteBlobURLMsgForcesUploadForLocalFiles(t *testing.T) {
 	a, tab := localClipboardPasteTestApp(t)
-	_, cmd := a.Update(types.PasteImageURLMsg{})
+	_, cmd := a.Update(types.PasteBlobURLMsg{})
 	assertForcedPasteNeedsSync(t, cmd, tab.StreamID())
 }
 
-func TestPasteImageURLKeyForcesUploadForLocalFiles(t *testing.T) {
+func TestPasteBlobURLKeyForcesUploadForLocalFiles(t *testing.T) {
 	a, tab := localClipboardPasteTestApp(t)
 	_, cmd := a.Update(tea.KeyPressMsg(tea.Key{Code: 'i', Text: "I", Mod: tea.ModCtrl | tea.ModShift}))
 	assertForcedPasteNeedsSync(t, cmd, tab.StreamID())
@@ -363,7 +363,7 @@ func assertForcedPasteNeedsSync(t *testing.T, cmd tea.Cmd, streamID uint64) {
 		t.Fatalf("batch len = %d", len(batch))
 	}
 	msg := batch[1]()
-	done, ok := msg.(types.ImageUploadDoneMsg)
+	done, ok := msg.(types.BlobUploadDoneMsg)
 	if !ok {
 		t.Fatalf("upload msg = %T", msg)
 	}

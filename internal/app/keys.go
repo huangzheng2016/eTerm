@@ -5,7 +5,6 @@ import (
 )
 
 type KeyMap struct {
-	// QuitApp exits the TUI from any tab. Plain ctrl+c is sent to the remote shell on SSH.
 	QuitApp        key.Binding
 	Quit           key.Binding
 	Help           key.Binding
@@ -24,6 +23,7 @@ type KeyMap struct {
 	Search         key.Binding
 	Lock           key.Binding
 	LockApp        key.Binding
+	Repaint        key.Binding
 	ForwardTab     key.Binding
 	SnippetsTab    key.Binding
 	CommandPalette key.Binding
@@ -31,7 +31,7 @@ type KeyMap struct {
 	VoiceInput     key.Binding
 	LocalTerminal  key.Binding
 	RenameTab      key.Binding
-	PasteImageURL  key.Binding
+	PasteBlobURL   key.Binding
 }
 
 func DefaultKeyMap() KeyMap {

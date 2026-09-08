@@ -26,10 +26,10 @@ func TestDefaultLocalTerminalKey(t *testing.T) {
 	}
 }
 
-func TestDefaultPasteImageURLKey(t *testing.T) {
+func TestDefaultPasteBlobURLKey(t *testing.T) {
 	cfg := defaultKeyBindingConfig("linux")
-	if len(cfg.PasteImageURL) != 1 || cfg.PasteImageURL[0] != "ctrl+shift+i" {
-		t.Fatalf("PasteImageURL = %#v", cfg.PasteImageURL)
+	if len(cfg.PasteBlobURL) != 1 || cfg.PasteBlobURL[0] != "ctrl+shift+i" {
+		t.Fatalf("PasteBlobURL = %#v", cfg.PasteBlobURL)
 	}
 }
 
@@ -43,7 +43,7 @@ func TestWindowsDefaultsAvoidCtrlShiftLetters(t *testing.T) {
 		cfg.SnippetsTab,
 		cfg.LocalTerminal,
 		cfg.RenameTab,
-		cfg.PasteImageURL,
+		cfg.PasteBlobURL,
 		cfg.SnippetPicker,
 		cfg.SessionHistory,
 		cfg.BatchTag,
@@ -95,7 +95,6 @@ func TestDefaultAIAndPaletteKeys(t *testing.T) {
 		if len(cfg.CommandPalette) != 1 || cfg.CommandPalette[0] != "ctrl+p" {
 			t.Fatalf("%s CommandPalette = %#v", goos, cfg.CommandPalette)
 		}
-		// Global app-level bindings must not collide.
 		globals := map[string][]string{
 			"quit_app": cfg.QuitApp, "quit": cfg.Quit, "help": cfg.Help,
 			"new_tab": cfg.NewTab, "close_tab": cfg.CloseTab, "close_tab_safe": cfg.CloseTabSafe,
@@ -106,7 +105,7 @@ func TestDefaultAIAndPaletteKeys(t *testing.T) {
 			"command_palette": cfg.CommandPalette, "ai_overlay": cfg.AIOverlay,
 			"voice_input":    cfg.VoiceInput,
 			"local_terminal": cfg.LocalTerminal, "rename_tab": cfg.RenameTab,
-			"paste_image_url": cfg.PasteImageURL,
+			"paste_blob_url": cfg.PasteBlobURL,
 		}
 		seen := map[string]string{}
 		for name, keys := range globals {

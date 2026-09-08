@@ -25,12 +25,12 @@ func TestCommandPaletteFiltersAndSelectsHostConnect(t *testing.T) {
 
 func TestCommandPaletteIncludesPasteURL(t *testing.T) {
 	p := newCommandPalette([]commandPaletteItem{
-		{Title: "Paste URL", Subtitle: "shell", Search: "paste upload clipboard file image url", Msg: types.PasteImageURLMsg{}},
+		{Title: "Paste URL", Subtitle: "shell", Search: "paste upload clipboard file image blob url", Msg: types.PasteBlobURLMsg{}},
 	})
 	p.input.SetValue("paste")
 	p.refresh()
 
-	if _, ok := p.selectedMsg().(types.PasteImageURLMsg); !ok {
+	if _, ok := p.selectedMsg().(types.PasteBlobURLMsg); !ok {
 		t.Fatalf("selected = %T", p.selectedMsg())
 	}
 }
