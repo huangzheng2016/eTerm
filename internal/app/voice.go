@@ -488,6 +488,8 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	}
 	if !a.voiceRec {
 		a.voicePartial = ""
+	} else {
+		a.voiceDropNotified = false
 	}
 	if a.voiceBusy {
 		return a, nil
@@ -566,7 +568,7 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 		} else if a.voiceSwallowFinal {
 			a.voiceSwallowFinal = false
 		} else if strings.TrimSpace(msg.ev.Text) != "" {
-			cmd = a.deliverVoiceText(msg.ev.Text)
+			a, cmd = a.deliverVoiceText(msg.ev.Text)
 		}
 	case voice.EventDownloadProgress:
 		var tc tea.Cmd
@@ -696,30 +698,41 @@ func (a App) handleVoiceDownload(msg voiceDownloadMsg) (App, tea.Cmd) {
 	return a, waitVoiceDownload(a.voiceDlCh)
 }
 
-func (a App) deliverVoiceText(text string) tea.Cmd {
+func (a App) deliverVoiceText(text string) (App, tea.Cmd) {
 	if a.viewState != MainView {
-		return nil
+		return a, nil
 	}
 	end := a.voiceCfg.SentenceEnd
 	if a.aiVisible && a.aiView != nil {
 		if end == voice.SentenceEndEnter {
 			a.aiView.InsertText(text)
-			return a.aiView.SubmitInput()
+			return a, a.aiView.SubmitInput()
 		}
 		a.aiView.InsertText(end.Apply(text))
-		return nil
+		return a, nil
 	}
 	if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isTerminalTab(a.tabs[a.activeTab].Type) {
 		if m, ok := a.tabs[a.activeTab].Model.(interface{ PasteText(string) }); ok {
 			m.PasteText(end.Apply(text))
 		}
+		return a, nil
 	}
-	return nil
+	if a.voiceDropNotified {
+		return a, nil
+	}
+	a.voiceDropNotified = true
+	t, cmd := a.toast.Show("Voice: no active terminal tab", components.ToastInfo, 4*time.Second)
+	a.toast = t
+	return a, cmd
 }
 
 func (a App) withVoiceStatusHint(hint string) string {
 	if !a.voiceRec {
 		return hint
 	}
-	return ui.ErrorStyle.Render("REC") + " · " + hint
+	rec := ui.ErrorStyle.Render("REC")
+	if a.voicePartial != "" {
+		rec += " " + a.voicePartial
+	}
+	return rec + " · " + hint
 }

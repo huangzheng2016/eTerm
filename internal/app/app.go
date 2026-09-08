@@ -129,6 +129,7 @@ type App struct {
 	voiceBusy          bool
 	voiceStartedAt     time.Time
 	voicePartial       string
+	voiceDropNotified  bool
 	voiceTickSeq       int
 	voiceProgressCh    chan float64
 	voiceProgressArmed bool
