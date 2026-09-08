@@ -832,9 +832,15 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.applyRemoteTerminalOpened(msg)
 
 	case types.TmuxMenuMsg:
+		if msg.HostID != 0 {
+			return a.startSSHTmuxMenu(msg)
+		}
 		a.tmuxMenu = tmuxmenu.New(nil)
 		a.tmuxMenu.SetLoading(true)
 		return a, a.loadTmuxSessions()
+
+	case sshTmuxMenuReadyMsg:
+		return a.applySSHTmuxMenuReady(msg)
 
 	case types.TmuxSessionsLoadedMsg:
 		if msg.Err != nil {
@@ -1561,6 +1567,8 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, func() tea.Msg { return types.SFTPOpenMsg{HostID: msg.HostID} }
 		case "reconnect":
 			return a, func() tea.Msg { return types.SSHReconnectMsg{HostID: msg.HostID, StreamID: msg.StreamID} }
+		case "tmux":
+			return a, func() tea.Msg { return types.TmuxMenuMsg{HostID: msg.HostID} }
 		case "quick":
 			if a.pendingQuickConnect != nil {
 				next := *a.pendingQuickConnect

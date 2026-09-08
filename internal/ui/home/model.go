@@ -124,6 +124,7 @@ type Model struct {
 	toggleSelectKeys   []string
 	batchTagKeys       []string
 	batchActionKeys    []string
+	localTerminalKeys  []string
 
 	selectedHosts map[uint]struct{}
 
@@ -142,6 +143,7 @@ type HomeKeyConfig struct {
 	BatchTag       []string
 	BatchActions   []string
 	Tmux           []string
+	LocalTerminal  []string
 }
 
 func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyConfig) Model {
@@ -172,6 +174,7 @@ func New(database *gorm.DB, masterKey *security.MasterKeyManager, hkc HomeKeyCon
 		toggleSelectKeys:   hkc.ToggleSelect,
 		batchTagKeys:       hkc.BatchTag,
 		batchActionKeys:    hkc.BatchActions,
+		localTerminalKeys:  hkc.LocalTerminal,
 		selectedHosts:      make(map[uint]struct{}),
 	}
 }
@@ -188,6 +191,7 @@ func (m Model) WithUpdatedKeys(hkc HomeKeyConfig) Model {
 	m.toggleSelectKeys = hkc.ToggleSelect
 	m.batchTagKeys = hkc.BatchTag
 	m.batchActionKeys = hkc.BatchActions
+	m.localTerminalKeys = hkc.LocalTerminal
 	return m
 }
 

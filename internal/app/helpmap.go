@@ -64,7 +64,9 @@ func homeStatusBarHint(km KeyMap, cfg KeyBindingConfig) string {
 		km.EditHost.Help().Key + " edit",
 		km.DeleteHost.Help().Key + " delete",
 		km.Search.Help().Key + " search",
+		helpLabel(cfg.SSHTmux) + " ssh tmux",
 		helpLabel(cfg.TmuxMenu) + " tmux",
+		km.LocalTerminal.Help().Key + " local",
 		km.RenameTab.Help().Key + " rename",
 		km.AIOverlay.Help().Key + " ai",
 		helpLabel(cfg.ShowHidden) + " show hidden",
@@ -124,7 +126,7 @@ func (h homeAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
-		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet"), dynamicBinding(h.cfg.ToggleView, "group/tag"), dynamicBinding(h.cfg.TmuxMenu, "tmux")},
+		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet"), dynamicBinding(h.cfg.ToggleView, "group/tag"), dynamicBinding(h.cfg.TmuxMenu, "tmux"), dynamicBinding(h.cfg.SSHTmux, "ssh tmux")},
 		{h.km.SSHConnect, h.km.SFTPOpen, h.km.NewHost},
 		{h.km.EditHost, h.km.DeleteHost, h.km.Search},
 		{dynamicBinding(h.cfg.CopySSH, "copy"), dynamicBinding(h.cfg.CloneHost, "clone"), dynamicBinding(h.cfg.QuickConnect, "quick")},

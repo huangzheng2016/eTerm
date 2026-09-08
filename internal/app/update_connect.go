@@ -8,10 +8,12 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/sftp"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/tmux"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/sftpview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
+	"gorm.io/gorm"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -110,6 +112,7 @@ func (a App) applySSHConnect(msg types.SSHConnectMsg) (App, tea.Cmd) {
 
 func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 	replaceAt := -1
+	tmuxSession := ""
 	for i := range a.tabs {
 		sm, ok := a.tabs[i].Model.(*sshview.Model)
 		if !ok || sm.StreamID() != msg.StreamID {
@@ -119,6 +122,7 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 			return a, nil
 		}
 		replaceAt = i
+		tmuxSession = a.tabs[i].TmuxSession
 		break
 	}
 	if replaceAt < 0 {
@@ -209,10 +213,21 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 		startPortForwards(database, client.Client, hostID, is)
 
 		alias := hostDisplayName(host)
-		initialCommands := initialSSHCommandsForHost(&host, "")
-		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx, initialCommands: initialCommands}
+		initialCommands := sshReconnectInitialCommands(database, client, &host, tmuxSession)
+		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx, initialCommands: initialCommands, tmuxSession: tmuxSession}
 	}
 	return a, tea.Batch(progressCmd, dial)
+}
+
+func sshReconnectInitialCommands(database *gorm.DB, client *internalssh.ConnectResult, host *db.Host, tmuxSession string) []string {
+	if tmuxSession == "" {
+		return initialSSHCommandsForHost(host, "")
+	}
+	configFile, cfgErr := sshTmuxEnsureConfig(client.Client, tmuxConfiguredPath(database))
+	if cfgErr != nil {
+		configFile = ""
+	}
+	return []string{tmux.RemoteAttachCommand(configFile, tmuxSession)}
 }
 
 func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {
@@ -224,7 +239,7 @@ func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {
 	if a.width > 0 {
 		sv.SetSize(a.width, a.mainContentHeightForType(SSHTab))
 	}
-	tab := Tab{Type: SSHTab, Title: msg.alias, Model: sv}
+	tab := Tab{Type: SSHTab, Title: msg.alias, Model: sv, TmuxSession: msg.tmuxSession}
 	if msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
 		if old, ok := a.tabs[msg.replaceTabAt].Model.(*sshview.Model); ok {
 			finalizeSSHSession(a.db, old)
@@ -243,6 +258,11 @@ func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {
 			continue
 		}
 		sv.PasteCommand(cmd + "\n")
+	}
+	if msg.configWarn {
+		var tc tea.Cmd
+		a.toast, tc = a.toast.Show("tmux config not injected; using remote defaults", components.ToastWarning, 4*time.Second)
+		return a, tea.Batch(sv.Init(), reflowWindow(a), tc)
 	}
 	return a, tea.Batch(sv.Init(), reflowWindow(a))
 }

@@ -202,16 +202,20 @@ type RefreshListMsg struct{}
 
 type TmuxSession = relay.TmuxSessionInfo
 
-type TmuxMenuMsg struct{}
+type TmuxMenuMsg struct {
+	HostID uint
+}
 
 type TmuxSessionsLoadedMsg struct {
+	HostID   uint
 	Sessions []TmuxSession
 	Err      error
 }
 
 type TmuxOpenMsg struct {
-	Name string
-	New  bool
+	HostID uint
+	Name   string
+	New    bool
 }
 
 type TmuxKillRequestMsg struct {
