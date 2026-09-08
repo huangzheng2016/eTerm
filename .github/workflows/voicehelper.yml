@@ -133,3 +133,33 @@ jobs:
         with:
           files: cmd/voicehelper/dist/voicehelper-linux-arm64.tar.gz*
           fail_on_unmatched_files: true
+
+  build-windows-amd64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache-dependency-path: cmd/voicehelper/go.sum
+      - uses: egor-tensin/setup-mingw@v2
+      - name: Build and stage
+        shell: bash
+        run: |
+          cd cmd/voicehelper
+          CGO_ENABLED=1 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o dist/voicehelper.exe .
+          SHERPA_LIB="$(go env GOMODCACHE)/github.com/k2-fsa/sherpa-onnx-go-windows@v1.13.3/lib/x86_64-pc-windows-gnu"
+          cp "$SHERPA_LIB"/sherpa-onnx-c-api.dll "$SHERPA_LIB"/onnxruntime.dll dist/
+          cd dist
+          7z a voicehelper-windows-amd64.zip voicehelper.exe sherpa-onnx-c-api.dll onnxruntime.dll
+          sha256sum voicehelper-windows-amd64.zip > voicehelper-windows-amd64.zip.sha256
+      - uses: actions/upload-artifact@v7
+        with:
+          name: voicehelper-windows-amd64
+          path: cmd/voicehelper/dist/voicehelper-windows-amd64.zip*
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: cmd/voicehelper/dist/voicehelper-windows-amd64.zip*
+          fail_on_unmatched_files: true
