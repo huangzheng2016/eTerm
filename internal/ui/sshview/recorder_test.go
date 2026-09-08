@@ -1,6 +1,8 @@
 package sshview
 
 import (
+	"bytes"
+	"encoding/binary"
 	"os"
 	"testing"
 	"time"
@@ -40,5 +42,26 @@ func TestRecorderStopsAtMaxDuration(t *testing.T) {
 	}
 	if len(events) != 0 || duration != MaxReplayDuration || !stopped {
 		t.Fatalf("events=%+v duration=%v stopped=%v", events, duration, stopped)
+	}
+}
+
+func TestRecorderBoundsZstdWindow(t *testing.T) {
+	r := NewRecorder(time.Now())
+	r.Output(bytes.Repeat([]byte("eterm-scrollback-line\r\n"), 8192))
+	data, _, _ := r.Close()
+	if len(data) < 6 || binary.LittleEndian.Uint32(data[:4]) != 0xFD2FB528 {
+		t.Fatalf("not a zstd frame: %d bytes", len(data))
+	}
+	if data[4]&0x20 != 0 {
+		t.Fatal("single-segment frame has no window descriptor")
+	}
+	wd := data[5]
+	base := 1 << (10 + wd>>3)
+	window := base + base/8*int(wd&7)
+	if window > 1<<20 {
+		t.Fatalf("zstd window %d exceeds 1MB", window)
+	}
+	if _, err := DecodeReplay(data); err != nil {
+		t.Fatal(err)
 	}
 }

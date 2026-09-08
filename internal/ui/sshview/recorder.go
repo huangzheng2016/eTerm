@@ -44,7 +44,7 @@ func NewRecorder(start time.Time) *Recorder {
 		dst = file
 	}
 	var err error
-	r.zip, err = zstd.NewWriter(dst)
+	r.zip, err = zstd.NewWriter(dst, zstd.WithWindowSize(1<<20))
 	if err != nil {
 		if r.file != nil {
 			_ = r.file.Close()
@@ -52,7 +52,7 @@ func NewRecorder(start time.Time) *Recorder {
 			r.file = nil
 			r.path = ""
 		}
-		r.zip, _ = zstd.NewWriter(&r.buf)
+		r.zip, _ = zstd.NewWriter(&r.buf, zstd.WithWindowSize(1<<20))
 	}
 	_, _ = r.zip.Write([]byte("ETR2"))
 	return r

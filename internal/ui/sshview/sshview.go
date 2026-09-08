@@ -895,10 +895,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.disconnected {
 			return m, nil
 		}
+		if m.sendRemoteMouse(msg) {
+			return m, nil
+		}
 		if m.emu.IsAltScreen() {
-			if m.sendRemoteMouse(msg) {
-				return m, nil
-			}
 			if m.sess != nil && m.sess.Stdin != nil {
 				lines := 3
 				var seq []byte
