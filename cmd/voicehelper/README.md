@@ -64,9 +64,9 @@ On first `start` the helper downloads into the model dir (`-model-dir`, default
 ## Build / CI
 
 Release assets are built by `.github/workflows/voicehelper.yml`: on `v*`
-tags it runs the recipe below for darwin-amd64, darwin-arm64, linux-amd64
-and linux-arm64, and uploads `voicehelper-<os>-<arch>.tar.gz` plus a
-`.sha256` sidecar to the GitHub
+tags it runs the recipe below for darwin-amd64, darwin-arm64, linux-amd64,
+linux-arm64 and windows-amd64, and uploads `voicehelper-<os>-<arch>.tar.gz`
+(`.zip` on Windows) plus a `.sha256` sidecar to the GitHub
 release. `workflow_dispatch` runs the same build without publishing (assets
 land as workflow artifacts).
 
@@ -103,4 +103,7 @@ downloads.
 The artifact contract: `voicehelper-<os>-<arch>.tar.gz` with the binary
 (named `voicehelper`) and its dylibs flat at the top level; eTerm verifies
 the sha256 and extracts it into a cache dir so the dylibs sit next to the
-binary for @executable_path.
+binary for @executable_path. On Windows the artifact is
+`voicehelper-windows-amd64.zip` with `voicehelper.exe`, `sherpa-onnx-c-api.dll`
+and `onnxruntime.dll` flat at the top level; the loader finds the DLLs next
+to the exe, no rpath step needed.
