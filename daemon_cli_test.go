@@ -33,6 +33,57 @@ func TestDaemonCommandParsesSubcommandAndFlags(t *testing.T) {
 	}
 }
 
+func TestDaemonCommandParsesEnableAndDisable(t *testing.T) {
+	for _, want := range []string{"enable", "disable"} {
+		cmd, _, err := parseDaemonArgs([]string{want})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd != want {
+			t.Fatalf("cmd = %q, want %q", cmd, want)
+		}
+	}
+}
+
+func TestDaemonEnableParsesDBPath(t *testing.T) {
+	cmd, opts, err := parseDaemonArgs([]string{"enable", "-c", "test.db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != "enable" || opts.DBPath != "test.db" {
+		t.Fatalf("cmd = %q, opts = %#v", cmd, opts)
+	}
+}
+
+func TestDaemonServiceProgramArguments(t *testing.T) {
+	args, err := daemonServiceProgramArguments(daemonOptions{DBPath: "test.db", Name: "box", PProfAddr: "127.0.0.1:6061"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 9 {
+		t.Fatalf("args = %#v", args)
+	}
+	if !filepath.IsAbs(args[0]) {
+		t.Fatalf("args[0] = %q, want absolute path", args[0])
+	}
+	want := []string{"daemon", "run", "-c", "test.db", "-name", "box", "-pprof", "127.0.0.1:6061"}
+	for i, w := range want {
+		if args[i+1] != w {
+			t.Fatalf("args = %#v, want suffix %#v", args, want)
+		}
+	}
+}
+
+func TestDaemonServiceProgramArgumentsDefaults(t *testing.T) {
+	args, err := daemonServiceProgramArguments(daemonOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 3 || args[1] != "daemon" || args[2] != "run" {
+		t.Fatalf("args = %#v", args)
+	}
+}
+
 func TestDaemonStatusReportsStoppedForMissingPid(t *testing.T) {
 	ctl := daemonController{
 		pidPath: filepath.Join(t.TempDir(), "daemon.pid"),
