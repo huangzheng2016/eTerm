@@ -65,6 +65,10 @@ func AttachSession(ctx context.Context, configFile, name string, rows, cols int)
 	return is, nil
 }
 
+func RefreshClient(ctx context.Context, configFile string) error {
+	return runTmux(ctx, "refresh-client", []string{"-f", configFile, "refresh-client"})
+}
+
 func KillSession(ctx context.Context, configFile, name string) error {
 	cmd := exec.CommandContext(ctx, "tmux", "-f", configFile, "kill-session", "-t", name)
 	out, err := cmd.CombinedOutput()

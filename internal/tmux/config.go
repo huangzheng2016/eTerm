@@ -22,6 +22,7 @@ bind -T copy-mode-vi y send -X copy-selection-and-cancel
 bind -T copy-mode y send -X copy-selection-and-cancel
 set -g extended-keys on
 set -g extended-keys-format csi-u
+set -g focus-events on
 `
 
 func ResolveConfig(database *gorm.DB, configDir, homeDir string) (string, error) {

@@ -1,9 +1,3 @@
-// Package sshview renders an SSH shell inside Bubble Tea (no tea.Exec), so the tab bar stays visible.
-// Terminal emulation uses github.com/charmbracelet/x/vt (ANSI screen state, cursor, colors).
-//
-// Full-screen TUI programs (vim, less, more) run in the remote shell; they use the PTY size
-// from SetSize and TERM from the session. They are not implemented in Go here—standard
-// OpenSSH-style behaviour once the pty geometry matches the layout row count.
 package sshview
 
 import (
@@ -30,7 +24,6 @@ import (
 
 var streamIDGen atomic.Uint64
 
-// bottomPadMax is how many empty rows the user can scroll past the live bottom.
 const bottomPadMax = 2
 
 const maxCoalescedChunkBytes = 64 * 1024
@@ -54,20 +47,16 @@ var xtgettcapValues = map[string]string{
 	"colors": "256",
 }
 
-// ChunkMsg carries PTY stdout for one embedded session; StreamID routes it in App.Update.
 type ChunkMsg struct {
 	StreamID uint64
 	Data     []byte
 }
 
-// StreamDoneMsg signals that the remote shell exited or the PTY read ended.
 type StreamDoneMsg struct {
 	StreamID uint64
 	Err      error
 }
 
-// TitleMsg carries an OSC 0/2 title change from the remote shell; StreamID
-// routes it to the owning tab in App.Update.
 type TitleMsg struct {
 	StreamID uint64
 	Title    string
@@ -87,7 +76,6 @@ type resizeRequest struct {
 	cols int
 }
 
-// Model streams PTY output through a virtual terminal and forwards keys to the SSH session.
 type Model struct {
 	sess     *internalssh.InteractiveSession
 	emu      *vt.Emulator
@@ -99,7 +87,6 @@ type Model struct {
 	width     int
 	height    int
 
-	// remote, when set, reconnects this session over the relay (hostID is 0).
 	remote *types.RemoteReconnect
 
 	ch     chan []byte
@@ -122,24 +109,17 @@ type Model struct {
 	reconnectTry int
 	reconnectMax int
 
-	// Scrollback view: scrollOffset > 0 means viewing history.
-	// 0 = live view (bottom of scrollback), N = N lines scrolled up.
 	scrollOffset int
 
-	// bottomPad > 0 lets the user scroll past the live bottom, pushing the
-	// newest line up and showing empty rows below it (0..bottomPadMax).
 	bottomPad int
 
 	scrollIndicatorUntil time.Time
 	scrollIndicatorSeq   uint64
 
-	// Mouse drag text selection over the visible screen + scrollback.
 	sel selection
 
-	// Edge-band auto-scroll while a drag selection sits at the top/bottom.
 	selAutoScroll textselection.AutoScroll
 
-	// Configurable keybindings
 	vk viewkeys.SSHKeys
 
 	appCursorKeys  bool
@@ -153,7 +133,6 @@ type Model struct {
 	lastTitle         string
 	recorder          *Recorder
 
-	// Command lifecycle from OSC 133 (set from emulator callbacks during Write).
 	cmdRunning   bool
 	cmdCount     int
 	lastExitCode int
@@ -162,8 +141,9 @@ type Model struct {
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
 
-// SetRemoteReconnect marks this session as relay-backed so "r" reconnects over
-// the relay instead of redialing a DB host.
+func (m *Model) FocusSession() { m.emu.Focus() }
+func (m *Model) BlurSession()  { m.emu.Blur() }
+
 func (m *Model) SetRemoteReconnect(r *types.RemoteReconnect) { m.remote = r }
 
 func (m *Model) RemoteReconnect() *types.RemoteReconnect {
@@ -174,10 +154,8 @@ func (m *Model) RemoteReconnect() *types.RemoteReconnect {
 	return &r
 }
 
-// New creates a model; call SetSize or rely on WindowSizeMsg. hostID is used to reconnect after a network drop.
 func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewkeys.SSHKeys) *Model {
 	emu := vt.NewEmulator(80, 24)
-	// tmux asks these xterm probes before repainting full-screen panes.
 	emu.RegisterCsiHandler(ansi.Command('?', 0, 'n'), func(params ansi.Params) bool {
 		n, _, ok := params.Param(0, 0)
 		if !ok || n != 996 {
@@ -267,8 +245,6 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 			m.hasExitCode = true
 		},
 	})
-	// Drain the emulator's input pipe so internal writes (e.g. in-band resize
-	// responses) never block emu.Write(). Without this, vi/less freeze the app.
 	go func() {
 		buf := make([]byte, 256)
 		for {
@@ -395,16 +371,12 @@ func isMouseTrackingMode(mode ansi.Mode) bool {
 	}
 }
 
-// StreamID identifies this session for routing ChunkMsg / StreamDoneMsg when the tab is not active.
 func (m *Model) StreamID() uint64 { return m.streamID }
 
-// HostID is the DB host used to redial after [Disconnected] is true.
 func (m *Model) HostID() uint { return m.hostID }
 
-// HistoryID returns the connection history record ID for disconnect tracking.
 func (m *Model) HistoryID() uint { return m.historyID }
 
-// SetHistoryID sets the connection history record ID.
 func (m *Model) SetHistoryID(id uint) { m.historyID = id }
 
 func (m *Model) EnableReplayRecording() {
@@ -425,21 +397,14 @@ func (m *Model) ReplayRecordingEnabled() bool {
 	return m != nil && m.recorder != nil
 }
 
-// LastCommandExitCode returns the exit code of the last command reported via
-// OSC 133;D (-1 when the shell omitted it). ok is false before the first
-// command finishes.
 func (m *Model) LastCommandExitCode() (code int, ok bool) {
 	return m.lastExitCode, m.hasExitCode
 }
 
-// CommandCount returns how many commands have finished (OSC 133;D count).
 func (m *Model) CommandCount() int { return m.cmdCount }
 
-// CommandRunning reports whether a command is currently executing (between
-// OSC 133;C and OSC 133;D).
 func (m *Model) CommandRunning() bool { return m.cmdRunning }
 
-// PasteCommand writes a command string to the SSH session stdin.
 func (m *Model) PasteCommand(cmd string) {
 	if m.disconnected || m.sess == nil || m.sess.Stdin == nil {
 		return
@@ -451,9 +416,6 @@ func (m *Model) PasteText(text string) {
 	m.PasteCommand(text)
 }
 
-// SendRaw writes raw bytes to the session stdin through the same queue as
-// typed keys (no bracketed-paste wrapping, so control bytes like \x03 reach
-// the pty as-is). Returns false when the session is not writable.
 func (m *Model) SendRaw(s string) bool {
 	if m.disconnected || m.sess == nil || m.sess.Stdin == nil {
 		return false
@@ -461,13 +423,8 @@ func (m *Model) SendRaw(s string) bool {
 	return m.queueInput([]byte(s))
 }
 
-// Session returns the current session so the app layer can extract relay
-// resume state (stream id and consumed offset) after a disconnect.
 func (m *Model) Session() *internalssh.InteractiveSession { return m.currentSession() }
 
-// ResumeSession swaps in a resumed relay session, keeping the emulator and
-// its scrollback, and restarts the read plumbing. The replayed output is
-// re-fed to the emulator, restoring the visible state.
 func (m *Model) ResumeSession(is *internalssh.InteractiveSession) tea.Cmd {
 	m.mu.Lock()
 	oldCh := m.ch
@@ -478,8 +435,6 @@ func (m *Model) ResumeSession(is *internalssh.InteractiveSession) tea.Cmd {
 	m.ch = make(chan []byte, 128)
 	m.doneClosed = make(chan struct{})
 	m.mu.Unlock()
-	// Render output that was acked but still queued in the old channel, so
-	// resuming from nextSeq loses nothing.
 drain:
 	for {
 		select {
@@ -507,7 +462,6 @@ drain:
 	return waitChunk(m)
 }
 
-// Disconnected is true after a network-style drop; press "r" to send [types.SSHReconnectMsg].
 func (m *Model) Disconnected() bool { return m.disconnected }
 
 func (m *Model) SetDisconnected(err error) {
@@ -534,8 +488,6 @@ func (m *Model) ReconnectingLabel() string {
 	return fmt.Sprintf("RECONNECTING (%d/%d)", m.reconnectTry, m.reconnectMax)
 }
 
-// SetSize resizes the VT and notifies the remote PTY. h is mainContentHeightForType(SSHTab):
-// terminal minus tab strip, divider line, status bar (with shortcut hints). Toast shares the divider row in App.
 func (m *Model) SetSize(w, h int) {
 	if w < 20 {
 		w = 80
@@ -570,7 +522,6 @@ func (m *Model) setReadErr(err error) {
 		m.endErr = err
 		return
 	}
-	// Prefer a concrete error over io.EOF when both appear (read vs Wait).
 	if errors.Is(m.endErr, io.EOF) && !errors.Is(err, io.EOF) {
 		m.endErr = err
 	}
@@ -597,9 +548,6 @@ func (m *Model) Init() tea.Cmd {
 	return waitChunk(m)
 }
 
-// watchDone waits for the current session to end. Init and ResumeSession each
-// start one; it captures the session and done channel at start and only
-// records the error if that session is still current.
 func (m *Model) watchDone() {
 	m.mu.Lock()
 	sess := m.sess
@@ -650,8 +598,6 @@ func (m *Model) readLoop() {
 	}
 }
 
-// closeChFor closes ch only if it is still the live chunk channel; a stale
-// readLoop from before a ResumeSession must not close the new channel.
 func (m *Model) closeChFor(ch chan []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -663,9 +609,6 @@ func (m *Model) closeChFor(ch chan []byte) {
 }
 
 func waitChunk(m *Model) tea.Cmd {
-	// Capture the generation's channels under lock: ResumeSession replaces
-	// them, and an in-flight wait on a superseded channel must not leak or
-	// report a stale StreamDoneMsg.
 	m.mu.Lock()
 	ch := m.ch
 	doneClosed := m.doneClosed
@@ -726,19 +669,13 @@ func coalesceQueuedChunks(ch <-chan []byte, first []byte) []byte {
 	return out
 }
 
-// Close ends the SSH session.
 func (m *Model) Close() error {
-	// Close the emulator's input pipe to unblock the drain goroutine. We avoid
-	// emu.Close() here because it writes an unsynchronized internal flag that the
-	// drain goroutine reads via emu.Read, which the race detector flags.
 	if c, ok := m.emu.InputPipe().(io.Closer); ok {
 		_ = c.Close()
 	}
 	m.closeInputQueue()
 	m.closeResizeQueue()
 	if m.recorder != nil {
-		// finalizeSSHSession already harvested the data when a history row
-		// exists; this only cleans up otherwise (temp file fd included).
 		m.recorder.Discard()
 	}
 	if m.sess != nil {
@@ -794,6 +731,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.SetSize(msg.Width, msg.Height)
 		return m, nil
 
+	case tea.FocusMsg:
+		m.emu.Focus()
+		return m, nil
+
+	case tea.BlurMsg:
+		m.emu.Blur()
+		return m, nil
+
 	case ChunkMsg:
 		if msg.StreamID != m.streamID {
 			return m, nil
@@ -803,9 +748,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		clipCmds := m.takeOSC52ClipboardCommands()
 		notifyCmds := m.takeOSC9NotificationCommands()
 		titleCmds := m.takeTitleCommands()
-		// Only follow new output when already at the live view (bottom). When the
-		// user has scrolled up, keep the same lines in view by compensating for the
-		// rows that the new output pushed into scrollback.
 		if m.scrollOffset > 0 {
 			if added := m.emu.ScrollbackLen() - before; added > 0 {
 				m.scrollOffset += added
@@ -826,8 +768,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if shouldOfferReconnect(err) {
 			m.disconnected = true
 			if m.sess != nil {
-				// Keep the dead session around: the app layer reads relay
-				// resume state from it before opening the replacement.
 				_ = m.sess.Close()
 			}
 			if m.remote != nil && m.remote.Tmux {
@@ -871,11 +811,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Snippet picker
 		if viewkeys.MatchKey(msg, m.vk.SnippetPicker) {
 			return m, func() tea.Msg { return types.SnippetPickerRequestMsg{} }
 		}
-		// Any keypress snaps back to live view and clears any text selection.
 		m.scrollOffset = 0
 		m.bottomPad = 0
 		m.clearScrollIndicator()
@@ -939,7 +877,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sel.dragging = false
 		m.selAutoScroll.Stop()
-		// Click without drag clears the selection; a real drag copies.
 		if m.sel.anchor == m.sel.caret && !m.sel.moved {
 			m.sel.active = false
 			return m, nil
@@ -958,7 +895,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.disconnected {
 			return m, nil
 		}
-		// In alternate screen (vim, less), forward scroll to the remote app.
 		if m.emu.IsAltScreen() {
 			if m.sendRemoteMouse(msg) {
 				return m, nil
@@ -980,8 +916,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Normal screen: scroll through scrollback history, with up to
-		// bottomPadMax extra rows of empty space below the live view.
 		maxScroll := m.emu.ScrollbackLen()
 		switch msg.Button {
 		case tea.MouseWheelUp:
@@ -1070,10 +1004,6 @@ func (m *Model) takeOSC52ClipboardCommands() []tea.Cmd {
 	return out
 }
 
-// OSC9Sequence builds an OSC 9 desktop-notification escape for the outer
-// terminal. C0 controls are stripped so the payload cannot break out of the
-// OSC envelope; C1 controls (U+0080-U+009F) are stripped too: on
-// C1-interpreting terminals U+009C would terminate the OSC envelope early.
 func OSC9Sequence(text string) string {
 	clean := strings.Map(func(r rune) rune {
 		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
@@ -1096,10 +1026,6 @@ func (m *Model) takeOSC9NotificationCommands() []tea.Cmd {
 	return out
 }
 
-// pushOSCTitle records a title change from OSC 0/1/2. OSC 0 fires both the
-// Title and IconName callbacks with the same text, so consecutive duplicates
-// are dropped; control characters are stripped so the tab bar cannot be
-// injected with escape sequences.
 func (m *Model) pushOSCTitle(name string) {
 	clean := strings.Map(func(r rune) rune {
 		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {

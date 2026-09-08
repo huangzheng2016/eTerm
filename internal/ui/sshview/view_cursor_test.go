@@ -27,14 +27,22 @@ func TestViewReportsInnerCursor(t *testing.T) {
 	}
 }
 
-func TestViewOmitsCursorWhenHiddenOrScrolled(t *testing.T) {
+func TestViewReportsHiddenCursorPosition(t *testing.T) {
 	m := newCursorTestModel(t)
 	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("hello")})
 	m.cursorHidden = true
-	if v := m.View(); v.Cursor != nil {
-		t.Fatal("hidden cursor reported")
+	v := m.View()
+	if v.Cursor == nil {
+		t.Fatal("hidden cursor position not reported")
 	}
-	m.cursorHidden = false
+	if v.Cursor.X != 5 || v.Cursor.Y != 0 {
+		t.Fatalf("cursor = %d,%d want 5,0", v.Cursor.X, v.Cursor.Y)
+	}
+}
+
+func TestViewOmitsCursorWhenScrolled(t *testing.T) {
+	m := newCursorTestModel(t)
+	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("hello")})
 	m.scrollOffset = 1
 	if v := m.View(); v.Cursor != nil {
 		t.Fatal("scrollback view reported live cursor")

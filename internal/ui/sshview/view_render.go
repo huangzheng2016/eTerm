@@ -14,8 +14,6 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
-// In alt-screen full-screen apps, render the whole cell grid so cleared
-// areas overwrite the previous frame.
 var disconnectBannerStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#e0a000")).
 	Bold(true)
@@ -47,9 +45,6 @@ func (m *Model) View() tea.View {
 	case m.bottomPad > 0 && !m.emu.IsAltScreen():
 		screen = m.renderBottomPad()
 	case reportCur:
-		// No software cursor: the outer terminal draws its hardware cursor at
-		// the reported position (block-inverting an already inverted cell
-		// would cancel out).
 		screen = m.renderScreen()
 	default:
 		screen = m.renderScreenWithCursor()
@@ -79,13 +74,8 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-// reportCursor returns the inner terminal cursor position so the outer
-// terminal can place its hardware cursor (and the OS IME candidate window)
-// at the right cell. ok is false when the visible view does not map 1:1 to
-// the live screen (selection, scrollback, bottom pad) or the cursor is
-// hidden or out of bounds.
 func (m *Model) reportCursor() (*tea.Cursor, bool) {
-	if m.cursorHidden || m.sel.active || m.scrollOffset > 0 || m.bottomPad > 0 {
+	if m.sel.active || m.scrollOffset > 0 || m.bottomPad > 0 {
 		return nil, false
 	}
 	w, h := m.emu.Width(), m.emu.Height()
@@ -96,7 +86,6 @@ func (m *Model) reportCursor() (*tea.Cursor, bool) {
 	return tea.NewCursor(pos.X, pos.Y), true
 }
 
-// renderScreen renders the visible grid without a software cursor.
 func (m *Model) renderScreen() string {
 	if m.emu.IsAltScreen() {
 		return m.renderFullScreen()
@@ -113,9 +102,6 @@ func overlayFirstLineRight(screen string, width int, overlay string) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderWithSelection renders the visible body cell-by-cell, highlighting cells that
-// fall inside the active selection. Used only while selecting; the normal path keeps
-// the fast emu.Render().
 func (m *Model) renderWithSelection() string {
 	w, h := m.emu.Width(), m.emu.Height()
 	if w <= 0 || h <= 0 {
@@ -174,8 +160,6 @@ func selectionCellStyle(s uv.Style) uv.Style {
 	return out
 }
 
-// renderBottomPad shows the live screen pushed up by bottomPad rows, with empty
-// rows below, so the user can scroll past the bottom to see the newest line clearly.
 func (m *Model) renderBottomPad() string {
 	lines := strings.Split(m.renderScreenWithCursor(), "\n")
 	if m.bottomPad < len(lines) {
@@ -236,8 +220,6 @@ func (m *Model) renderFullScreen() string {
 	return strings.Join(lines, "\n")
 }
 
-// renderScrollback renders a mixed view: scrollback lines at the top, then
-// visible screen lines at the bottom, offset by m.scrollOffset.
 func (m *Model) renderScrollback() string {
 	w := m.emu.Width()
 	h := m.emu.Height()
@@ -246,24 +228,19 @@ func (m *Model) renderScrollback() string {
 		return m.emu.Render()
 	}
 
-	// We want to show h lines total.
-	// scrollOffset=1 means the top line is the last scrollback line,
-	// and the bottom h-1 lines are from the current screen.
 	offset := m.scrollOffset
 	if offset > sbLen {
 		offset = sbLen
 	}
 
 	var lines []string
-	// How many lines come from scrollback vs current screen
-	sbLines := offset // lines from scrollback
+	sbLines := offset
 	screenLines := h - sbLines
 	if screenLines < 0 {
 		screenLines = 0
 		sbLines = h
 	}
 
-	// Render scrollback lines (oldest first in scrollback, we want newest first)
 	sbStart := sbLen - offset
 	if sbStart < 0 {
 		sbStart = 0
@@ -277,7 +254,6 @@ func (m *Model) renderScrollback() string {
 		lines = append(lines, renderScrollbackLine(m, w, idx))
 	}
 
-	// Render current screen lines (top screenLines lines of the screen)
 	for y := 0; y < screenLines && y < h; y++ {
 		lines = append(lines, renderScreenLine(m, w, y))
 	}
@@ -354,9 +330,6 @@ func renderScreenLine(m *Model, w, y int) string {
 	return sb.String()
 }
 
-// writeLink emits the OSC 8 transitions needed to switch the open hyperlink
-// from cur to next, mirroring ultraviolet's renderLine so links survive the
-// cell-by-cell render paths.
 func writeLink(sb *strings.Builder, cur *uv.Link, next uv.Link) {
 	if next == *cur {
 		return
@@ -375,7 +348,6 @@ func renderCellANSI(cell *uv.Cell) string {
 	if content == "" {
 		content = " "
 	}
-	// Use ultraviolet's built-in ANSI styling
 	return cell.Style.Styled(content)
 }
 
@@ -383,7 +355,6 @@ func invertCursorStyle(s uv.Style) uv.Style {
 	out := s
 	out.Fg, out.Bg = s.Bg, s.Fg
 
-	// Default colors: typical dark terminal — light glyph on gray block.
 	if s.Fg == nil && s.Bg == nil {
 		out.Fg = color.RGBA{R: 0xee, G: 0xee, B: 0xee, A: 0xff}
 		out.Bg = color.RGBA{R: 0x44, G: 0x44, B: 0x44, A: 0xff}

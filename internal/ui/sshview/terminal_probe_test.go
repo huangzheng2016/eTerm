@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
@@ -73,6 +75,37 @@ func TestTmuxTerminalProbesReply(t *testing.T) {
 	stdin.waitContains(t, "\x1b[8;10;40t")
 	if got := m.emu.Render(); strings.TrimSpace(got) != "" {
 		t.Fatalf("probes polluted screen: %q", got)
+	}
+}
+
+func TestFocusBlurForwardedWhenMode1004Set(t *testing.T) {
+	stdin := newProbeStdin()
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+	m.SetSize(40, 10)
+
+	_, _ = m.Update(ChunkMsg{
+		StreamID: m.StreamID(),
+		Data:     []byte("\x1b[?1004h"),
+	})
+
+	_, _ = m.Update(tea.FocusMsg{})
+	stdin.waitContains(t, "\x1b[I")
+	_, _ = m.Update(tea.BlurMsg{})
+	stdin.waitContains(t, "\x1b[O")
+}
+
+func TestFocusBlurDroppedWithoutMode1004(t *testing.T) {
+	stdin := newProbeStdin()
+	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+	m.SetSize(40, 10)
+
+	_, _ = m.Update(tea.FocusMsg{})
+	_, _ = m.Update(tea.BlurMsg{})
+	time.Sleep(200 * time.Millisecond)
+	if stdin.contains("\x1b[I") || stdin.contains("\x1b[O") {
+		t.Fatal("focus events leaked without mode 1004")
 	}
 }
 
