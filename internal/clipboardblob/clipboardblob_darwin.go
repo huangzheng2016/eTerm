@@ -4,6 +4,7 @@ package clipboardblob
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -24,5 +25,26 @@ func clipboardFilePath() (string, error) {
 	if data == "" {
 		return "", ErrNoBlob
 	}
-	return filePathFromURIList(data)
+	path, err := filePathFromURIList(data)
+	if err != nil {
+		return "", err
+	}
+	// Finder may advertise a file-id reference (file:///.file/id=...) instead
+	// of the real path; only AppleScript resolves it.
+	if strings.HasPrefix(path, "/.file/") {
+		return resolveFileRefPath()
+	}
+	return path, nil
+}
+
+func resolveFileRefPath() (string, error) {
+	out, err := exec.Command("osascript", "-e", `POSIX path of (the clipboard as «class furl»)`).Output()
+	if err != nil {
+		return "", ErrNoBlob
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return "", ErrNoBlob
+	}
+	return path, nil
 }
