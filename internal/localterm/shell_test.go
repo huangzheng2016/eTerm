@@ -3,11 +3,19 @@ package localterm
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 )
+
+func stubLoginShell(t *testing.T, shell string) {
+	t.Helper()
+	old := loginShell
+	loginShell = func() string { return shell }
+	t.Cleanup(func() { loginShell = old })
+}
 
 func TestResolveShellUsesConfiguredShell(t *testing.T) {
 	got := ResolveShell("/opt/custom-shell", func(string) bool { return false })
@@ -17,6 +25,7 @@ func TestResolveShellUsesConfiguredShell(t *testing.T) {
 }
 
 func TestResolveShellPrefersEnvThenZshThenBash(t *testing.T) {
+	stubLoginShell(t, "")
 	t.Setenv("SHELL", "/opt/env-shell")
 	got := ResolveShell("", func(path string) bool {
 		return path == "/bin/zsh" || path == "/bin/bash"
@@ -34,6 +43,63 @@ func TestResolveShellPrefersEnvThenZshThenBash(t *testing.T) {
 	}
 
 	got = ResolveShell("", func(path string) bool {
+		return path == "/bin/bash"
+	})
+	if got != "/bin/bash" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveShellAbsolutizesBareNameFromProbeDirs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("probe dirs are unix-only")
+	}
+	got := ResolveShell("eterm-probe-only-shell", func(path string) bool {
+		return path == "/usr/local/bin/eterm-probe-only-shell"
+	})
+	if got != "/usr/local/bin/eterm-probe-only-shell" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveShellKeepsBareNameFoundInPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("LookPath check is unix-specific")
+	}
+	got := ResolveShell("sh", func(string) bool { return false })
+	if got != "sh" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveShellBareNameNotFoundReturnsAsIs(t *testing.T) {
+	got := ResolveShell("eterm-definitely-missing-shell", func(string) bool { return false })
+	if got != "eterm-definitely-missing-shell" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveShellUsesLoginShellWhenEnvEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("login shell lookup is unix-only")
+	}
+	stubLoginShell(t, "/opt/login/fish")
+	t.Setenv("SHELL", "")
+	got := ResolveShell("", func(path string) bool {
+		return path == "/opt/login/fish"
+	})
+	if got != "/opt/login/fish" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveShellIgnoresMissingLoginShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("login shell lookup is unix-only")
+	}
+	stubLoginShell(t, "/nonexistent/fish")
+	t.Setenv("SHELL", "")
+	got := ResolveShell("", func(path string) bool {
 		return path == "/bin/bash"
 	})
 	if got != "/bin/bash" {
