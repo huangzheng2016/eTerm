@@ -332,6 +332,7 @@ func isMissingTmuxSession(err error) bool {
 	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "can't find session") ||
+		strings.Contains(s, "no such session") ||
 		strings.Contains(s, "no server running") ||
 		strings.Contains(s, "no sessions") ||
 		(strings.Contains(s, "error connecting to") && strings.Contains(s, "no such file or directory"))

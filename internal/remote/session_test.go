@@ -698,6 +698,108 @@ func TestDataSeqDuplicateDropped(t *testing.T) {
 	}
 }
 
+func TestFreshOpenRebasesFirstFrameSeq(t *testing.T) {
+	const base = uint64(5 * 1024 * 1024)
+	tail := bytes.Repeat([]byte("x"), ackThresholdBytes)
+	total := base + 2 + uint64(len(tail))
+	ackCh := make(chan uint64, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		f, ok := readOpen(t, c, ctx)
+		if !ok {
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(base, []byte("ab"))}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(base+2, tail)}))
+		for {
+			_, data, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			ackFrame, err := relay.Decode(data)
+			if err != nil || ackFrame.Type != relay.FrameAck {
+				continue
+			}
+			ack, err := relay.ParseAck(ackFrame.Payload)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			ackCh <- ack
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	buf := make([]byte, 2+len(tail))
+	if _, err := io.ReadFull(is.Stdout, buf); err != nil {
+		t.Fatal(err)
+	}
+	if string(buf[:2]) != "ab" {
+		t.Fatalf("prefix = %q, want ab", buf[:2])
+	}
+	select {
+	case ack := <-ackCh:
+		if ack != total {
+			t.Fatalf("ack = %d, want %d (lastAck not aligned to rebased seq)", ack, total)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack")
+	}
+	waitNextSeq(t, is, total)
+}
+
+func TestResumeOpenGapStillFatal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		f, ok := readOpen(t, c, ctx)
+		if !ok {
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(10, []byte("xy"))}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	op := relay.OpenRequest{PeerID: "peer-a", Target: "local", Rows: 24, Cols: 80}
+	is, err := ResumeOpenWithProgress(ctx, server.URL, "", "", false, op, 42, 7, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	select {
+	case err := <-is.Done:
+		if err == nil || !strings.Contains(err.Error(), "gap") {
+			t.Fatalf("done err = %v, want output gap", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for gap error")
+	}
+}
+
 func TestOpenTimeoutContextAddsDeadline(t *testing.T) {
 	ctx, cancel := openTimeoutContext(context.Background())
 	defer cancel()

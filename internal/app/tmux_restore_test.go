@@ -289,6 +289,35 @@ func TestTmuxRestoreMissingSessionClosesOnlyPlaceholder(t *testing.T) {
 	}
 }
 
+func TestTmuxRestoreDaemonMissingSessionClosesPlaceholder(t *testing.T) {
+	a := restoreTestApp(t)
+	a.viewState = MainView
+	a.tabs = []Tab{{Type: HomeTab, Title: "List"}}
+	a.activeTab = 0
+
+	cmd := (&a).restoreTmuxSessions([]tmuxRestoreEntry{
+		{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer"},
+		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
+	})
+	if cmd == nil || len(a.tabs) != 3 {
+		t.Fatalf("tabs before result = %#v", a.tabs)
+	}
+	missingID := a.tabs[1].tmuxRestoreID
+	next, _ := a.Update(tmuxRestoreOpenedMsg{
+		id:    missingID,
+		entry: tmuxRestoreEntry{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer"},
+		err:   errors.New("no such session: gone"),
+	})
+	a = next.(App)
+
+	if len(a.tabs) != 2 || a.tabs[1].Title != "[T]work" {
+		t.Fatalf("tabs after daemon missing session = %#v", a.tabs)
+	}
+	if a.activeTab != 0 || a.connError != nil {
+		t.Fatalf("active tab=%d connError=%v", a.activeTab, a.connError)
+	}
+}
+
 func TestApplyTmuxTerminalOpenedPersistsRestoreSnapshot(t *testing.T) {
 	a := restoreTestApp(t)
 	a.viewState = MainView

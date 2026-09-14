@@ -341,6 +341,44 @@ func TestRemoteTmuxAutoReconnectDoesNotStealActiveTab(t *testing.T) {
 	}
 }
 
+func TestApplyRemoteTerminalOpenedFreshReconnectKeepsModel(t *testing.T) {
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	a := remoteHTTPTestApp(t)
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
+
+	newSess := &internalssh.InteractiveSession{}
+	next, _ := a.applyRemoteTerminalOpened(remoteTerminalOpenedMsg{
+		is:           newSess,
+		title:        "[T]peer-work",
+		tabType:      SSHTab,
+		replaceTabAt: 0,
+		reconnect:    tab.RemoteReconnect(),
+	})
+	a = next
+
+	if len(a.tabs) != 1 {
+		t.Fatalf("tabs = %d, want 1", len(a.tabs))
+	}
+	if a.tabs[0].Model.(*sshview.Model) != tab {
+		t.Fatal("fresh reconnect replaced the tab model, old content lost")
+	}
+	if tab.Session() != newSess {
+		t.Fatal("fresh reconnect did not swap in the new session")
+	}
+	if tab.Disconnected() {
+		t.Fatal("tab still marked disconnected after reconnect")
+	}
+	if a.activeTab != 0 {
+		t.Fatalf("activeTab = %d, want 0", a.activeTab)
+	}
+}
+
 func TestRemoteTmuxRenameAppliedUpdatesTabAndRefreshesList(t *testing.T) {
 	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
 	tab.SetRemoteReconnect(&types.RemoteReconnect{
