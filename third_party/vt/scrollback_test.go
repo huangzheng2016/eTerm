@@ -1,7 +1,10 @@
 package vt
 
 import (
+	"fmt"
 	"testing"
+
+	uv "github.com/charmbracelet/ultraviolet"
 )
 
 func TestScrollback(t *testing.T) {
@@ -141,4 +144,83 @@ func TestScrollback(t *testing.T) {
 			t.Errorf("expected empty scrollback after ED 3, got %d", e.ScrollbackLen())
 		}
 	})
+
+	t.Run("order preserved after overflow", func(t *testing.T) {
+		sb := NewScrollback(5)
+
+		for i := 0; i < 12; i++ {
+			sb.PushWrapped(uv.Line{{Content: fmt.Sprintf("line%d", i)}}, i%3 == 0)
+		}
+
+		if sb.Len() != 5 {
+			t.Fatalf("expected len 5 after overflow, got %d", sb.Len())
+		}
+		for i := 0; i < 5; i++ {
+			line := sb.Line(i)
+			if len(line) != 1 || line[0].Content != fmt.Sprintf("line%d", i+7) {
+				t.Errorf("Line(%d) = %v, want line%d", i, line, i+7)
+			}
+			if got, want := sb.LineWrapped(i), (i+7)%3 == 0; got != want {
+				t.Errorf("LineWrapped(%d) = %v, want %v", i, got, want)
+			}
+		}
+	})
+
+	t.Run("set max lines shrink after overflow", func(t *testing.T) {
+		sb := NewScrollback(10)
+
+		for i := 0; i < 15; i++ {
+			sb.Push(uv.Line{{Content: fmt.Sprintf("line%d", i)}})
+		}
+		sb.SetMaxLines(4)
+
+		if sb.Len() != 4 {
+			t.Fatalf("expected len 4 after shrink, got %d", sb.Len())
+		}
+		sb.Push(uv.Line{{Content: "line15"}})
+		for i := 0; i < 4; i++ {
+			line := sb.Line(i)
+			if len(line) != 1 || line[0].Content != fmt.Sprintf("line%d", i+12) {
+				t.Errorf("Line(%d) = %v, want line%d", i, line, i+12)
+			}
+		}
+	})
+
+	t.Run("set max lines grow after overflow", func(t *testing.T) {
+		sb := NewScrollback(5)
+
+		for i := 0; i < 8; i++ {
+			sb.Push(uv.Line{{Content: fmt.Sprintf("line%d", i)}})
+		}
+		sb.SetMaxLines(10)
+		for i := 8; i < 13; i++ {
+			sb.Push(uv.Line{{Content: fmt.Sprintf("line%d", i)}})
+		}
+
+		if sb.Len() != 10 {
+			t.Fatalf("expected len 10 after grow, got %d", sb.Len())
+		}
+		for i := 0; i < 10; i++ {
+			line := sb.Line(i)
+			if len(line) != 1 || line[0].Content != fmt.Sprintf("line%d", i+3) {
+				t.Errorf("Line(%d) = %v, want line%d", i, line, i+3)
+			}
+		}
+	})
+}
+
+func BenchmarkPushWrappedFull(b *testing.B) {
+	for _, maxLines := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("maxLines=%d", maxLines), func(b *testing.B) {
+			sb := NewScrollback(maxLines)
+			line := make(uv.Line, 80)
+			for i := 0; i < maxLines; i++ {
+				sb.Push(line)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sb.PushWrapped(line, i%2 == 0)
+			}
+		})
+	}
 }
