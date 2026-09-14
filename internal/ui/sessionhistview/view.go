@@ -39,6 +39,9 @@ func (m *Model) View() tea.View {
 	listStyled := lipgloss.NewStyle().Width(listW).Render(listBlock)
 
 	body := m.selectedDisplayTranscript()
+	if m.sel >= 0 && m.sel < len(m.rows) && rowPendingContent(m.rows[m.sel]) {
+		body = "Loading transcript..."
+	}
 	lines := strings.Split(body, "\n")
 	maxLines := m.transcriptPageSize()
 	scroll := m.scroll

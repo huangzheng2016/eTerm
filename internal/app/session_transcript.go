@@ -65,4 +65,5 @@ func finalizeSSHSession(gdb *gorm.DB, m *sshview.Model) {
 		vals["replay_stopped"] = stopped
 	}
 	_ = gdb.Model(&db.ConnectionHistory{}).Where("id = ?", hid).Updates(vals).Error
+	_ = db.PruneConnectionHistories(gdb, db.HistoryMaxRows, db.HistoryMaxAgeDays)
 }

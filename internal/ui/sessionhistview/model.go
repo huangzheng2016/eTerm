@@ -2,6 +2,7 @@ package sessionhistview
 
 import (
 	"fmt"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
@@ -25,6 +26,34 @@ type Model struct {
 	showEmpty     bool
 	showEmptyKeys []string
 	selection     textselection.Selection
+	contentSeq    int
+}
+
+const contentDebounceDelay = 150 * time.Millisecond
+
+type contentTickMsg struct{ seq int }
+
+type contentLoadedMsg struct {
+	id         uint
+	transcript string
+	ansi       string
+	err        error
+}
+
+func rowPendingContent(row db.ConnectionHistory) bool {
+	return row.HasTranscript && row.Transcript == "" && row.ANSITranscript == ""
+}
+
+func (m *Model) scheduleContentLoad() tea.Cmd {
+	if m.sel < 0 || m.sel >= len(m.rows) {
+		return nil
+	}
+	if !rowPendingContent(m.rows[m.sel]) {
+		return nil
+	}
+	m.contentSeq++
+	seq := m.contentSeq
+	return tea.Tick(contentDebounceDelay, func(time.Time) tea.Msg { return contentTickMsg{seq: seq} })
 }
 
 func New(database *gorm.DB, hostID uint) *Model {
@@ -48,11 +77,11 @@ func (m *Model) reload() tea.Cmd {
 			title = fmt.Sprintf("%s@%s", host.Username, host.Hostname)
 		}
 		var rows []db.ConnectionHistory
-		q := m.db.Where("host_id = ?", m.hostID)
+		q := m.db.Where("host_id = ?", m.hostID).Select(db.HistoryMetaColumns)
 		if !m.showEmpty {
-			q = q.Where("length(trim(transcript, char(9) || char(10) || char(13) || ' ')) > 0 OR length(replay_data) > 0")
+			q = q.Where(db.HistoryNonEmptyFilter)
 		}
-		err := q.Order("connected_at DESC").Find(&rows).Error
+		err := q.Order("connected_at DESC").Limit(db.HistoryListLimit).Find(&rows).Error
 		if err != nil {
 			return types.ErrorMsg{Err: err}
 		}

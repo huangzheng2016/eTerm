@@ -25,26 +25,197 @@ func sessionTestDB(t *testing.T) *gorm.DB {
 	return database
 }
 
-func TestGlobalSessionSearchMatchesLabelAndTranscript(t *testing.T) {
+func TestGlobalSessionSearchMatchesMetadataOnly(t *testing.T) {
 	database := sessionTestDB(t)
 	now := time.Now()
 	rows := []db.ConnectionHistory{
 		{Label: "daemon-prod", Source: "remote", ConnectedAt: now, Status: "success", Transcript: "deploy completed"},
-		{Label: "local-work", Source: "tmux", ConnectedAt: now, Status: "success", Transcript: "go test ./..."},
+		{Label: "local-work", Source: "tmux", ConnectedAt: now.Add(time.Minute), Status: "success", Transcript: "go test ./..."},
 	}
 	if err := database.Create(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	m := New(database)
-	m.search.SetValue("deploy")
+	m.search.SetValue("daemon")
 	msg := m.reload()().(loadedMsg)
 	if msg.err != nil || len(msg.rows) != 1 || msg.rows[0].Label != "daemon-prod" {
-		t.Fatalf("transcript search = %+v err=%v", msg.rows, msg.err)
+		t.Fatalf("label search = %+v err=%v", msg.rows, msg.err)
 	}
-	m.search.SetValue("local-work")
+	m.search.SetValue("tmux")
 	msg = m.reload()().(loadedMsg)
 	if msg.err != nil || len(msg.rows) != 1 || msg.rows[0].Source != "tmux" {
-		t.Fatalf("label search = %+v err=%v", msg.rows, msg.err)
+		t.Fatalf("source search = %+v err=%v", msg.rows, msg.err)
+	}
+	m.search.SetValue("deploy")
+	msg = m.reload()().(loadedMsg)
+	if msg.err != nil || len(msg.rows) != 0 {
+		t.Fatalf("transcript content must not be searched, rows = %+v err=%v", msg.rows, msg.err)
+	}
+}
+
+func TestSessionListLoadsMetadataWithoutBlobs(t *testing.T) {
+	database := sessionTestDB(t)
+	now := time.Now()
+	rows := []db.ConnectionHistory{
+		{Label: "plain", ConnectedAt: now, Transcript: "output", Status: "success"},
+		{Label: "replay", ConnectedAt: now.Add(time.Second), ReplayData: []byte{1, 2, 3}, Status: "success"},
+	}
+	if err := database.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	msg := New(database).reload()().(loadedMsg)
+	if msg.err != nil || len(msg.rows) != 2 {
+		t.Fatalf("rows=%+v err=%v", msg.rows, msg.err)
+	}
+	byLabel := map[string]db.ConnectionHistory{}
+	for _, r := range msg.rows {
+		byLabel[r.Label] = r
+	}
+	plain := byLabel["plain"]
+	if !plain.HasTranscript || plain.HasReplay || plain.Transcript != "" || plain.Status != "success" {
+		t.Fatalf("plain row = %+v", plain)
+	}
+	replay := byLabel["replay"]
+	if !replay.HasReplay || replay.HasTranscript || len(replay.ReplayData) != 0 {
+		t.Fatalf("replay row = %+v", replay)
+	}
+}
+
+func TestSessionListLimit(t *testing.T) {
+	database := sessionTestDB(t)
+	base := time.Now()
+	rows := make([]db.ConnectionHistory, 0, db.HistoryListLimit+10)
+	for i := 0; i < db.HistoryListLimit+10; i++ {
+		rows = append(rows, db.ConnectionHistory{Label: "s", ConnectedAt: base.Add(time.Duration(i) * time.Second), Transcript: "x"})
+	}
+	if err := database.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	msg := New(database).reload()().(loadedMsg)
+	if msg.err != nil || len(msg.rows) != db.HistoryListLimit {
+		t.Fatalf("rows=%d err=%v", len(msg.rows), msg.err)
+	}
+	if !msg.rows[0].ConnectedAt.After(msg.rows[len(msg.rows)-1].ConnectedAt) {
+		t.Fatal("rows not ordered newest first")
+	}
+}
+
+func TestSessionSearchDebounce(t *testing.T) {
+	database := sessionTestDB(t)
+	rows := []db.ConnectionHistory{
+		{Label: "alpha", ConnectedAt: time.Now(), Transcript: "x"},
+		{Label: "zzz", ConnectedAt: time.Now(), Transcript: "x"},
+	}
+	if err := database.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database)
+	m.searching = true
+	m.search.Focus()
+	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))
+	m = updated.(*Model)
+	if m.searchSeq != 1 || m.search.Value() != "a" {
+		t.Fatalf("searchSeq=%d value=%q", m.searchSeq, m.search.Value())
+	}
+	updated, stale := m.Update(searchDebounceMsg{seq: 0})
+	m = updated.(*Model)
+	if stale != nil {
+		t.Fatal("stale debounce tick triggered a reload")
+	}
+	updated, tick := m.Update(searchDebounceMsg{seq: m.searchSeq})
+	m = updated.(*Model)
+	if tick == nil {
+		t.Fatal("current debounce tick did not reload")
+	}
+	msg := tick().(loadedMsg)
+	if msg.err != nil || len(msg.rows) != 1 || msg.rows[0].Label != "alpha" {
+		t.Fatalf("debounced reload rows=%+v err=%v", msg.rows, msg.err)
+	}
+}
+
+func TestEnterLoadsTranscriptDetailByID(t *testing.T) {
+	database := sessionTestDB(t)
+	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database)
+	loaded := m.reload()().(loadedMsg)
+	m.rows, m.loaded = loaded.rows, true
+	if len(m.rows) != 1 || m.rows[0].Transcript != "" {
+		t.Fatalf("list rows = %+v", m.rows)
+	}
+	m.SetSize(80, 20)
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = updated.(*Model)
+	if cmd == nil || m.detail {
+		t.Fatalf("enter cmd=%v detail=%v", cmd, m.detail)
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(*Model)
+	if !m.detail || m.selectedTranscript() != "line one\nline two" {
+		t.Fatalf("detail=%v transcript=%q", m.detail, m.selectedTranscript())
+	}
+	if !m.rows[0].HasTranscript {
+		t.Fatal("detail load did not refresh HasTranscript")
+	}
+}
+
+func TestReloadKeepsOpenDetailContent(t *testing.T) {
+	database := sessionTestDB(t)
+	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database)
+	loaded := m.reload()().(loadedMsg)
+	m.rows, m.loaded = loaded.rows, true
+	m.SetSize(80, 20)
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = updated.(*Model)
+	updated, _ = m.Update(cmd())
+	m = updated.(*Model)
+	if !m.detail {
+		t.Fatal("detail not open")
+	}
+	newer := db.ConnectionHistory{Label: "newer", ConnectedAt: time.Now().Add(time.Minute), Transcript: "x"}
+	if err := database.Create(&newer).Error; err != nil {
+		t.Fatal(err)
+	}
+	updated, _ = m.Update(m.reload()())
+	m = updated.(*Model)
+	if !m.detail || m.selectedTranscript() != "line one\nline two" {
+		t.Fatalf("detail lost after reload: detail=%v transcript=%q", m.detail, m.selectedTranscript())
+	}
+	if m.rows[m.cursor].Label != "remote-shell" {
+		t.Fatalf("cursor row = %q, want remote-shell", m.rows[m.cursor].Label)
+	}
+}
+
+func TestReloadClosesDetailWhenRowGone(t *testing.T) {
+	database := sessionTestDB(t)
+	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database)
+	loaded := m.reload()().(loadedMsg)
+	m.rows, m.loaded = loaded.rows, true
+	m.SetSize(80, 20)
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = updated.(*Model)
+	updated, _ = m.Update(cmd())
+	m = updated.(*Model)
+	if !m.detail {
+		t.Fatal("detail not open")
+	}
+	if err := database.Delete(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	updated, _ = m.Update(m.reload()())
+	m = updated.(*Model)
+	if m.detail {
+		t.Fatal("detail stayed open for a deleted row")
 	}
 }
 

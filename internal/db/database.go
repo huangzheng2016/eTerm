@@ -33,6 +33,8 @@ func InitDB(dbPath string) (*gorm.DB, error) {
 
 	backfillSyncIDs(db)
 
+	_ = PruneConnectionHistories(db, HistoryMaxRows, HistoryMaxAgeDays)
+
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, err

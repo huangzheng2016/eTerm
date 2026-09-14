@@ -1,6 +1,7 @@
 package sessionhistview
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -32,8 +33,114 @@ func TestHistoryListHidesEmptyTranscripts(t *testing.T) {
 	}
 
 	msg := New(database, host.ID).reload()().(loadedMsg)
-	if len(msg.rows) != 1 || msg.rows[0].Transcript != "output" {
+	if len(msg.rows) != 1 || !msg.rows[0].HasTranscript || msg.rows[0].Transcript != "" {
 		t.Fatalf("rows=%+v", msg.rows)
+	}
+}
+
+func TestHistoryContentLoadsAfterSelectionSettles(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	host := db.Host{Alias: "host"}
+	if err := database.Create(&host).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	rows := []db.ConnectionHistory{
+		{HostID: host.ID, ConnectedAt: now, Transcript: "first"},
+		{HostID: host.ID, ConnectedAt: now.Add(-time.Minute), Transcript: "second"},
+	}
+	if err := database.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database, host.ID)
+	updated, cmd := m.Update(m.reload()())
+	m = updated.(*Model)
+	if cmd == nil || m.contentSeq != 1 {
+		t.Fatalf("content load not scheduled: seq=%d cmd=%v", m.contentSeq, cmd)
+	}
+	if m.rows[0].Transcript != "" || !m.rows[0].HasTranscript {
+		t.Fatalf("list row loaded blob: %+v", m.rows[0])
+	}
+	m.SetSize(90, 20)
+	if !strings.Contains(m.View().Content, "Loading transcript...") {
+		t.Fatal("pending row did not show loading placeholder")
+	}
+	updated, stale := m.Update(contentTickMsg{seq: 0})
+	m = updated.(*Model)
+	if stale != nil {
+		t.Fatal("stale content tick triggered a fetch")
+	}
+	updated, fetch := m.Update(contentTickMsg{seq: m.contentSeq})
+	m = updated.(*Model)
+	if fetch == nil {
+		t.Fatal("content tick did not fetch")
+	}
+	updated, _ = m.Update(fetch())
+	m = updated.(*Model)
+	if m.selectedTranscript() != "first" {
+		t.Fatalf("transcript = %q", m.selectedTranscript())
+	}
+	if strings.Contains(m.View().Content, "Loading transcript...") {
+		t.Fatal("loaded row still shows loading placeholder")
+	}
+	updated, moved := m.Update(tea.KeyPressMsg(tea.Key{Code: 'j'}))
+	m = updated.(*Model)
+	if m.sel != 1 || moved == nil || m.contentSeq != 2 {
+		t.Fatalf("move did not schedule load: sel=%d seq=%d", m.sel, m.contentSeq)
+	}
+	updated, fetch = m.Update(contentTickMsg{seq: m.contentSeq})
+	m = updated.(*Model)
+	updated, _ = m.Update(fetch())
+	m = updated.(*Model)
+	if m.selectedTranscript() != "second" {
+		t.Fatalf("transcript after move = %q", m.selectedTranscript())
+	}
+	updated, back := m.Update(tea.KeyPressMsg(tea.Key{Code: 'k'}))
+	m = updated.(*Model)
+	if m.sel != 0 || back != nil || m.contentSeq != 2 {
+		t.Fatalf("re-selecting a loaded row rescheduled fetch: sel=%d seq=%d", m.sel, m.contentSeq)
+	}
+}
+
+func TestHistoryReplayRowSkipsContentLoad(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	host := db.Host{Alias: "host"}
+	if err := database.Create(&host).Error; err != nil {
+		t.Fatal(err)
+	}
+	row := db.ConnectionHistory{HostID: host.ID, ConnectedAt: time.Now(), ReplayData: []byte{1, 2, 3}}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database, host.ID)
+	updated, cmd := m.Update(m.reload()())
+	m = updated.(*Model)
+	if len(m.rows) != 1 || !m.rows[0].HasReplay || m.rows[0].HasTranscript {
+		t.Fatalf("rows = %+v", m.rows)
+	}
+	if cmd != nil || m.contentSeq != 0 {
+		t.Fatalf("replay-only row scheduled content load: seq=%d cmd=%v", m.contentSeq, cmd)
+	}
+	m.SetSize(90, 20)
+	if strings.Contains(m.View().Content, "Loading transcript...") {
+		t.Fatal("replay-only row stuck on loading placeholder")
+	}
+	updated, tick := m.Update(contentTickMsg{seq: 0})
+	m = updated.(*Model)
+	if tick != nil {
+		t.Fatal("replay-only row fetched on content tick")
 	}
 }
 
@@ -53,7 +160,7 @@ func TestHistoryListShowsReplayWithoutTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	msg := New(database, host.ID).reload()().(loadedMsg)
-	if len(msg.rows) != 1 {
+	if len(msg.rows) != 1 || !msg.rows[0].HasReplay || len(msg.rows[0].ReplayData) != 0 {
 		t.Fatalf("rows=%+v", msg.rows)
 	}
 }
