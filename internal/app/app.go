@@ -102,7 +102,9 @@ type App struct {
 	noUpdateCheck    bool
 	forceUpdateCheck bool
 
-	syncing bool
+	syncing         bool
+	syncTickPending bool
+	autoLockOn      bool
 
 	batchTag     *batchTagModel
 	batchActions *batchActionsModel
