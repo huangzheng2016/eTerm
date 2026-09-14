@@ -51,7 +51,12 @@ func newTestSender() (*frameSender, *daemonFrameSink) {
 			default:
 				select {
 				case f = <-s.ctrl:
-				case f = <-s.data:
+				case b := <-s.data:
+					df, err := relay.Decode(b)
+					if err != nil {
+						return
+					}
+					f = df
 				case <-s.done:
 					return
 				}
@@ -394,7 +399,7 @@ func TestPumpCapsOutputFrameSize(t *testing.T) {
 func TestPumpAppliesWindowBackpressure(t *testing.T) {
 	done := make(chan error)
 	is := &internalssh.InteractiveSession{
-		Stdout: bytes.NewReader(bytes.Repeat([]byte("x"), 1024*1024)),
+		Stdout: bytes.NewReader(bytes.Repeat([]byte("x"), 2*outputWindowBytes)),
 		Done:   done,
 	}
 	sender, out := newTestSender()

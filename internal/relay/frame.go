@@ -74,6 +74,19 @@ type Frame struct {
 	Payload  []byte
 }
 
+func PeekStreamID(b []byte) uint32 {
+	return binary.BigEndian.Uint32(b[2:6])
+}
+
+func DataFrameBuf(streamID uint32, seq uint64, n int) (frame []byte, data []byte) {
+	frame = make([]byte, HeaderLen+dataSeqLen+n)
+	frame[0] = byte(FrameData)
+	binary.BigEndian.PutUint32(frame[2:6], streamID)
+	binary.BigEndian.PutUint32(frame[6:10], uint32(dataSeqLen+n))
+	binary.BigEndian.PutUint64(frame[HeaderLen:], seq)
+	return frame, frame[HeaderLen+dataSeqLen:]
+}
+
 func Encode(f Frame) []byte {
 	out := make([]byte, HeaderLen+len(f.Payload))
 	out[0] = byte(f.Type)

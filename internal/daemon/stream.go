@@ -16,13 +16,13 @@ import (
 )
 
 const (
-	outputWindowBytes  = 256 * 1024
+	outputWindowBytes  = 1024 * 1024
 	outputRingBytes    = 2 * 1024 * 1024
 	sendCtrlQueueSize  = 64
-	sendDataQueueSize  = 64
+	sendDataQueueSize  = 32
 	inputQueueSize     = 64
 	sendRetryDelay     = 50 * time.Millisecond
-	outputReadBufBytes = 8192
+	outputReadBufBytes = 32 * 1024
 )
 
 var errSenderClosed = errors.New("relay connection closed")
@@ -83,32 +83,60 @@ func (r *outputRing) ReadFrom(off uint64, max int) []byte {
 	return out
 }
 
+func (r *outputRing) ReadInto(off uint64, dst []byte) int {
+	if off < r.base {
+		off = r.base
+	}
+	if off >= r.End() || len(dst) == 0 {
+		return 0
+	}
+	n := int(r.End() - off)
+	if n > len(dst) {
+		n = len(dst)
+	}
+	idx := (r.start + int(off-r.base)) % len(r.buf)
+	first := min(n, len(r.buf)-idx)
+	copy(dst, r.buf[idx:idx+first])
+	copy(dst[first:], r.buf[:n-first])
+	return n
+}
+
 type frameSender struct {
 	ctrl chan relay.Frame
-	data chan relay.Frame
+	data chan []byte
 	done chan struct{}
 }
 
 func newFrameSender() *frameSender {
 	return &frameSender{
 		ctrl: make(chan relay.Frame, sendCtrlQueueSize),
-		data: make(chan relay.Frame, sendDataQueueSize),
+		data: make(chan []byte, sendDataQueueSize),
 		done: make(chan struct{}),
 	}
 }
 
 func (s *frameSender) send(f relay.Frame) error {
-	ch := s.ctrl
-	if f.Type == relay.FrameData {
-		ch = s.data
-	}
 	select {
 	case <-s.done:
 		return errSenderClosed
 	default:
 	}
 	select {
-	case ch <- f:
+	case s.ctrl <- f:
+		return nil
+	case <-s.done:
+		return errSenderClosed
+	}
+}
+
+func (s *frameSender) sendData(b []byte) error {
+	select {
+	case <-s.done:
+		return errSenderClosed
+	default:
+	}
+	select {
+	case s.data <- b:
 		return nil
 	case <-s.done:
 		return errSenderClosed
@@ -116,45 +144,47 @@ func (s *frameSender) send(f relay.Frame) error {
 }
 
 func (s *frameSender) drainData(streamID uint32) {
-	var keep []relay.Frame
+	var keep [][]byte
 	for {
 		select {
-		case f := <-s.data:
-			if f.StreamID != streamID {
-				keep = append(keep, f)
+		case b := <-s.data:
+			if relay.PeekStreamID(b) != streamID {
+				keep = append(keep, b)
 			}
 		default:
-			for _, f := range keep {
-				_ = s.send(f)
+			for _, b := range keep {
+				_ = s.sendData(b)
 			}
 			return
 		}
 	}
 }
 
-func recoverLog(what string) {
+func recoverLog(label func() string) {
 	if r := recover(); r != nil {
-		log.Printf("eterm daemon %s panic: %v\n%s", what, r, debug.Stack())
+		log.Printf("eterm daemon %s panic: %v\n%s", label(), r, debug.Stack())
 	}
 }
 
 func (s *frameSender) run(ctx context.Context, c *websocket.Conn) {
 	defer close(s.done)
-	defer recoverLog("frame sender")
+	defer recoverLog(func() string { return "frame sender" })
 	for {
-		var f relay.Frame
+		var msg []byte
 		select {
-		case f = <-s.ctrl:
+		case f := <-s.ctrl:
+			msg = relay.Encode(f)
 		default:
 			select {
-			case f = <-s.ctrl:
-			case f = <-s.data:
+			case f := <-s.ctrl:
+				msg = relay.Encode(f)
+			case msg = <-s.data:
 			case <-ctx.Done():
 				return
 			}
 		}
 		wctx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
-		err := c.Write(wctx, websocket.MessageBinary, relay.Encode(f))
+		err := c.Write(wctx, websocket.MessageBinary, msg)
 		cancel()
 		if err != nil {
 			return
@@ -168,6 +198,7 @@ type streamRelay struct {
 	ring          *outputRing
 	sent          uint64
 	ack           uint64
+	gen           uint64
 	detachedSince time.Time
 	sidV          atomic.Uint32
 	input         chan []byte
@@ -205,7 +236,7 @@ func (s *streamRelay) queueInput(p []byte) {
 }
 
 func (s *streamRelay) inputPump() {
-	defer func() { recoverLog(fmt.Sprintf("stream %d input pump", s.sidV.Load())) }()
+	defer recoverLog(func() string { return fmt.Sprintf("stream %d input pump", s.sidV.Load()) })
 	for {
 		select {
 		case p := <-s.input:
@@ -261,6 +292,7 @@ func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK 
 	}
 	s.sent = fromSeq
 	s.ack = fromSeq
+	s.gen++
 	s.detachedSince = time.Time{}
 	sender.drainData(openOK.StreamID)
 	err := sender.send(openOK)
@@ -283,6 +315,7 @@ func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *fra
 	}
 	s.sent = fromSeq
 	s.ack = fromSeq
+	s.gen++
 	s.detachedSince = time.Time{}
 	sender.drainData(streamID)
 	err := sender.send(openOK)
@@ -291,6 +324,14 @@ func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *fra
 		s.notify()
 	}
 	return err
+}
+
+func (s *streamRelay) drainIfGenChanged(gen uint64, sid uint32, sender *frameSender) {
+	s.mu.Lock()
+	if s.gen != gen {
+		sender.drainData(sid)
+	}
+	s.mu.Unlock()
 }
 
 func (s *streamRelay) waitCredit() bool {
@@ -310,7 +351,7 @@ func (s *streamRelay) waitCredit() bool {
 }
 
 func (s *streamRelay) readPump(readDone chan<- error) {
-	defer func() { recoverLog(fmt.Sprintf("stream %d read pump", s.sidV.Load())) }()
+	defer recoverLog(func() string { return fmt.Sprintf("stream %d read pump", s.sidV.Load()) })
 	buf := make([]byte, outputReadBufBytes)
 	for {
 		if !s.waitCredit() {
@@ -328,7 +369,7 @@ func (s *streamRelay) readPump(readDone chan<- error) {
 }
 
 func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionManager) {
-	defer recoverLog(fmt.Sprintf("stream %d pump", streamID))
+	defer recoverLog(func() string { return fmt.Sprintf("stream %d pump", s.sidV.Load()) })
 	s.sidV.Store(streamID)
 	readDone := make(chan error, 1)
 	go s.readPump(readDone)
@@ -337,17 +378,23 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 	for {
 		sender := mgr.sender()
 		s.mu.Lock()
-		sid := s.sidV.Load()
 		sent, end, inflight := s.sent, s.ring.End(), s.sent-s.ack
 		if sender != nil && sent < end && inflight < outputWindowBytes {
-			chunk := s.ring.ReadFrom(sent, maxOutputFrameBytes)
-			frame := relay.Frame{Type: relay.FrameData, StreamID: sid, Payload: relay.DataPayload(sent, chunk)}
-			err := sender.send(frame)
-			if err == nil {
-				s.sent += uint64(len(chunk))
+			sid, gen := s.sidV.Load(), s.gen
+			n := int(end - sent)
+			if n > maxOutputFrameBytes {
+				n = maxOutputFrameBytes
 			}
+			frame, data := relay.DataFrameBuf(sid, sent, n)
+			s.ring.ReadInto(sent, data)
+			s.sent += uint64(n)
 			s.mu.Unlock()
-			if err != nil {
+			if err := sender.sendData(frame); err != nil {
+				s.mu.Lock()
+				if s.gen == gen {
+					s.sent = sent
+				}
+				s.mu.Unlock()
 				select {
 				case <-time.After(sendRetryDelay):
 				case <-s.stop:
@@ -355,7 +402,9 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 				case <-ctx.Done():
 					return
 				}
+				continue
 			}
+			s.drainIfGenChanged(gen, sid, sender)
 			continue
 		}
 		s.mu.Unlock()
