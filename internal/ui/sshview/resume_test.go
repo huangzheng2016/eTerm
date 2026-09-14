@@ -3,6 +3,7 @@ package sshview
 import (
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +11,26 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
+
+type trackingWriteCloser struct {
+	mu     sync.Mutex
+	closed bool
+}
+
+func (t *trackingWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+
+func (t *trackingWriteCloser) Close() error {
+	t.mu.Lock()
+	t.closed = true
+	t.mu.Unlock()
+	return nil
+}
+
+func (t *trackingWriteCloser) isClosed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.closed
+}
 
 func TestResumeSessionDrainsPendingOutputAndContinues(t *testing.T) {
 	pr1, _ := io.Pipe()
@@ -44,6 +65,30 @@ func TestResumeSessionDrainsPendingOutputAndContinues(t *testing.T) {
 		t.Fatalf("chunk = %q, want live output", chunk.Data)
 	}
 	_ = pw2.Close()
+}
+
+func TestResumeSessionClosesReplacedSession(t *testing.T) {
+	stdin1 := &trackingWriteCloser{}
+	closer1 := &trackingWriteCloser{}
+	pr1, _ := io.Pipe()
+	done1 := make(chan error, 1)
+	sess1 := &internalssh.InteractiveSession{Stdin: stdin1, Stdout: pr1, Done: done1}
+	sess1.AddCloser(closer1)
+	m := New(sess1, "t", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = m.Close() })
+	m.SetSize(80, 24)
+
+	pr2, _ := io.Pipe()
+	done2 := make(chan error, 1)
+	sess2 := &internalssh.InteractiveSession{Stdout: pr2, Done: done2}
+	m.ResumeSession(sess2)
+
+	if !stdin1.isClosed() {
+		t.Fatal("replaced session stdin not closed")
+	}
+	if !closer1.isClosed() {
+		t.Fatal("replaced session closer not closed")
+	}
 }
 
 func TestStaleWaitChunkReturnsNil(t *testing.T) {

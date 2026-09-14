@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 
+	"github.com/huangzheng2016/eTerm/internal/remote"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/textselection"
@@ -307,6 +309,7 @@ func (m *Model) queueInput(p []byte) bool {
 		}
 		return true
 	default:
+		log.Printf("eterm sshview: input queue full, dropping %d input bytes", len(b))
 		return false
 	}
 }
@@ -427,6 +430,7 @@ func (m *Model) Session() *internalssh.InteractiveSession { return m.currentSess
 
 func (m *Model) ResumeSession(is *internalssh.InteractiveSession) tea.Cmd {
 	m.mu.Lock()
+	old := m.sess
 	oldCh := m.ch
 	m.sess = is
 	m.endErr = nil
@@ -435,6 +439,9 @@ func (m *Model) ResumeSession(is *internalssh.InteractiveSession) tea.Cmd {
 	m.ch = make(chan []byte, 128)
 	m.doneClosed = make(chan struct{})
 	m.mu.Unlock()
+	if old != nil && old != is {
+		remote.CloseSessionNow(old)
+	}
 drain:
 	for {
 		select {

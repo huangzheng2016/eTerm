@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -777,6 +778,7 @@ func TestResumeOpenGapStillFatal(t *testing.T) {
 			return
 		}
 		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(7, []byte("ab"))}))
 		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(10, []byte("xy"))}))
 	}))
 	defer server.Close()
@@ -790,6 +792,10 @@ func TestResumeOpenGapStillFatal(t *testing.T) {
 	}
 	defer is.Close()
 
+	buf := make([]byte, 2)
+	if _, err := io.ReadFull(is.Stdout, buf); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case err := <-is.Done:
 		if err == nil || !strings.Contains(err.Error(), "gap") {
@@ -797,6 +803,165 @@ func TestResumeOpenGapStillFatal(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for gap error")
+	}
+}
+
+func TestResumeOpenRebasesRaisedBaseline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		f, ok := readOpen(t, c, ctx)
+		if !ok {
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(42, []byte("tail"))}))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	op := relay.OpenRequest{PeerID: "peer-a", Target: "local", Rows: 24, Cols: 80}
+	is, err := ResumeOpenWithProgress(ctx, server.URL, "", "", false, op, 42, 7, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(is.Stdout, buf); err != nil {
+		t.Fatal(err)
+	}
+	if string(buf) != "tail" {
+		t.Fatalf("got %q want tail", buf)
+	}
+	waitNextSeq(t, is, 46)
+}
+
+func TestWriteChunksLargeInput(t *testing.T) {
+	total := 2*relay.MaxWebSocketMessageBytes + 12345
+	payload := make([]byte, total)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	got := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		c.SetReadLimit(relay.MaxWebSocketMessageBytes)
+		ctx := r.Context()
+		f, ok := readOpen(t, c, ctx)
+		if !ok {
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		var acc []byte
+		for len(acc) < total {
+			typ, data, err := c.Read(ctx)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if typ != websocket.MessageBinary {
+				continue
+			}
+			fr, err := relay.Decode(data)
+			if err != nil || fr.Type != relay.FrameData {
+				continue
+			}
+			if len(fr.Payload) > maxInputChunkBytes {
+				t.Errorf("frame payload %d bytes exceeds chunk size %d", len(fr.Payload), maxInputChunkBytes)
+			}
+			acc = append(acc, fr.Payload...)
+		}
+		got <- acc
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	n, err := is.Stdin.Write(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != total {
+		t.Fatalf("write n = %d, want %d", n, total)
+	}
+	select {
+	case acc := <-got:
+		if !bytes.Equal(acc, payload) {
+			t.Fatal("reassembled input does not match written payload")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for chunked input")
+	}
+}
+
+func TestReadLoopExitClosesConn(t *testing.T) {
+	closed := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		f, ok := readOpen(t, c, ctx)
+		if !ok {
+			return
+		}
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}))
+		_ = c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID, Payload: []byte("bye")}))
+		rctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		for {
+			if _, _, err = c.Read(rctx); err != nil {
+				break
+			}
+		}
+		closed <- err
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	is, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer is.Close()
+
+	select {
+	case err := <-is.Done:
+		if err == nil || err.Error() != "bye" {
+			t.Fatalf("done err = %v, want bye", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for done")
+	}
+	select {
+	case err := <-closed:
+		if err == nil || errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("server conn not closed by client, read err = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for conn close")
 	}
 }
 

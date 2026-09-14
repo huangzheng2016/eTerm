@@ -43,7 +43,8 @@ type wsStdin struct {
 const (
 	wsKeepaliveInterval = 25 * time.Second
 	wsKeepaliveTimeout  = 5 * time.Second
-	ackThresholdBytes   = 128 * 1024
+	ackThresholdBytes   = 256 * 1024
+	maxInputChunkBytes  = relay.MaxWebSocketMessageBytes - 1024
 )
 
 func Open(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, hostSyncID string, rows, cols int) (*internalssh.InteractiveSession, error) {
@@ -251,6 +252,7 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 	is.AddCloser(closerFunc(stopKeepalive))
 	go func() {
 		defer pw.Close()
+		defer conn.CloseNow()
 		sawData := false
 		accepted := false
 		for {
@@ -278,7 +280,7 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 					continue
 				}
 				if seq > next {
-					if resumeFromSeq != 0 || accepted {
+					if accepted {
 						log.Printf("eterm remote: output gap stream=%d seq=%d want=%d", streamID, seq, next)
 						done <- fmt.Errorf("relay output gap: got seq %d, want %d", seq, next)
 						return
@@ -330,11 +332,18 @@ func (f closerFunc) Close() error {
 func (w *wsStdin) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	err := writeFrame(w.ctx, w.conn, relay.Frame{Type: relay.FrameData, StreamID: w.streamID, Payload: p})
-	if err != nil {
-		return 0, err
+	sent := 0
+	for {
+		n := min(len(p), maxInputChunkBytes)
+		if err := writeFrame(w.ctx, w.conn, relay.Frame{Type: relay.FrameData, StreamID: w.streamID, Payload: p[:n]}); err != nil {
+			return sent, err
+		}
+		sent += n
+		p = p[n:]
+		if len(p) == 0 {
+			return sent, nil
+		}
 	}
-	return len(p), nil
 }
 
 func (w *wsStdin) Close() error {
@@ -342,6 +351,16 @@ func (w *wsStdin) Close() error {
 	defer w.mu.Unlock()
 	_ = writeFrame(w.ctx, w.conn, relay.Frame{Type: relay.FrameClose, StreamID: w.streamID})
 	return w.conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func CloseSessionNow(is *internalssh.InteractiveSession) {
+	if is == nil {
+		return
+	}
+	if w, ok := is.Stdin.(*wsStdin); ok {
+		w.conn.CloseNow()
+	}
+	_ = is.Close()
 }
 
 func writeFrame(ctx context.Context, conn *websocket.Conn, f relay.Frame) error {
