@@ -205,7 +205,7 @@ func (s *streamRelay) queueInput(p []byte) {
 }
 
 func (s *streamRelay) inputPump() {
-	defer recoverLog(fmt.Sprintf("stream %d input pump", s.sidV.Load()))
+	defer func() { recoverLog(fmt.Sprintf("stream %d input pump", s.sidV.Load())) }()
 	for {
 		select {
 		case p := <-s.input:
@@ -310,7 +310,7 @@ func (s *streamRelay) waitCredit() bool {
 }
 
 func (s *streamRelay) readPump(readDone chan<- error) {
-	defer recoverLog(fmt.Sprintf("stream %d read pump", s.sidV.Load()))
+	defer func() { recoverLog(fmt.Sprintf("stream %d read pump", s.sidV.Load())) }()
 	buf := make([]byte, outputReadBufBytes)
 	for {
 		if !s.waitCredit() {
