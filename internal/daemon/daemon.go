@@ -185,7 +185,7 @@ func runLoop(ctx context.Context, rt *runtimeConfig) error {
 	mgr := newSessionManager()
 	defer mgr.closeAll()
 	go func() {
-		defer recoverLog("reap loop")
+		defer recoverLog(func() string { return "reap loop" })
 		mgr.reapLoop(ctx)
 	}()
 	delay := 2 * time.Second
@@ -284,11 +284,11 @@ func shortID(s string) string {
 }
 
 func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *frameSender, ctx context.Context) {
-	defer recoverLog(fmt.Sprintf("handle frame type=%d stream=%d", f.Type, f.StreamID))
+	defer recoverLog(func() string { return fmt.Sprintf("handle frame type=%d stream=%d", f.Type, f.StreamID) })
 	switch f.Type {
 	case relay.FrameOpen:
 		go func() {
-			defer recoverLog(fmt.Sprintf("open stream %d", f.StreamID))
+			defer recoverLog(func() string { return fmt.Sprintf("open stream %d", f.StreamID) })
 			reqCtx, cancel := context.WithTimeout(ctx, openRequestTimeout)
 			defer cancel()
 			handleOpen(rt, f, mgr, sender, reqCtx, ctx)
