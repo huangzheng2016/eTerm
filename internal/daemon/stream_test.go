@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 
 	"github.com/huangzheng2016/eTerm/internal/relay"
@@ -157,5 +160,24 @@ func TestDrainIfGenChangedKeepsFrameWhenGenSame(t *testing.T) {
 	b := <-sender.data
 	if frameData(t, b) != "AAAA" {
 		t.Fatalf("frame data = %q, want %q", frameData(t, b), "AAAA")
+	}
+}
+
+func TestRecoverLogRecoversGoroutinePanic(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer recoverLog(func() string { return "test pump" })
+		panic("boom")
+	}()
+	<-done
+
+	if !strings.Contains(buf.String(), "test pump panic: boom") {
+		t.Fatalf("panic not logged: %q", buf.String())
 	}
 }

@@ -160,15 +160,15 @@ func (s *frameSender) drainData(streamID uint32) {
 	}
 }
 
-func recoverLog(what string) {
+func recoverLog(label func() string) {
 	if r := recover(); r != nil {
-		log.Printf("eterm daemon %s panic: %v\n%s", what, r, debug.Stack())
+		log.Printf("eterm daemon %s panic: %v\n%s", label(), r, debug.Stack())
 	}
 }
 
 func (s *frameSender) run(ctx context.Context, c *websocket.Conn) {
 	defer close(s.done)
-	defer recoverLog("frame sender")
+	defer recoverLog(func() string { return "frame sender" })
 	for {
 		var msg []byte
 		select {
@@ -236,7 +236,7 @@ func (s *streamRelay) queueInput(p []byte) {
 }
 
 func (s *streamRelay) inputPump() {
-	defer func() { recoverLog(fmt.Sprintf("stream %d input pump", s.sidV.Load())) }()
+	defer recoverLog(func() string { return fmt.Sprintf("stream %d input pump", s.sidV.Load()) })
 	for {
 		select {
 		case p := <-s.input:
@@ -351,7 +351,7 @@ func (s *streamRelay) waitCredit() bool {
 }
 
 func (s *streamRelay) readPump(readDone chan<- error) {
-	defer func() { recoverLog(fmt.Sprintf("stream %d read pump", s.sidV.Load())) }()
+	defer recoverLog(func() string { return fmt.Sprintf("stream %d read pump", s.sidV.Load()) })
 	buf := make([]byte, outputReadBufBytes)
 	for {
 		if !s.waitCredit() {
@@ -369,7 +369,7 @@ func (s *streamRelay) readPump(readDone chan<- error) {
 }
 
 func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionManager) {
-	defer func() { recoverLog(fmt.Sprintf("stream %d pump", s.sidV.Load())) }()
+	defer recoverLog(func() string { return fmt.Sprintf("stream %d pump", s.sidV.Load()) })
 	s.sidV.Store(streamID)
 	readDone := make(chan error, 1)
 	go s.readPump(readDone)
