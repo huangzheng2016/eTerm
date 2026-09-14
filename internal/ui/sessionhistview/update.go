@@ -22,6 +22,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loaded = true
 		m.sel = 0
 		m.scroll = 0
+		return m, m.scheduleContentLoad()
+
+	case contentTickMsg:
+		if msg.seq != m.contentSeq || m.sel < 0 || m.sel >= len(m.rows) {
+			return m, nil
+		}
+		row := m.rows[m.sel]
+		if !row.NeedsContentLoad() {
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			var full db.ConnectionHistory
+			err := m.db.Select("id", "transcript", "ansi_transcript").First(&full, row.ID).Error
+			return contentLoadedMsg{id: row.ID, transcript: full.Transcript, ansi: full.ANSITranscript, err: err}
+		}
+
+	case contentLoadedMsg:
+		if msg.err != nil {
+			return m, func() tea.Msg { return types.ErrorMsg{Err: msg.err} }
+		}
+		for i := range m.rows {
+			if m.rows[i].ID == msg.id {
+				m.rows[i].Transcript = msg.transcript
+				m.rows[i].ANSITranscript = msg.ansi
+				break
+			}
+		}
 		return m, nil
 
 	case types.RefreshListMsg:
@@ -43,6 +70,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sel = idx
 				m.scroll = 0
 				m.focusList = true
+				return m, m.scheduleContentLoad()
 			}
 			return m, nil
 		}
@@ -80,6 +108,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if next != m.sel {
 				m.sel = next
 				m.scroll = 0
+				return m, m.scheduleContentLoad()
 			}
 			return m, nil
 		}
@@ -118,6 +147,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusList && m.sel > 0 {
 				m.sel--
 				m.scroll = 0
+				return m, m.scheduleContentLoad()
 			} else if !m.focusList {
 				m.scroll--
 				if m.scroll < 0 {
@@ -130,6 +160,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focusList && m.sel < len(m.rows)-1 {
 				m.sel++
 				m.scroll = 0
+				return m, m.scheduleContentLoad()
 			} else if !m.focusList {
 				m.scroll++
 			}

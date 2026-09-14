@@ -36,6 +36,7 @@ type Model struct {
 	selection     textselection.Selection
 	replayOnly    bool
 	replayID      uint
+	searchSeq     int
 }
 
 type loadedMsg struct {
@@ -43,9 +44,18 @@ type loadedMsg struct {
 	err  error
 }
 
+type detailLoadedMsg struct {
+	row db.ConnectionHistory
+	err error
+}
+
+type searchDebounceMsg struct{ seq int }
+
+const searchDebounceDelay = 200 * time.Millisecond
+
 func New(database *gorm.DB) *Model {
 	input := textinput.New()
-	input.Placeholder = "Search host, status, time, or transcript"
+	input.Placeholder = "Search host, status, or time"
 	return &Model{db: database, search: input, showEmptyKeys: []string{"h"}}
 }
 
@@ -106,20 +116,30 @@ func (m *Model) StatusBarHint() string {
 func (m *Model) reload() tea.Cmd {
 	query := strings.TrimSpace(m.search.Value())
 	return func() tea.Msg {
-		q := m.db.Preload("Host")
+		q := m.db.Preload("Host").Select(db.HistoryMetaColumns)
 		if !m.showEmpty {
-			q = q.Where("length(trim(transcript, char(9) || char(10) || char(13) || ' ')) > 0 OR length(replay_data) > 0")
+			q = q.Where(db.HistoryNonEmptyFilter)
 		}
-		q = q.Order("connected_at DESC")
+		q = q.Order("connected_at DESC").Limit(db.HistoryListLimit)
 		if query != "" {
 			like := "%" + query + "%"
 			hostIDs := m.db.Model(&db.Host{}).Select("id").Where("alias LIKE ? OR hostname LIKE ? OR username LIKE ?", like, like, like)
-			q = q.Where("label LIKE ? OR source LIKE ? OR status LIKE ? OR transcript LIKE ? OR strftime('%Y-%m-%d %H:%M', connected_at) LIKE ? OR host_id IN (?)", like, like, like, like, like, hostIDs)
+			q = q.Where("label LIKE ? OR source LIKE ? OR status LIKE ? OR strftime('%Y-%m-%d %H:%M', connected_at) LIKE ? OR host_id IN (?)", like, like, like, like, hostIDs)
 		}
 		var rows []db.ConnectionHistory
 		err := q.Find(&rows).Error
 		return loadedMsg{rows: rows, err: err}
 	}
+}
+
+func (m *Model) debounceSearch() tea.Cmd {
+	m.searchSeq++
+	seq := m.searchSeq
+	return tea.Tick(searchDebounceDelay, func(time.Time) tea.Msg { return searchDebounceMsg{seq: seq} })
+}
+
+func rowHasReplay(row db.ConnectionHistory) bool {
+	return row.HasReplay || len(row.ReplayData) > 0
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -130,6 +150,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loadedMsg:
 		if msg.err != nil {
 			return m, func() tea.Msg { return types.ErrorMsg{Err: msg.err} }
+		}
+		var open db.ConnectionHistory
+		if m.detail && m.cursor >= 0 && m.cursor < len(m.rows) {
+			open = m.rows[m.cursor]
 		}
 		m.rows, m.loaded = msg.rows, true
 		if m.replayOnly {
@@ -143,6 +167,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(m.rows) {
 			m.cursor = max(0, len(m.rows)-1)
 		}
+		if open.ID != 0 {
+			found := false
+			for i := range m.rows {
+				if m.rows[i].ID == open.ID {
+					m.rows[i].Transcript = open.Transcript
+					m.rows[i].ANSITranscript = open.ANSITranscript
+					m.rows[i].ReplayData = open.ReplayData
+					m.rows[i].ReplayDuration = open.ReplayDuration
+					m.rows[i].HasReplay = open.HasReplay
+					m.rows[i].HasTranscript = open.HasTranscript
+					m.cursor = i
+					found = true
+					break
+				}
+			}
+			if !found && !m.replayOnly {
+				m.detail, m.detailScroll, m.replay = false, 0, nil
+			}
+		}
+		return m, nil
+	case detailLoadedMsg:
+		if msg.err != nil {
+			return m, func() tea.Msg { return types.ErrorMsg{Err: msg.err} }
+		}
+		for i := range m.rows {
+			if m.rows[i].ID == msg.row.ID {
+				m.rows[i] = msg.row
+				break
+			}
+		}
+		if m.cursor >= 0 && m.cursor < len(m.rows) && m.rows[m.cursor].ID == msg.row.ID {
+			if err := m.openDetail(); err != nil {
+				return m, func() tea.Msg { return types.ErrorMsg{Err: err} }
+			}
+		}
+		return m, nil
+	case searchDebounceMsg:
+		if msg.seq == m.searchSeq {
+			return m, m.reload()
+		}
 		return m, nil
 	case replayTickMsg:
 		if m.replay != nil && msg.replay == m.replay {
@@ -154,7 +218,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		if m.searching {
 			m.search.SetValue(m.search.Value() + msg.Content)
-			return m, m.reload()
+			return m, m.debounceSearch()
 		}
 	case tea.KeyPressMsg:
 		if m.searching {
@@ -167,11 +231,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searching = false
 				m.search.SetValue("")
 				m.search.Blur()
+				m.searchSeq++
 				return m, m.reload()
 			}
 			var cmd tea.Cmd
 			m.search, cmd = m.search.Update(msg)
-			return m, tea.Batch(cmd, m.reload())
+			return m, tea.Batch(cmd, m.debounceSearch())
 		}
 		if m.detail {
 			if m.replay != nil {
@@ -215,12 +280,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if len(m.rows) > 0 {
 				row := m.rows[m.cursor]
-				if len(row.ReplayData) > 0 && !m.replayOnly {
+				if rowHasReplay(row) && !m.replayOnly {
 					return m, func() tea.Msg { return types.OpenSessionReplayMsg{HistoryID: row.ID, Title: sessionTitle(row)} }
 				}
-				if err := m.openDetail(); err != nil {
-					return m, func() tea.Msg { return types.ErrorMsg{Err: err} }
-				}
+				return m, m.openDetailCmd(row)
 			}
 		case "/":
 			m.searching = true
@@ -250,12 +313,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if idx, ok := components.GridIndexAtMouse(msg.X, msg.Y-1, len(m.rows), m.grid, page); ok {
 				if idx == m.cursor {
 					row := m.rows[m.cursor]
-					if len(row.ReplayData) > 0 && !m.replayOnly {
+					if rowHasReplay(row) && !m.replayOnly {
 						return m, func() tea.Msg { return types.OpenSessionReplayMsg{HistoryID: row.ID, Title: sessionTitle(row)} }
 					}
-					if err := m.openDetail(); err != nil {
-						return m, func() tea.Msg { return types.ErrorMsg{Err: err} }
-					}
+					return m, m.openDetailCmd(row)
 				} else {
 					m.cursor = idx
 				}
@@ -285,6 +346,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) openDetailCmd(row db.ConnectionHistory) tea.Cmd {
+	if m.db != nil && row.NeedsContentLoad() {
+		return func() tea.Msg {
+			var full db.ConnectionHistory
+			err := m.db.Preload("Host").First(&full, row.ID).Error
+			full.HasReplay = len(full.ReplayData) > 0
+			full.HasTranscript = strings.TrimSpace(full.Transcript) != ""
+			return detailLoadedMsg{row: full, err: err}
+		}
+	}
+	if err := m.openDetail(); err != nil {
+		return func() tea.Msg { return types.ErrorMsg{Err: err} }
+	}
+	return nil
 }
 
 func (m *Model) openDetail() error {
@@ -524,12 +601,12 @@ func sessionTime(row db.ConnectionHistory) string {
 
 func sessionMeta(row db.ConnectionHistory) string {
 	capture := "no transcript"
-	if len(row.ReplayData) > 0 {
+	if rowHasReplay(row) {
 		capture = "replay"
 		if row.ReplayStopped {
 			capture = "replay stopped at 24h"
 		}
-	} else if strings.TrimSpace(row.Transcript) != "" {
+	} else if row.HasTranscript || strings.TrimSpace(row.Transcript) != "" {
 		capture = "transcript"
 	}
 	source := row.Source

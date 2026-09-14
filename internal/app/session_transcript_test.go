@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/db"
@@ -44,7 +45,7 @@ func TestReplayAlwaysSavesSearchableTranscript(t *testing.T) {
 	if err := db.SetSetting(database, saveSessionTranscriptKey, "false"); err != nil {
 		t.Fatal(err)
 	}
-	history := db.ConnectionHistory{Label: "replay"}
+	history := db.ConnectionHistory{Label: "replay", ConnectedAt: time.Now()}
 	if err := database.Create(&history).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -62,5 +63,41 @@ func TestReplayAlwaysSavesSearchableTranscript(t *testing.T) {
 	}
 	if history.Transcript == "" || len(history.ReplayData) == 0 {
 		t.Fatalf("transcript=%q replay=%d", history.Transcript, len(history.ReplayData))
+	}
+}
+
+func TestFinalizeSSHSessionPrunesOldHistory(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(&db.Host{}, &db.AppSetting{}, &db.ConnectionHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	stale := db.ConnectionHistory{Label: "stale", ConnectedAt: time.Now().AddDate(0, 0, -120)}
+	if err := database.Create(&stale).Error; err != nil {
+		t.Fatal(err)
+	}
+	history := db.ConnectionHistory{Label: "current", ConnectedAt: time.Now()}
+	if err := database.Create(&history).Error; err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	done <- nil
+	m := sshview.New(&internalssh.InteractiveSession{Stdout: bytes.NewReader([]byte("output")), Done: done}, "current", 0, viewkeys.SSHKeys{})
+	m.SetHistoryID(history.ID)
+	cmd := m.Init()
+	msg := cmd()
+	m.Update(msg)
+	finalizeSSHSession(database, m)
+	var count int64
+	if err := database.Model(&db.ConnectionHistory{}).Where("id = ?", stale.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("stale history not pruned after finalize")
+	}
+	if err := database.First(&history, history.ID).Error; err != nil {
+		t.Fatal(err)
 	}
 }

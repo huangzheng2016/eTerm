@@ -87,6 +87,15 @@ type ConnectionHistory struct {
 	ReplayData     []byte `gorm:"type:blob"`
 	ReplayDuration int64
 	ReplayStopped  bool
+	HasReplay      bool `gorm:"-:migration;->"`
+	HasTranscript  bool `gorm:"-:migration;->"`
+}
+
+func (h ConnectionHistory) NeedsContentLoad() bool {
+	if !h.HasTranscript && !h.HasReplay {
+		return false
+	}
+	return h.Transcript == "" && h.ANSITranscript == "" && len(h.ReplayData) == 0
 }
 
 type Snippet struct {
