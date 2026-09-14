@@ -198,6 +198,7 @@ type streamRelay struct {
 	ring          *outputRing
 	sent          uint64
 	ack           uint64
+	gen           uint64
 	detachedSince time.Time
 	sidV          atomic.Uint32
 	input         chan []byte
@@ -291,6 +292,7 @@ func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK 
 	}
 	s.sent = fromSeq
 	s.ack = fromSeq
+	s.gen++
 	s.detachedSince = time.Time{}
 	sender.drainData(openOK.StreamID)
 	err := sender.send(openOK)
@@ -313,6 +315,7 @@ func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *fra
 	}
 	s.sent = fromSeq
 	s.ack = fromSeq
+	s.gen++
 	s.detachedSince = time.Time{}
 	sender.drainData(streamID)
 	err := sender.send(openOK)
@@ -321,6 +324,14 @@ func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *fra
 		s.notify()
 	}
 	return err
+}
+
+func (s *streamRelay) drainIfGenChanged(gen uint64, sid uint32, sender *frameSender) {
+	s.mu.Lock()
+	if s.gen != gen {
+		sender.drainData(sid)
+	}
+	s.mu.Unlock()
 }
 
 func (s *streamRelay) waitCredit() bool {
@@ -369,17 +380,18 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 		s.mu.Lock()
 		sent, end, inflight := s.sent, s.ring.End(), s.sent-s.ack
 		if sender != nil && sent < end && inflight < outputWindowBytes {
+			sid, gen := s.sidV.Load(), s.gen
 			n := int(end - sent)
 			if n > maxOutputFrameBytes {
 				n = maxOutputFrameBytes
 			}
-			frame, data := relay.DataFrameBuf(s.sidV.Load(), sent, n)
+			frame, data := relay.DataFrameBuf(sid, sent, n)
 			s.ring.ReadInto(sent, data)
 			s.sent += uint64(n)
 			s.mu.Unlock()
 			if err := sender.sendData(frame); err != nil {
 				s.mu.Lock()
-				if s.sent == sent+uint64(n) {
+				if s.gen == gen {
 					s.sent = sent
 				}
 				s.mu.Unlock()
@@ -390,7 +402,9 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 				case <-ctx.Done():
 					return
 				}
+				continue
 			}
+			s.drainIfGenChanged(gen, sid, sender)
 			continue
 		}
 		s.mu.Unlock()

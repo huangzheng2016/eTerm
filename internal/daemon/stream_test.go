@@ -111,3 +111,51 @@ func TestOutputThroughputConstants(t *testing.T) {
 		t.Fatalf("maxOutputFrameBytes = %d exceeds window %d", maxOutputFrameBytes, outputWindowBytes)
 	}
 }
+
+func TestDrainIfGenChangedDropsLateStaleFrame(t *testing.T) {
+	fake := newDaemonFakeSession()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sender := newFrameSender()
+	sr.appendOutput([]byte("AAAABBBB"))
+	_ = sender.sendData(dataFrame(t, 9, 0, "other"))
+
+	gen := sr.gen
+	openOK := relay.Frame{Type: relay.FrameOpenOK, StreamID: 7}
+	if err := sr.attachForOpen(4, sender, openOK); err != nil {
+		t.Fatal(err)
+	}
+	if sr.gen == gen {
+		t.Fatal("attach did not bump gen")
+	}
+	if err := sender.sendData(dataFrame(t, 7, 4, "BBBB")); err != nil {
+		t.Fatal(err)
+	}
+
+	sr.drainIfGenChanged(gen, 7, sender)
+
+	b := <-sender.data
+	if relay.PeekStreamID(b) != 9 {
+		t.Fatalf("surviving frame stream = %d, want 9", relay.PeekStreamID(b))
+	}
+	select {
+	case b := <-sender.data:
+		t.Fatalf("stale frame survived redrain: stream %d", relay.PeekStreamID(b))
+	default:
+	}
+}
+
+func TestDrainIfGenChangedKeepsFrameWhenGenSame(t *testing.T) {
+	fake := newDaemonFakeSession()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sender := newFrameSender()
+	_ = sender.sendData(dataFrame(t, 7, 0, "AAAA"))
+
+	sr.drainIfGenChanged(sr.gen, 7, sender)
+
+	b := <-sender.data
+	if frameData(t, b) != "AAAA" {
+		t.Fatalf("frame data = %q, want %q", frameData(t, b), "AAAA")
+	}
+}
