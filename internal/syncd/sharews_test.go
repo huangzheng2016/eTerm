@@ -603,3 +603,20 @@ func TestShareWSExpiryDisconnects(t *testing.T) {
 		t.Fatalf("got frame %#v, want CLOSE kill (empty payload)", f)
 	}
 }
+
+func TestShareForwardPanicRecovered(t *testing.T) {
+	logs := captureSyncdLog(t)
+	h := NewRelayHub(nil)
+	st, _ := h.shareState("tok")
+	cause := -1
+	dieWith := func(why int) { cause = why }
+
+	h.shareForward(context.Background(), nil, nil, newLaneQueue(), st, st.streamID, time.Now().Add(time.Minute), make(chan struct{}), make(chan struct{}), dieWith)
+
+	if cause != shareExitFatal {
+		t.Fatalf("dieWith cause = %d, want %d", cause, shareExitFatal)
+	}
+	if !strings.Contains(logs.String(), "share forward") || !strings.Contains(logs.String(), "panic") {
+		t.Fatalf("panic not logged: %q", logs.String())
+	}
+}

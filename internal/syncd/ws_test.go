@@ -4,15 +4,43 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
+
+type lockedLogBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedLogBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedLogBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func captureSyncdLog(t *testing.T) *lockedLogBuf {
+	t.Helper()
+	b := &lockedLogBuf{}
+	old := log.Writer()
+	log.SetOutput(b)
+	t.Cleanup(func() { log.SetOutput(old) })
+	return b
+}
 
 func TestWebSocketRelayData(t *testing.T) {
 	engine := testEngine(t)
@@ -487,5 +515,38 @@ func TestDaemonWSDuplicatePeerReplaced(t *testing.T) {
 	}
 	if f := readFrame(t, ctx, client); f.Type != relay.FrameOpenOK || f.StreamID != 42 {
 		t.Fatalf("got frame %#v, want OPEN_OK stream 42", f)
+	}
+}
+
+func TestWriteWSPanicRecovered(t *testing.T) {
+	logs := captureSyncdLog(t)
+	done := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		writeWS(r.Context(), c, nil, make(chan struct{}), done)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writeWS did not return after panic")
+	}
+	if _, _, err := c.Read(ctx); err == nil {
+		t.Fatal("connection still readable after writer panic")
+	}
+	if !strings.Contains(logs.String(), "writeWS panic") {
+		t.Fatalf("panic not logged: %q", logs.String())
 	}
 }

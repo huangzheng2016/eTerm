@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"log"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -284,6 +286,12 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 }
 
 func (h *RelayHub) shareForward(ctx context.Context, c *websocket.Conn, q *laneQueue, daemon *laneQueue, st *shareStreamState, streamID uint32, expiresAt time.Time, replaced <-chan struct{}, dead <-chan struct{}, dieWith func(int)) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("syncd relay share forward stream %d panic: %v\n%s", streamID, r, debug.Stack())
+			dieWith(shareExitFatal)
+		}
+	}()
 	expiry := time.NewTimer(time.Until(expiresAt))
 	defer expiry.Stop()
 	for {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -305,6 +306,12 @@ func shortID(s string) string {
 
 func writeWS(ctx context.Context, c *websocket.Conn, q *laneQueue, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("syncd relay writeWS panic: %v\n%s", r, debug.Stack())
+			c.CloseNow()
+		}
+	}()
 	write := func(f relay.Frame) bool {
 		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := c.Write(wctx, websocket.MessageBinary, relay.Encode(f))

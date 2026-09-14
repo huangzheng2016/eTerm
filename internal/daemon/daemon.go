@@ -52,7 +52,7 @@ const (
 	wsWriteTimeout      = 10 * time.Second
 	openRequestTimeout  = 30 * time.Second
 	sessionStartupGrace = 150 * time.Millisecond
-	maxOutputFrameBytes = 16 * 1024
+	maxOutputFrameBytes = 48 * 1024
 )
 
 var errProtocolVersion = errors.New("relay protocol version mismatch")
@@ -184,7 +184,10 @@ func unlock(database *gorm.DB, password string) (*security.MasterKeyManager, err
 func runLoop(ctx context.Context, rt *runtimeConfig) error {
 	mgr := newSessionManager()
 	defer mgr.closeAll()
-	go mgr.reapLoop(ctx)
+	go func() {
+		defer recoverLog("reap loop")
+		mgr.reapLoop(ctx)
+	}()
 	delay := 2 * time.Second
 	for {
 		start := time.Now()
@@ -281,9 +284,11 @@ func shortID(s string) string {
 }
 
 func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *frameSender, ctx context.Context) {
+	defer recoverLog(fmt.Sprintf("handle frame type=%d stream=%d", f.Type, f.StreamID))
 	switch f.Type {
 	case relay.FrameOpen:
 		go func() {
+			defer recoverLog(fmt.Sprintf("open stream %d", f.StreamID))
 			reqCtx, cancel := context.WithTimeout(ctx, openRequestTimeout)
 			defer cancel()
 			handleOpen(rt, f, mgr, sender, reqCtx, ctx)
