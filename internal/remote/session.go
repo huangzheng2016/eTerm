@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -251,6 +252,7 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 	go func() {
 		defer pw.Close()
 		sawData := false
+		accepted := false
 		for {
 			typ, data, err := conn.Read(sessionCtx)
 			if err != nil {
@@ -272,12 +274,21 @@ func sessionFromConn(ctx context.Context, conn *websocket.Conn, streamID uint32,
 				}
 				next := stdin.nextSeq.Load()
 				if seq < next {
+					log.Printf("eterm remote: dropping duplicate frame stream=%d seq=%d next=%d", streamID, seq, next)
 					continue
 				}
 				if seq > next {
-					done <- fmt.Errorf("relay output gap: got seq %d, want %d", seq, next)
-					return
+					if resumeFromSeq != 0 || accepted {
+						log.Printf("eterm remote: output gap stream=%d seq=%d want=%d", streamID, seq, next)
+						done <- fmt.Errorf("relay output gap: got seq %d, want %d", seq, next)
+						return
+					}
+					log.Printf("eterm remote: rebase stream=%d next=%d to first frame seq=%d", streamID, next, seq)
+					stdin.nextSeq.Store(seq)
+					stdin.lastAck.Store(seq)
+					next = seq
 				}
+				accepted = true
 				if len(payload) > 0 {
 					sawData = true
 				}

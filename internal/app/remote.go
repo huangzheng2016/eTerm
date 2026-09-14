@@ -349,7 +349,7 @@ func remoteTmuxTabTitle(peerName, sessionID string) string {
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
-	if msg.resume && msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
+	if msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
 		if old, ok := a.tabs[msg.replaceTabAt].Model.(*sshview.Model); ok {
 			cmd := old.ResumeSession(msg.is)
 			if !msg.background {
