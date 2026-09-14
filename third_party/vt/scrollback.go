@@ -11,6 +11,7 @@ const DefaultScrollbackSize = 10000
 type Scrollback struct {
 	lines    []uv.Line
 	wrapped  []bool
+	head     int
 	maxLines int
 }
 
@@ -44,12 +45,17 @@ func (s *Scrollback) PushWrapped(line uv.Line, wrapped bool) {
 
 	cloned := slices.Clone(line[:lastNonEmpty+1])
 
-	if len(s.lines) >= s.maxLines {
-		s.lines = slices.Delete(s.lines, 0, 1)
-		s.wrapped = slices.Delete(s.wrapped, 0, 1)
+	if len(s.lines) < s.maxLines {
+		s.lines = append(s.lines, cloned)
+		s.wrapped = append(s.wrapped, wrapped)
+		return
 	}
-	s.lines = append(s.lines, cloned)
-	s.wrapped = append(s.wrapped, wrapped)
+	s.lines[s.head] = cloned
+	s.wrapped[s.head] = wrapped
+	s.head++
+	if s.head == len(s.lines) {
+		s.head = 0
+	}
 }
 
 func (s *Scrollback) PushN(buf *uv.RenderBuffer, y, n int) {
@@ -83,29 +89,41 @@ func (s *Scrollback) SetMaxLines(maxLines int) {
 		return
 	}
 
-	s.maxLines = maxLines
+	if s.head != 0 {
+		s.linearize()
+	}
 	if len(s.lines) > maxLines {
 		s.lines = s.lines[len(s.lines)-maxLines:]
 		s.wrapped = s.wrapped[len(s.wrapped)-maxLines:]
 	}
+	s.maxLines = maxLines
+}
+
+func (s *Scrollback) linearize() {
+	s.lines = slices.Concat(s.lines[s.head:], s.lines[:s.head])
+	s.wrapped = slices.Concat(s.wrapped[s.head:], s.wrapped[:s.head])
+	s.head = 0
 }
 
 func (s *Scrollback) Line(index int) uv.Line {
 	if s == nil || index < 0 || index >= len(s.lines) {
 		return nil
 	}
-	return s.lines[index]
+	return s.lines[(s.head+index)%len(s.lines)]
 }
 
 func (s *Scrollback) Lines() []uv.Line {
 	if s == nil {
 		return nil
 	}
+	if s.head != 0 {
+		s.linearize()
+	}
 	return s.lines
 }
 
 func (s *Scrollback) LineWrapped(index int) bool {
-	return s != nil && index >= 0 && index < len(s.wrapped) && s.wrapped[index]
+	return s != nil && index >= 0 && index < len(s.wrapped) && s.wrapped[(s.head+index)%len(s.wrapped)]
 }
 
 func (s *Scrollback) Clear() {
@@ -114,6 +132,7 @@ func (s *Scrollback) Clear() {
 	}
 	s.lines = s.lines[:0]
 	s.wrapped = s.wrapped[:0]
+	s.head = 0
 }
 
 func (s *Scrollback) CellAt(x, y int) *uv.Cell {
