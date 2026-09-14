@@ -109,6 +109,44 @@ func TestTmuxSessionInfoDaemonJSON(t *testing.T) {
 	}
 }
 
+func TestDataFrameBufMatchesEncode(t *testing.T) {
+	chunk := []byte("hello world")
+	frame, data := DataFrameBuf(42, 1<<40+3, len(chunk))
+	if len(data) != len(chunk) {
+		t.Fatalf("data region len = %d, want %d", len(data), len(chunk))
+	}
+	copy(data, chunk)
+	want := Encode(Frame{Type: FrameData, StreamID: 42, Payload: DataPayload(1<<40+3, chunk)})
+	if !bytes.Equal(frame, want) {
+		t.Fatalf("frame bytes differ:\ngot  %x\nwant %x", frame, want)
+	}
+	if got := PeekStreamID(frame); got != 42 {
+		t.Fatalf("PeekStreamID = %d, want 42", got)
+	}
+	out, err := Decode(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, payload, err := ParseData(out.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Type != FrameData || seq != 1<<40+3 || !bytes.Equal(payload, chunk) {
+		t.Fatalf("round-trip mismatch: type=0x%02x seq=%d payload=%q", out.Type, seq, payload)
+	}
+}
+
+func TestDataFrameBufSingleAllocation(t *testing.T) {
+	chunk := make([]byte, 4096)
+	allocs := testing.AllocsPerRun(100, func() {
+		_, data := DataFrameBuf(1, 2, len(chunk))
+		copy(data, chunk)
+	})
+	if allocs != 1 {
+		t.Fatalf("allocs = %v, want 1", allocs)
+	}
+}
+
 func TestAckPayloadRoundTrip(t *testing.T) {
 	ack, err := ParseAck(AckPayload(262144))
 	if err != nil {

@@ -6,34 +6,47 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
+func dataFrame(t *testing.T, id uint32, seq uint64, data string) []byte {
+	t.Helper()
+	frame, region := relay.DataFrameBuf(id, seq, len(data))
+	copy(region, data)
+	return frame
+}
+
+func frameData(t *testing.T, b []byte) string {
+	t.Helper()
+	_, data, err := relay.ParseData(b[relay.HeaderLen:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func TestDrainDataDropsOnlyTargetStream(t *testing.T) {
 	s := newFrameSender()
-	mk := func(id uint32, data string) relay.Frame {
-		return relay.Frame{Type: relay.FrameData, StreamID: id, Payload: []byte(data)}
-	}
-	_ = s.send(mk(1, "a"))
-	_ = s.send(mk(2, "b"))
-	_ = s.send(mk(1, "c"))
-	_ = s.send(mk(2, "d"))
+	_ = s.sendData(dataFrame(t, 1, 0, "a"))
+	_ = s.sendData(dataFrame(t, 2, 0, "b"))
+	_ = s.sendData(dataFrame(t, 1, 1, "c"))
+	_ = s.sendData(dataFrame(t, 2, 1, "d"))
 
 	s.drainData(1)
 
-	var got []relay.Frame
+	var got [][]byte
 	for {
 		select {
-		case f := <-s.data:
-			got = append(got, f)
+		case b := <-s.data:
+			got = append(got, b)
 		default:
 			if len(got) != 2 {
 				t.Fatalf("queued frames = %d, want 2", len(got))
 			}
-			for _, f := range got {
-				if f.StreamID != 2 {
-					t.Fatalf("frame for stream %d survived drain of stream 1", f.StreamID)
+			for _, b := range got {
+				if relay.PeekStreamID(b) != 2 {
+					t.Fatalf("frame for stream %d survived drain of stream 1", relay.PeekStreamID(b))
 				}
 			}
-			if string(got[0].Payload) != "b" || string(got[1].Payload) != "d" {
-				t.Fatalf("kept payloads = %q,%q", got[0].Payload, got[1].Payload)
+			if frameData(t, got[0]) != "b" || frameData(t, got[1]) != "d" {
+				t.Fatalf("kept payloads = %q,%q", frameData(t, got[0]), frameData(t, got[1]))
 			}
 			return
 		}
@@ -50,8 +63,8 @@ func TestAttachClampedKeepsOtherStreamFrames(t *testing.T) {
 		sr2.shutdown()
 	})
 	sender := newFrameSender()
-	_ = sender.send(relay.Frame{Type: relay.FrameData, StreamID: 1, Payload: relay.DataPayload(0, []byte("drop"))})
-	_ = sender.send(relay.Frame{Type: relay.FrameData, StreamID: 2, Payload: relay.DataPayload(0, []byte("keep"))})
+	_ = sender.sendData(dataFrame(t, 1, 0, "drop"))
+	_ = sender.sendData(dataFrame(t, 2, 0, "keep"))
 
 	openOK := relay.Frame{Type: relay.FrameOpenOK, StreamID: 1}
 	if err := sr1.attachClamped(1, 0, sender, openOK); err != nil {
@@ -61,20 +74,16 @@ func TestAttachClampedKeepsOtherStreamFrames(t *testing.T) {
 		t.Fatalf("sidV = %d, want 1", got)
 	}
 
-	f := <-sender.data
-	if f.StreamID != 2 {
-		t.Fatalf("queued data frame stream = %d, want 2", f.StreamID)
+	b := <-sender.data
+	if relay.PeekStreamID(b) != 2 {
+		t.Fatalf("queued data frame stream = %d, want 2", relay.PeekStreamID(b))
 	}
-	_, data, err := relay.ParseData(f.Payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "keep" {
-		t.Fatalf("queued data = %q, want %q", data, "keep")
+	if frameData(t, b) != "keep" {
+		t.Fatalf("queued data = %q, want %q", frameData(t, b), "keep")
 	}
 	select {
-	case f := <-sender.data:
-		t.Fatalf("unexpected extra data frame: stream %d", f.StreamID)
+	case b := <-sender.data:
+		t.Fatalf("unexpected extra data frame: stream %d", relay.PeekStreamID(b))
 	default:
 	}
 
@@ -85,5 +94,20 @@ func TestAttachClampedKeepsOtherStreamFrames(t *testing.T) {
 		}
 	default:
 		t.Fatal("open ok not queued")
+	}
+}
+
+func TestOutputThroughputConstants(t *testing.T) {
+	if outputWindowBytes != 1024*1024 {
+		t.Fatalf("outputWindowBytes = %d, want 1MiB", outputWindowBytes)
+	}
+	if outputReadBufBytes != 32*1024 {
+		t.Fatalf("outputReadBufBytes = %d, want 32KiB", outputReadBufBytes)
+	}
+	if maxOutputFrameBytes >= relay.MaxWebSocketMessageBytes {
+		t.Fatalf("maxOutputFrameBytes = %d must stay below ws message limit %d", maxOutputFrameBytes, relay.MaxWebSocketMessageBytes)
+	}
+	if maxOutputFrameBytes > outputWindowBytes {
+		t.Fatalf("maxOutputFrameBytes = %d exceeds window %d", maxOutputFrameBytes, outputWindowBytes)
 	}
 }
