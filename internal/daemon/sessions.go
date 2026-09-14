@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"time"
 
@@ -177,6 +178,7 @@ func daemonSessionNew(rt *runtimeConfig, mgr *sessionManager, sender *frameSende
 		return
 	}
 	go sr.pump(streamCtx, streamID, mgr)
+	log.Printf("eterm daemon session new name=%q stream=%d", name, streamID)
 }
 
 func daemonSessionAttach(mgr *sessionManager, sender *frameSender, streamID uint32, name string, resumeFromSeq uint64) {
@@ -204,13 +206,16 @@ func daemonSessionAttach(mgr *sessionManager, sender *frameSender, streamID uint
 	openOK := relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID}
 	if err := sr.attachClamped(streamID, resumeFromSeq, sender, openOK); err != nil {
 		openErr(errors.New(resumeUnavailableErr))
+		return
 	}
+	log.Printf("eterm daemon session attach name=%q stream=%d old_stream=%d takeover=%t", name, streamID, oldStreamID, oldStreamID != 0 && oldStreamID != streamID)
 }
 
 func daemonSessionKill(mgr *sessionManager, sender *frameSender, streamID uint32, name string) {
 	mgr.attachMu.Lock()
 	sr := mgr.removeNamed(name)
 	mgr.attachMu.Unlock()
+	log.Printf("eterm daemon session kill name=%q found=%t", name, sr != nil)
 	if sr != nil {
 		sr.shutdown()
 		_ = sr.is.Close()
@@ -225,6 +230,7 @@ func daemonSessionRename(mgr *sessionManager, sender *frameSender, streamID uint
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: streamID, Payload: []byte("cannot rename session")})
 		return
 	}
+	log.Printf("eterm daemon session rename old=%q new=%q", oldName, newName)
 	if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID}) == nil {
 		_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: streamID})
 	}

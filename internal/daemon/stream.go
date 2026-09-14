@@ -3,6 +3,9 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -112,18 +115,32 @@ func (s *frameSender) send(f relay.Frame) error {
 	}
 }
 
-func (s *frameSender) drainData() {
+func (s *frameSender) drainData(streamID uint32) {
+	var keep []relay.Frame
 	for {
 		select {
-		case <-s.data:
+		case f := <-s.data:
+			if f.StreamID != streamID {
+				keep = append(keep, f)
+			}
 		default:
+			for _, f := range keep {
+				_ = s.send(f)
+			}
 			return
 		}
 	}
 }
 
+func recoverLog(what string) {
+	if r := recover(); r != nil {
+		log.Printf("eterm daemon %s panic: %v\n%s", what, r, debug.Stack())
+	}
+}
+
 func (s *frameSender) run(ctx context.Context, c *websocket.Conn) {
 	defer close(s.done)
+	defer recoverLog("frame sender")
 	for {
 		var f relay.Frame
 		select {
@@ -188,6 +205,7 @@ func (s *streamRelay) queueInput(p []byte) {
 }
 
 func (s *streamRelay) inputPump() {
+	defer func() { recoverLog(fmt.Sprintf("stream %d input pump", s.sidV.Load())) }()
 	for {
 		select {
 		case p := <-s.input:
@@ -244,7 +262,7 @@ func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK 
 	s.sent = fromSeq
 	s.ack = fromSeq
 	s.detachedSince = time.Time{}
-	sender.drainData()
+	sender.drainData(openOK.StreamID)
 	err := sender.send(openOK)
 	s.mu.Unlock()
 	if err == nil {
@@ -266,7 +284,7 @@ func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *fra
 	s.sent = fromSeq
 	s.ack = fromSeq
 	s.detachedSince = time.Time{}
-	sender.drainData()
+	sender.drainData(streamID)
 	err := sender.send(openOK)
 	s.mu.Unlock()
 	if err == nil {
@@ -292,6 +310,7 @@ func (s *streamRelay) waitCredit() bool {
 }
 
 func (s *streamRelay) readPump(readDone chan<- error) {
+	defer func() { recoverLog(fmt.Sprintf("stream %d read pump", s.sidV.Load())) }()
 	buf := make([]byte, outputReadBufBytes)
 	for {
 		if !s.waitCredit() {
@@ -309,6 +328,7 @@ func (s *streamRelay) readPump(readDone chan<- error) {
 }
 
 func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionManager) {
+	defer recoverLog(fmt.Sprintf("stream %d pump", streamID))
 	s.sidV.Store(streamID)
 	readDone := make(chan error, 1)
 	go s.readPump(readDone)
@@ -344,6 +364,7 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 				s.shutdown()
 				_ = s.is.Close()
 				_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: closeID, Payload: closePayload(endErr)})
+				log.Printf("eterm daemon stream %d closed err=%v", closeID, endErr)
 			}
 			return
 		}
@@ -351,9 +372,11 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 		case err := <-readDone:
 			endErr = sessionDoneErr(err, s.is.Done)
 			ended = true
+			log.Printf("eterm daemon stream %d read pump exited err=%v", s.sidV.Load(), err)
 		case err := <-s.is.Done:
 			endErr = err
 			ended = true
+			log.Printf("eterm daemon stream %d session exited err=%v", s.sidV.Load(), err)
 		case <-s.wake:
 		case <-s.stop:
 			return
