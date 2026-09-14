@@ -1,6 +1,7 @@
 package syncd
 
 import (
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -28,14 +29,25 @@ func NewPeerRegistry() *PeerRegistry {
 
 func (r *PeerRegistry) Register(tenant string, p PeerInfo, send *laneQueue) string {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.tenants[tenant] == nil {
 		r.tenants[tenant] = make(map[string]*PeerConn)
 	}
 	if p.LastSeen.IsZero() {
 		p.LastSeen = time.Now()
 	}
+	replaced := r.tenants[tenant][p.ID]
+	if replaced != nil && replaced.Send == send {
+		replaced = nil
+	}
 	r.tenants[tenant][p.ID] = &PeerConn{PeerInfo: p, Send: send}
+	r.mu.Unlock()
+	if replaced != nil {
+		log.Printf("syncd relay peer replaced tenant=%s peer=%s; closing previous connection", shortID(tenant), p.ID)
+		replaced.Send.close()
+		if replaced.Send.closeConn != nil {
+			replaced.Send.closeConn()
+		}
+	}
 	return p.ID
 }
 

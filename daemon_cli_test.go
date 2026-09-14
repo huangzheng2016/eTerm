@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -177,5 +179,98 @@ func TestDaemonStopFailsWhenKillDoesNotHelp(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "still running") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestDaemonLockSecondInstanceFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.lock")
+	lock, err := acquireDaemonLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	if _, err := acquireDaemonLock(path); !errors.Is(err, errDaemonAlreadyRunning) {
+		t.Fatalf("err = %v, want %v", err, errDaemonAlreadyRunning)
+	}
+	pid, held := daemonLockHolder(path)
+	if !held {
+		t.Fatal("lock holder not detected")
+	}
+	if pid != os.Getpid() {
+		t.Fatalf("holder pid = %d, want %d", pid, os.Getpid())
+	}
+}
+
+func TestDaemonLockReleasedOnClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.lock")
+	lock, err := acquireDaemonLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, held := daemonLockHolder(path); held {
+		t.Fatal("lock still held after close")
+	}
+	lock2, err := acquireDaemonLock(path)
+	if err != nil {
+		t.Fatalf("lock not re-acquired after close: %v", err)
+	}
+	lock2.Close()
+}
+
+func TestDaemonStartReportsLockHolder(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "daemon.lock")
+	lock, err := acquireDaemonLock(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	ctl := daemonController{
+		pidPath:  filepath.Join(dir, "daemon.pid"),
+		lockPath: lockPath,
+		isAlive:  func(int) bool { return false },
+	}
+	var out strings.Builder
+	code := ctl.start(&out, daemonOptions{})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	want := "running pid=" + strconv.Itoa(os.Getpid())
+	if strings.TrimSpace(out.String()) != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestDaemonEnableGuardReportsLockHolder(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "daemon.lock")
+	lock, err := acquireDaemonLock(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	err = daemonEnableGuard(lockPath)
+	if err == nil {
+		t.Fatal("expected error when lock is held")
+	}
+	want := "pid=" + strconv.Itoa(os.Getpid())
+	if !strings.Contains(err.Error(), "eterm daemon already running") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %q", err)
+	}
+	if !strings.Contains(err.Error(), "daemon.log") {
+		t.Fatalf("err missing log path clue: %q", err)
+	}
+}
+
+func TestDaemonEnableGuardPassesWhenLockFree(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "daemon.lock")
+	if err := daemonEnableGuard(lockPath); err != nil {
+		t.Fatal(err)
 	}
 }

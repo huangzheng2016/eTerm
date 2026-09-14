@@ -3,12 +3,22 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
 
 	"golang.org/x/sys/windows"
 )
+
+func lockDaemonFile(f *os.File) error {
+	var ol windows.Overlapped
+	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &ol)
+	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+		return errDaemonAlreadyRunning
+	}
+	return err
+}
 
 func startDetachedDaemon(exe string, args []string, env []string, logFile *os.File) (int, error) {
 	cmd := exec.Command(exe, args...)
