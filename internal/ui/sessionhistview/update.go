@@ -29,7 +29,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		row := m.rows[m.sel]
-		if !row.NeedsContentLoad() {
+		if !rowPendingContent(row) {
 			return m, nil
 		}
 		return m, func() tea.Msg {

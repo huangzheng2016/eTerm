@@ -40,11 +40,15 @@ type contentLoadedMsg struct {
 	err        error
 }
 
+func rowPendingContent(row db.ConnectionHistory) bool {
+	return row.HasTranscript && row.Transcript == "" && row.ANSITranscript == ""
+}
+
 func (m *Model) scheduleContentLoad() tea.Cmd {
 	if m.sel < 0 || m.sel >= len(m.rows) {
 		return nil
 	}
-	if !m.rows[m.sel].NeedsContentLoad() {
+	if !rowPendingContent(m.rows[m.sel]) {
 		return nil
 	}
 	m.contentSeq++
