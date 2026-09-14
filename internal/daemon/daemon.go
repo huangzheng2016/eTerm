@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -65,9 +66,22 @@ var (
 	localNewSession   = localterm.NewSession
 )
 
-func hasTmuxBinary() bool {
-	_, err := exec.LookPath("tmux")
-	return err == nil
+var tmuxProbeDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"}
+
+func resolveTmuxBinary() string {
+	if path, err := exec.LookPath("tmux"); err == nil {
+		return path
+	}
+	for _, dir := range tmuxProbeDirs {
+		path := filepath.Join(dir, "tmux")
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			continue
+		}
+		os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		return path
+	}
+	return ""
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -118,6 +132,12 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 		peerID = uuid.New().String()
 		_ = db.SetSetting(database, "remote_peer_id", peerID)
 	}
+	tmuxPath := resolveTmuxBinary()
+	if tmuxPath != "" {
+		log.Printf("eterm daemon tmux found at %s", tmuxPath)
+	} else {
+		log.Printf("eterm daemon tmux not found; using daemon built-in shell sessions")
+	}
 	return &runtimeConfig{
 		db:       database,
 		mk:       mk,
@@ -125,7 +145,7 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 		name:     name,
 		peerID:   peerID,
 		tenantID: sc.TenantID(),
-		hasTmux:  hasTmuxBinary(),
+		hasTmux:  tmuxPath != "",
 	}, nil
 }
 
@@ -287,6 +307,7 @@ func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *
 			}
 		}
 	case relay.FrameClose:
+		log.Printf("eterm daemon close stream=%d reason=%q", f.StreamID, string(f.Payload))
 		if string(f.Payload) == relay.CloseClientDisconnected {
 			if sr := mgr.get(f.StreamID); sr != nil {
 				sr.markDetached()
@@ -314,7 +335,9 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
 		return
 	}
+	log.Printf("eterm daemon open stream=%d target=%s session=%q resume=%d", f.StreamID, req.Target, req.SessionID, req.ResumeFromSeq)
 	if sr := mgr.get(f.StreamID); sr != nil {
+		log.Printf("eterm daemon attach takeover stream=%d resume=%d", f.StreamID, req.ResumeFromSeq)
 		openOK := relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}
 		if err := sr.attachForOpen(req.ResumeFromSeq, sender, openOK); err != nil {
 			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(resumeUnavailableErr)})
