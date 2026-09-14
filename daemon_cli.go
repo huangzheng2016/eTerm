@@ -26,10 +26,74 @@ type daemonOptions struct {
 
 type daemonController struct {
 	pidPath   string
+	lockPath  string
 	logPath   string
 	isAlive   func(int) bool
 	terminate func(int) error
 	kill      func(int) error
+}
+
+var errDaemonAlreadyRunning = errors.New("daemon already running")
+
+const exitCodeDaemonAlreadyRunning = 3
+
+func daemonLockPath() string {
+	return filepath.Join(config.ConfigDir(), "daemon.lock")
+}
+
+func acquireDaemonLock(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockDaemonFile(f); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Truncate(0); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func readDaemonLockPid(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
+}
+
+func daemonLockHolder(path string) (int, bool) {
+	f, err := acquireDaemonLock(path)
+	if err == nil {
+		f.Close()
+		return 0, false
+	}
+	if !errors.Is(err, errDaemonAlreadyRunning) {
+		return 0, false
+	}
+	return readDaemonLockPid(path), true
+}
+
+func daemonEnableGuard(lockPath string) error {
+	pid, held := daemonLockHolder(lockPath)
+	if !held {
+		return nil
+	}
+	if pid > 0 {
+		return fmt.Errorf("eterm daemon already running pid=%d (log %s): stop it first ('eterm daemon stop' or 'eterm daemon disable')", pid, daemonServiceLogPath())
+	}
+	return fmt.Errorf("eterm daemon already running (log %s): stop it first ('eterm daemon stop' or 'eterm daemon disable')", daemonServiceLogPath())
 }
 
 func runDaemon(args []string) {
@@ -39,6 +103,25 @@ func runDaemon(args []string) {
 		os.Exit(2)
 	}
 	if cmd == "run" {
+		if err := config.EnsureConfigDir(); err != nil {
+			fmt.Fprintf(os.Stderr, "eterm daemon: %v\n", err)
+			os.Exit(1)
+		}
+		lockPath := daemonLockPath()
+		lock, err := acquireDaemonLock(lockPath)
+		if errors.Is(err, errDaemonAlreadyRunning) {
+			if pid := readDaemonLockPid(lockPath); pid > 0 {
+				fmt.Fprintf(os.Stderr, "eterm daemon already running pid=%d (log %s)\n", pid, daemonServiceLogPath())
+			} else {
+				fmt.Fprintf(os.Stderr, "eterm daemon already running (log %s)\n", daemonServiceLogPath())
+			}
+			os.Exit(exitCodeDaemonAlreadyRunning)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "eterm daemon: %v\n", err)
+			os.Exit(1)
+		}
+		defer lock.Close()
 		if _, err := debugpprof.Start("eterm-daemon", debugpprof.ResolveAddr(opts.PProfAddr, "ETERM_DAEMON_PPROF_ADDR")); err != nil {
 			fmt.Fprintf(os.Stderr, "eterm daemon: pprof: %v\n", err)
 			os.Exit(1)
@@ -70,6 +153,10 @@ func runDaemon(args []string) {
 		fmt.Fprintf(os.Stdout, "service: %s\n", detail)
 		os.Exit(code)
 	case "enable":
+		if err := daemonEnableGuard(daemonLockPath()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		if err := daemonServiceEnable(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "eterm daemon enable: %v\n", err)
 			os.Exit(1)
@@ -121,6 +208,7 @@ func newDaemonController() (daemonController, error) {
 	dir := config.ConfigDir()
 	return daemonController{
 		pidPath:   filepath.Join(dir, "daemon.pid"),
+		lockPath:  daemonLockPath(),
 		logPath:   filepath.Join(dir, "daemon.log"),
 		isAlive:   isProcessAlive,
 		terminate: terminateProcess,
@@ -135,6 +223,16 @@ func (c daemonController) start(out io.Writer, opts daemonOptions) int {
 			return 0
 		}
 		_ = os.Remove(c.pidPath)
+	}
+	if c.lockPath != "" {
+		if pid, held := daemonLockHolder(c.lockPath); held {
+			if pid > 0 {
+				fmt.Fprintf(out, "running pid=%d\n", pid)
+			} else {
+				fmt.Fprintln(out, "running")
+			}
+			return 0
+		}
 	}
 
 	logFile, err := os.OpenFile(c.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)

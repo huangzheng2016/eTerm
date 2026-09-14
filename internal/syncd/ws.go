@@ -14,9 +14,11 @@ import (
 )
 
 type laneQueue struct {
-	ctrl chan relay.Frame
-	bulk chan relay.Frame
-	done chan struct{}
+	ctrl      chan relay.Frame
+	bulk      chan relay.Frame
+	done      chan struct{}
+	closeOnce sync.Once
+	closeConn func()
 }
 
 const relaySendQueueSize = 1024
@@ -29,7 +31,7 @@ func newLaneQueue() *laneQueue {
 	}
 }
 
-func (q *laneQueue) close() { close(q.done) }
+func (q *laneQueue) close() { q.closeOnce.Do(func() { close(q.done) }) }
 
 func (q *laneQueue) send(ctx context.Context, f relay.Frame, bulk bool) bool {
 	ch := q.ctrl
@@ -146,6 +148,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 	defer c.CloseNow()
 
 	send := newLaneQueue()
+	send.closeConn = func() { c.CloseNow() }
 	ctx := r.Context()
 	done := make(chan struct{})
 	stop := make(chan struct{})

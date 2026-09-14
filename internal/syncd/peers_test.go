@@ -40,6 +40,8 @@ func TestPeerRegistryReplacesDuplicatePeerID(t *testing.T) {
 	r := NewPeerRegistry()
 	firstSend := newLaneQueue()
 	secondSend := newLaneQueue()
+	connClosed := false
+	firstSend.closeConn = func() { connClosed = true }
 	first := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, firstSend)
 	second := r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, secondSend)
 
@@ -57,8 +59,39 @@ func TestPeerRegistryReplacesDuplicatePeerID(t *testing.T) {
 	if peer.Send != secondSend {
 		t.Fatal("peer did not point to latest connection")
 	}
+	if !connClosed {
+		t.Fatal("previous connection was not closed")
+	}
+	select {
+	case <-firstSend.done:
+	default:
+		t.Fatal("replaced queue was not closed")
+	}
+	select {
+	case <-secondSend.done:
+		t.Fatal("replacement queue was closed")
+	default:
+	}
 	r.UnregisterConn("tenant-a", "peer", firstSend)
 	if peer, ok := r.Get("tenant-a", "peer"); !ok || peer.Send != secondSend {
 		t.Fatal("old connection unregister removed latest peer")
+	}
+}
+
+func TestPeerRegistrySameConnReRegisterKeepsConn(t *testing.T) {
+	r := NewPeerRegistry()
+	send := newLaneQueue()
+	send.closeConn = func() { t.Error("closeConn called for same connection re-register") }
+	r.Register("tenant-a", PeerInfo{ID: "peer", Name: "alpha"}, send)
+	r.Register("tenant-a", PeerInfo{ID: "peer", Name: "renamed"}, send)
+
+	select {
+	case <-send.done:
+		t.Fatal("queue closed on same connection re-register")
+	default:
+	}
+	peer, ok := r.Get("tenant-a", "peer")
+	if !ok || peer.Name != "renamed" {
+		t.Fatal("re-register did not update peer info")
 	}
 }

@@ -3,10 +3,21 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
+
+func lockDaemonFile(f *os.File) error {
+	err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	if errors.Is(err, unix.EWOULDBLOCK) {
+		return errDaemonAlreadyRunning
+	}
+	return err
+}
 
 func startDetachedDaemon(exe string, args []string, env []string, logFile *os.File) (int, error) {
 	cmd := exec.Command(exe, args...)

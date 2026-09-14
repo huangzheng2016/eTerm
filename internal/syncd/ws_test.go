@@ -452,3 +452,40 @@ func TestDaemonWSForeignStreamFrameDropped(t *testing.T) {
 		t.Fatalf("got frame %#v, want owner DATA legit (injected must be dropped)", f)
 	}
 }
+
+func TestDaemonWSDuplicatePeerReplaced(t *testing.T) {
+	engine := testEngine(t)
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+
+	daemon1 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon1, "peer-a")
+	waitPeer(t, server.URL)
+
+	daemon2 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon2, "peer-a")
+
+	if _, _, err := daemon1.Read(ctx); err == nil {
+		t.Fatal("replaced daemon connection still readable")
+	}
+
+	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 42, Payload: openPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon2); f.Type != relay.FrameOpen || f.StreamID != 42 {
+		t.Fatalf("got frame %#v, want OPEN stream 42 on replacement connection", f)
+	}
+	if err := daemon2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: 42})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, client); f.Type != relay.FrameOpenOK || f.StreamID != 42 {
+		t.Fatalf("got frame %#v, want OPEN_OK stream 42", f)
+	}
+}
