@@ -68,6 +68,26 @@ func (a App) refocusSessionOnTabSwitch(prev *sshview.Model) {
 	}
 }
 
+func (a App) armSyncTick() (App, tea.Cmd) {
+	if a.syncTickPending {
+		return a, nil
+	}
+	cmd := syncTickCmd(a.db)
+	if cmd == nil {
+		return a, nil
+	}
+	a.syncTickPending = true
+	return a, cmd
+}
+
+func (a App) armAutoLock() (App, tea.Cmd) {
+	if a.autoLockOn {
+		return a, nil
+	}
+	a.autoLockOn = true
+	return a, autoLockTick()
+}
+
 func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -1005,7 +1025,10 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.activeTab = 0
 		a.syncTabBar()
 		a.scheduleTmuxRestoreAfterUnlock()
-		unlockCmds := []tea.Cmd{autoLockTick()}
+		var unlockCmds []tea.Cmd
+		var autoLockCmd tea.Cmd
+		a, autoLockCmd = a.armAutoLock()
+		unlockCmds = append(unlockCmds, autoLockCmd)
 		if a.width > 0 && a.height > 0 {
 			unlockCmds = append(unlockCmds, tea.Sequence(reflowWindow(a), homeModel.Init()))
 		} else {
@@ -1037,7 +1060,9 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return types.UpdateAvailableMsg{Version: tag, URL: url}
 			})
 		}
-		unlockCmds = append(unlockCmds, syncTickCmd(a.db))
+		var syncArm tea.Cmd
+		a, syncArm = a.armSyncTick()
+		unlockCmds = append(unlockCmds, syncArm)
 		var aiCmd tea.Cmd
 		a, aiCmd = a.ensureAI()
 		unlockCmds = append(unlockCmds, aiCmd)
@@ -1303,10 +1328,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.SyncResultMsg:
 		a.syncing = false
+		var syncArm tea.Cmd
+		a, syncArm = a.armSyncTick()
 		if msg.Err != nil {
 			var tc tea.Cmd
 			a.toast, tc = a.toast.Show(fmt.Sprintf("Sync error: %v", msg.Err), components.ToastError, 5*time.Second)
-			return a, tea.Batch(tc, syncTickCmd(a.db))
+			return a, tea.Batch(tc, syncArm)
 		}
 		var tc tea.Cmd
 		tmsg := fmt.Sprintf("Sync: %d pulled, %d pushed", msg.Pulled, msg.Pushed)
@@ -1318,7 +1345,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tt = components.ToastWarning
 		}
 		a.toast, tc = a.toast.Show(tmsg, tt, 3*time.Second)
-		return a, tea.Batch(tc, syncTickCmd(a.db), func() tea.Msg { return types.RefreshListMsg{} })
+		return a, tea.Batch(tc, syncArm, func() tea.Msg { return types.RefreshListMsg{} })
 
 	case types.SyncTestResultMsg:
 		for _, tab := range a.tabs {
@@ -1344,12 +1371,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case types.SyncTickMsg:
+		a.syncTickPending = false
 		if a.syncing {
 			return a, nil
 		}
 		cmd, inFlight := a.prepareSync(false)
 		if cmd == nil {
-			return a, nil
+			return a.armSyncTick()
 		}
 		a.syncing = inFlight
 		return a, cmd
@@ -1503,11 +1531,17 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.SuccessMsg:
 		var tc tea.Cmd
 		a.toast, tc = a.toast.Show(msg.Message, components.ToastSuccess, 3*time.Second)
+		if msg.Message == "Sync settings saved" {
+			var syncArm tea.Cmd
+			a, syncArm = a.armSyncTick()
+			tc = tea.Batch(tc, syncArm)
+		}
 		return a, tea.Batch(tc, reflowWindow(a))
 
 	case types.AutoLockTickMsg:
+		a.autoLockOn = false
 		if a.noPasswordMode || a.viewState != MainView {
-			return a, autoLockTick()
+			return a, nil
 		}
 		if a.masterKey.CheckTimeout() {
 			a.viewState = LoginView
@@ -1516,6 +1550,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.toast, tc = a.toast.Show("Session locked (timeout)", components.ToastWarning, 3*time.Second)
 			return a, tea.Batch(tc, func() tea.Msg { return types.MasterKeyLockedMsg{} })
 		}
+		a.autoLockOn = true
 		return a, autoLockTick()
 
 	case types.HostDeleteRequestMsg:

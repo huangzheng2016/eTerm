@@ -36,7 +36,6 @@ type remoteTerminalOpenedMsg struct {
 	replaceTabAt int
 	reconnect    *types.RemoteReconnect
 	background   bool
-	resume       bool
 }
 
 type remoteTmuxRenameAppliedMsg struct {
