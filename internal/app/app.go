@@ -42,6 +42,7 @@ const (
 	BatchResultTab    TabType = "batch-result"
 	SettingsTab       TabType = "settings"
 	SyncTab           TabType = "sync"
+	VoiceTab          TabType = "voice"
 	SessionHistoryTab TabType = "session-hist"
 	SessionListTab    TabType = "sessions"
 	SessionReplayTab  TabType = "session-replay"
@@ -139,7 +140,6 @@ type App struct {
 	voiceProgressCh    chan float64
 	voiceProgressArmed bool
 	voiceMake          func(voiceSettings, func(float64)) (voice.Engine, error)
-	voiceSettingsView  *voiceSettingsModel
 	voiceTest          bool
 	voiceTestSeq       int
 	voiceSwallowFinal  bool

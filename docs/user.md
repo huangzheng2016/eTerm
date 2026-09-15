@@ -39,18 +39,16 @@ Provider：首次启动自动导入 `~/.kimi-code/config.toml` 中 api_key 类�
 
 `C-r` 切换录音（终端无法感知按键抬起，因此是开关而非按住说话）。识别文本送入当前终端（等同粘贴）或 AI 面板输入框；句尾动作为 enter 时识别完一句直接提交。
 
-helper 或模型未就绪时按 `C-r` 会打开设置面板引导下载。设置面板也可从命令面板或 `Esc` 菜单（`v`）进入：
+helper 或模型未就绪时按 `C-r` 会打开语音设置标签页并提示缺什么。设置标签页也可从命令面板或 `Esc` 菜单（`v`）进入。它与 Settings 同为全屏标签页：`↑↓` 移动光标，`←→` 调整数值/循环选项，`enter` 选择或编辑，`Esc` 关闭。所有改动先暂存（底部显示 `* unsaved changes`），`C-s` 保存后才生效，`C-r` 放弃暂存改动、恢复已保存的值。文本类参数（API key、自定义模型路径）回车后在顶部编辑行输入（enter 确认 / esc 取消，密钥密文回显，显示为 `(set)`/`(not set)`）。
 
-- helper：一键下载 CI 构建的 voicehelper（release 产物 `voicehelper-<os>-<arch>.tar.gz`，darwin-amd64 / darwin-arm64 / linux-amd64 / linux-arm64，约 45 MB，含 sherpa-onnx 动态库）
-- 模型：SenseVoice 2024-07-17（约 1 GB，默认；同包含 fp32/int8 两套权重）/ Paraformer zh-small int8（约 74 MB）；模型含两套权重时主视图显示 Precision 开关（自定义目录需同时有 model.onnx 与 model.int8.onnx）
-- Engine：enter 进入子菜单选择，顺序为 local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，只需一个 API key，加密存储；模型版本用左右键或回车在四个 resource id 间循环切换，默认 volc.seedasr.sauc.duration；旧版 app_key/access_key 双 key 配置已废弃，迁移时自动丢弃，需在设置里填 API key）/ 其他云端引擎
-- speech sensitivity (0-1)：VAD 触发灵敏度
-- end-of-sentence silence (ms)：句尾静音判停时长。同时作为火山引擎的 end_window_size（服务端判停窗口，clamp 300-5000）传入
-- Sentence end：句尾动作 enter / space
-- Extra features >：额外功能子菜单（仅火山引擎显示）
+按分类分节，超出屏幕可滚动：
+
+- Engine：引擎列表（local 离线 / volcano 火山云端 / 其他云端引擎，`[active]` 标记当前引擎，enter 切换），以及当前引擎的参数。火山引擎只需一个 API key（加密存储）；模型版本用左右键或回车在四个 resource id 间循环切换，默认 volc.seedasr.sauc.duration；旧版 app_key/access_key 双 key 配置已废弃，迁移时自动丢弃，需在设置里填 API key
+- Models（仅本地引擎）：helper 一键下载/更新（CI 构建的 voicehelper，release 产物 `voicehelper-<os>-<arch>.tar.gz`，darwin-amd64 / darwin-arm64 / linux-amd64 / linux-arm64，约 45 MB，含 sherpa-onnx 动态库）；模型 SenseVoice 2024-07-17（约 1 GB，默认；同包含 fp32/int8 两套权重）/ Paraformer zh-small int8（约 74 MB），enter 下载或设为当前（`[active]` 标记）；自定义模型目录需同时有 tokens.txt 与 model.onnx 或 model.int8.onnx，两套权重齐全时显示 Precision 开关
+- Input：Microphone test（录音验证当前配置）、speech sensitivity (0-1)（VAD 触发灵敏度）、end-of-sentence silence（句尾静音判停时长 ms，同时作为火山引擎的 end_window_size 传入，clamp 300-5000）、Sentence end（句尾动作 enter / space）
+- Extra features（仅火山引擎显示）：
   - Context awareness：上下文感知开关（默认关，仅火山引擎生效）。开启后开始录音会把上下文作为 `corpus.context`（dialog_ctx，800 token 上限）传给火山引擎提高识别率：当前是 AI 面板时取最近 20 轮对话（user/assistant 交替）；当前是终端标签页时取屏幕尾部最近 20 行，先清洗（去表格线/边框等结构符号、压缩空白、丢弃无字母数字或汉字的行、相邻重复行去重）。上下文在每一句话（utterance）边界自动刷新，计算失败时复用上一轮成功的上下文
   - Semantic smoothing (DDC)：语义顺滑开关（默认开，仅火山引擎生效），对应火山 enable_ddc
-- 测试录音：验证当前配置
 
 注：火山引擎的 vad_segment_duration 不传——官方说明当 end_window_size 已配置时 vad_segment_duration 不生效，保持缺省即可。
 

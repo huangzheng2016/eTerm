@@ -144,9 +144,6 @@ func (a App) View() tea.View {
 		} else if a.escMenu != nil {
 			overlay := a.escMenu.View()
 			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
-		} else if a.voiceSettingsView != nil {
-			overlay := a.voiceSettingsView.View()
-			main = lipgloss.Place(layoutW, a.height, lipgloss.Center, lipgloss.Center, overlay)
 		} else if a.helpOverlay {
 			layoutH := a.height
 			if layoutH <= 0 {
