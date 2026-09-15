@@ -29,8 +29,6 @@ var VolcanoResourceIDs = []string{
 
 type VolcanoConfig struct {
 	APIKey        string
-	AppKey        string
-	AccessKey     string
 	ResourceID    string
 	URL           string
 	Language      string
@@ -90,19 +88,14 @@ func (e *VolcanoEngine) Start(ctx context.Context) error {
 	if e.started {
 		return nil
 	}
-	if e.cfg.APIKey == "" && (e.cfg.AppKey == "" || e.cfg.AccessKey == "") {
-		return fmt.Errorf("volcano: APIKey or AppKey+AccessKey required")
+	if e.cfg.APIKey == "" {
+		return fmt.Errorf("volcano: APIKey required")
 	}
 
 	header := http.Header{}
 	header.Set("X-Api-Resource-Id", e.resourceID())
 	header.Set("X-Api-Connect-Id", fmt.Sprintf("eterm-%d", time.Now().UnixMilli()))
-	if e.cfg.APIKey != "" {
-		header.Set("X-Api-Key", e.cfg.APIKey)
-	} else {
-		header.Set("X-Api-App-Key", e.cfg.AppKey)
-		header.Set("X-Api-Access-Key", e.cfg.AccessKey)
-	}
+	header.Set("X-Api-Key", e.cfg.APIKey)
 
 	conn, resp, err := websocket.Dial(ctx, e.url(), &websocket.DialOptions{HTTPHeader: header})
 	if err != nil {

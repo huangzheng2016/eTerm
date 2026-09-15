@@ -43,6 +43,13 @@ const (
 	voiceViewExtra
 )
 
+const (
+	voicePanelWidth = 64
+	voiceLabelWidth = 24
+	voiceInnerWidth = voicePanelWidth - 8
+	voiceValueWidth = voiceInnerWidth - voiceLabelWidth - 3
+)
+
 const voiceHelperTarget = "helper"
 
 type voiceRow struct {
@@ -136,7 +143,7 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 		return rows
 	}
 	if m.view == voiceViewExtra {
-		return []voiceRow{{kind: vrowContext}, {kind: vrowDDC}}
+		return m.extraRows()
 	}
 	rows := []voiceRow{{kind: vrowEngine}}
 	if m.cfg.Engine == voiceEngineLocal {
@@ -150,8 +157,10 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 		voiceRow{kind: vrowThreshold},
 		voiceRow{kind: vrowSilence},
 		voiceRow{kind: vrowSentenceEnd},
-		voiceRow{kind: vrowExtra},
 	)
+	if len(m.extraRows()) > 0 {
+		rows = append(rows, voiceRow{kind: vrowExtra})
+	}
 	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
 		for _, p := range d.Params {
 			rows = append(rows, voiceRow{kind: vrowParam, param: p})
@@ -168,6 +177,13 @@ func (m *voiceSettingsModel) precisionAvailable() bool {
 		return voice.HasBothPrecisions(m.cfg.CustomModelDir)
 	}
 	return voice.ModelByID(m.cfg.ModelID).Kind == voice.ModelKindSenseVoice
+}
+
+func (m *voiceSettingsModel) extraRows() []voiceRow {
+	if m.cfg.Engine != voiceEngineVolcano {
+		return nil
+	}
+	return []voiceRow{{kind: vrowContext}, {kind: vrowDDC}}
 }
 
 func enginePickerDescriptors() []voice.EngineDescriptor {
@@ -511,15 +527,24 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 		case vrowModel:
 			return false, m.modelAction(rows[m.cursor].modelIdx)
 		case vrowParam:
+			if len(rows[m.cursor].param.Options) > 0 {
+				return false, m.adjust(1)
+			}
 			m.edit = m.cursor
+			m.input.EchoMode = textinput.EchoNormal
+			if rows[m.cursor].param.Secret {
+				m.input.EchoMode = textinput.EchoPassword
+				m.input.EchoCharacter = '*'
+			}
+			m.input.SetWidth(voiceValueWidth - lipgloss.Width(m.input.Prompt))
 			m.input.SetValue(m.cfg.engineParams(m.cfg.Engine)[rows[m.cursor].param.Key])
-			m.input.SetWidth(40)
 			return false, m.input.Focus()
 		case vrowCustomPath:
 			m.edit = m.cursor
 			m.customErr = ""
+			m.input.EchoMode = textinput.EchoNormal
+			m.input.SetWidth(voiceValueWidth - lipgloss.Width(m.input.Prompt))
 			m.input.SetValue(m.cfg.CustomModelDir)
-			m.input.SetWidth(40)
 			return false, m.input.Focus()
 		}
 		return false, m.adjust(1)
@@ -605,17 +630,17 @@ func (m *voiceSettingsModel) helperValue() string {
 	case m.dlErrTarget == voiceHelperTarget && m.dlErr != "":
 		return "failed: " + m.dlErr
 	case !m.helperOK:
-		return "not installed - enter to download"
+		return "not installed"
 	case m.checkingUpdate:
-		return "installed (" + m.helperVersionDisplay() + ") - checking for updates"
+		return "checking for updates"
 	case m.updateErr != "":
-		return "installed (" + m.helperVersionDisplay() + ") - update check failed: " + m.updateErr
+		return "update check failed: " + m.updateErr
 	case m.updateAvailable():
-		return "update available (" + m.helperVersionDisplay() + " -> " + m.updateTag + ") - enter to update"
+		return "update " + m.helperVersionDisplay() + " -> " + m.updateTag
 	case m.updateChecked:
-		return "installed (" + m.helperVersionDisplay() + ") - up to date"
+		return "up to date (" + m.helperVersionDisplay() + ")"
 	}
-	return "installed (" + m.helperVersionDisplay() + ") - enter to check for updates"
+	return "installed (" + m.helperVersionDisplay() + ")"
 }
 
 func (m *voiceSettingsModel) modelValue(i int) string {
@@ -666,13 +691,13 @@ func (m *voiceSettingsModel) testValue() string {
 		if m.testText != "" {
 			return "recording... " + shorten(m.testText)
 		}
-		return "recording... speak now (enter stops)"
+		return "recording... speak now"
 	case m.testErr != "":
 		return "failed: " + shorten(m.testErr)
 	case m.testText != "":
 		return "heard: " + shorten(m.testText)
 	case m.cfg.Verified:
-		return "verified - enter to test again"
+		return "verified - enter to run again"
 	}
 	return "enter to record a sample"
 }
@@ -769,6 +794,20 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 	return
 }
 
+func truncateVoiceValue(s string, max int) string {
+	if max <= 0 || lipgloss.Width(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	for len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+		if candidate := string(runes) + "..."; lipgloss.Width(candidate) <= max {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func (m *voiceSettingsModel) View() string {
 	rows := m.rows()
 	if m.cursor >= len(rows) {
@@ -779,22 +818,22 @@ func (m *voiceSettingsModel) View() string {
 		threshold = "default"
 	}
 	title := "Voice Input"
-	hint := "up/down move · left/right change · enter select/edit · esc close"
+	hint := "↑↓ navigate · ←→ change · enter select/edit · esc close"
 	switch m.view {
 	case voiceViewModels:
 		title = "Voice Input - Model"
-		hint = "up/down move · left/right change · enter select/download · esc back"
+		hint = "↑↓ navigate · enter select · esc back"
 	case voiceViewEngines:
 		title = "Voice Input - Engine"
-		hint = "up/down move · enter select · esc back"
+		hint = "↑↓ navigate · enter select · esc back"
 	case voiceViewExtra:
 		title = "Voice Input - Extra features"
-		hint = "up/down move · left/right change · esc back"
+		hint = "↑↓ navigate · enter select · esc back"
 	}
 	var lines []string
 	lines = append(lines, ui.TitleStyle.Render(title), "")
 	if notice := m.noticeText(); notice != "" {
-		lines = append(lines, ui.DimStyle.Render(notice), "")
+		lines = append(lines, ui.DimStyle.Render(truncateVoiceValue(notice, voiceInnerWidth)), "")
 	}
 	for i, r := range rows {
 		cursor := "  "
@@ -804,19 +843,23 @@ func (m *voiceSettingsModel) View() string {
 			style = ui.SelectedStyle
 		}
 		label, value := m.rowText(r, threshold)
+		label = truncateVoiceValue(label, voiceLabelWidth)
 		if m.edit == i {
 			value = m.input.View()
+		} else {
+			value = truncateVoiceValue(value, voiceValueWidth)
 		}
-		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-28s", label)), ui.DimStyle.Render(value)))
+		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-24s", label)), ui.DimStyle.Render(value)))
 	}
 	lines = append(lines, "")
 	if m.view == voiceViewMain {
-		lines = append(lines, ui.DimStyle.Render(m.statusLine()))
+		lines = append(lines, ui.DimStyle.Render(truncateVoiceValue(m.statusLine(), voiceInnerWidth)))
 	}
 	lines = append(lines, ui.DimStyle.Render(hint))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7D56F4")).
 		Padding(1, 3).
+		Width(voicePanelWidth).
 		Render(strings.Join(lines, "\n"))
 }

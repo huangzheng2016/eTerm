@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
@@ -449,8 +450,14 @@ func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
 
 	cfg := loadVoiceSettings(database, mk)
 	params := cfg.engineParams(voiceEngineVolcano)
-	if params["api_key"] != "a" || params["app_key"] != "b" || params["access_key"] != "c" {
+	if params["api_key"] != "a" {
 		t.Fatalf("migrated params = %v", params)
+	}
+	if _, ok := params["app_key"]; ok {
+		t.Fatalf("deprecated app_key migrated: %v", params)
+	}
+	if _, ok := params["access_key"]; ok {
+		t.Fatalf("deprecated access_key migrated: %v", params)
 	}
 	if _, err := db.GetSetting(database, voiceVolcanoSettingKey); err == nil {
 		t.Fatal("legacy key not deleted")
@@ -528,6 +535,9 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 		t.Fatal("enter did not start editing")
 	}
 	m.input.SetValue("secret")
+	if view := m.View(); strings.Contains(view, "secret") || !strings.Contains(view, "******") {
+		t.Fatalf("secret echoed while editing:\n%s", view)
+	}
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	msg, ok = cmd().(voiceSettingsChangedMsg)
 	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["api_key"] != "secret" {
@@ -595,6 +605,16 @@ func TestVoiceSettingsParamOptionsCycle(t *testing.T) {
 	if view := m.View(); !strings.Contains(view, voice.VolcanoResourceIDs[3]) {
 		t.Fatalf("current value not shown:\n%s", view)
 	}
+
+	m.cfg.setEngineParam(voiceEngineVolcano, "resource_id", voice.ResourceIDSeedASR)
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	msg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["resource_id"] != voice.VolcanoResourceIDs[1] {
+		t.Fatalf("enter cycle msg = %#v", msg)
+	}
+	if m.edit >= 0 {
+		t.Fatal("enter on an options param started editing")
+	}
 }
 
 func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
@@ -606,13 +626,22 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	if findVoiceRow(m, vrowParam) >= 0 {
 		t.Fatal("local shows engine param rows")
 	}
+	if findVoiceRow(m, vrowExtra) >= 0 {
+		t.Fatal("local shows the extra features row")
+	}
 	if view := m.View(); !strings.Contains(view, "Voice Helper") || !strings.Contains(view, "Model >") {
 		t.Fatalf("local rows not rendered:\n%s", view)
+	}
+	if strings.Contains(m.View(), "Extra features >") {
+		t.Fatal("local rendered the extra features row")
 	}
 
 	m.cfg.Engine = voiceEngineVolcano
 	if findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
 		t.Fatal("volcano shows local-only rows")
+	}
+	if findVoiceRow(m, vrowExtra) < 0 {
+		t.Fatal("volcano missing the extra features row")
 	}
 	n := 0
 	for _, r := range m.rows() {
@@ -634,7 +663,7 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	if findVoiceRow(m, vrowEngine) < 0 || findVoiceRow(m, vrowTest) < 0 {
 		t.Fatal("unknown engine lost shared rows")
 	}
-	if findVoiceRow(m, vrowParam) >= 0 || findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
+	if findVoiceRow(m, vrowParam) >= 0 || findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 || findVoiceRow(m, vrowExtra) >= 0 {
 		t.Fatal("unknown engine shows engine-specific rows")
 	}
 	if view = m.View(); !strings.Contains(view, "mystery (unknown)") {
@@ -643,6 +672,35 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	if !strings.Contains(m.View(), "setup incomplete") {
 		t.Fatal("unknown engine shown ready")
 	}
+}
+
+func TestVoiceSettingsLongValuesTruncated(t *testing.T) {
+	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+	m.dlErr = strings.Repeat("x", 300)
+	m.dlErrTarget = voiceHelperTarget
+	m.cfg.CustomModelDir = "/" + strings.Repeat("long-path-segment/", 30)
+	assertWidth := func(view string) {
+		t.Helper()
+		for _, line := range strings.Split(view, "\n") {
+			if w := lipgloss.Width(line); w > voicePanelWidth {
+				t.Fatalf("line width %d exceeds %d: %q", w, voicePanelWidth, line)
+			}
+		}
+	}
+	for _, view := range []int{voiceViewMain, voiceViewModels} {
+		m.view = view
+		assertWidth(m.View())
+	}
+
+	m.view = voiceViewMain
+	m.cfg.Engine = voiceEngineVolcano
+	m.cfg.setEngineParam(voiceEngineVolcano, "api_key", strings.Repeat("k", 100))
+	m.cursor = findVoiceParamRow(m, "api_key")
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.edit < 0 {
+		t.Fatal("enter did not start editing")
+	}
+	assertWidth(m.View())
 }
 
 func TestDefaultVoiceEngineSelection(t *testing.T) {
@@ -1215,8 +1273,8 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	if gotDir != dir || gotKind != voice.ModelKindSenseVoice {
 		t.Fatalf("set_model target = %q %q", gotDir, gotKind)
 	}
-	if !strings.Contains(m.View(), "[active] "+dir) {
-		t.Fatal("custom path not marked active")
+	if want := truncateVoiceValue("[active] "+dir, voiceValueWidth); !strings.Contains(m.View(), want) {
+		t.Fatalf("custom path not marked active: want %q", want)
 	}
 
 	m.cursor = findVoiceRow(m, vrowCustomPath)
@@ -1385,7 +1443,7 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	}
 
 	m.updateCheckDone("v3.1.0", nil)
-	if view := m.View(); !strings.Contains(view, "update available") || !strings.Contains(view, "v3.0.0 -> v3.1.0") {
+	if view := m.View(); !strings.Contains(view, "update v3.0.0 -> v3.1.0") {
 		t.Fatalf("update not offered:\n%s", view)
 	}
 	_, cmd = m.Update(enter)
@@ -1867,6 +1925,7 @@ func TestVoiceContextSettingTogglePersists(t *testing.T) {
 		t.Fatal("context default on")
 	}
 
+	m.cfg.Engine = voiceEngineVolcano
 	m.enterExtra()
 	m.cursor = findVoiceRow(m, vrowContext)
 	if m.cursor < 0 {
@@ -2067,6 +2126,10 @@ func TestVoiceSettingsExtraSubmenu(t *testing.T) {
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
+	if findVoiceRow(m, vrowExtra) >= 0 {
+		t.Fatal("local engine shows the extra features row")
+	}
+	m.cfg.Engine = voiceEngineVolcano
 	if findVoiceRow(m, vrowContext) >= 0 || findVoiceRow(m, vrowDDC) >= 0 {
 		t.Fatal("extra toggles leaked into the main view")
 	}

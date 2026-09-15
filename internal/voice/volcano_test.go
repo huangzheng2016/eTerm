@@ -172,36 +172,6 @@ func TestVolcanoEngineLifecycle(t *testing.T) {
 	}
 }
 
-func TestVolcanoEngineAppKeyAuth(t *testing.T) {
-	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Api-App-Key") != "app" || r.Header.Get("X-Api-Access-Key") != "access" {
-			t.Errorf("app key headers: %q %q", r.Header.Get("X-Api-App-Key"), r.Header.Get("X-Api-Access-Key"))
-		}
-		if r.Header.Get("X-Api-Key") != "" {
-			t.Errorf("unexpected X-Api-Key: %q", r.Header.Get("X-Api-Key"))
-		}
-		conn, err := websocket.Accept(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close(websocket.StatusNormalClosure, "done")
-		ctx := context.Background()
-		conn.Read(ctx)
-		conn.Write(ctx, websocket.MessageBinary, serverFrame(t, 1, []byte(`{"result":{"text":""}}`)))
-		time.Sleep(100 * time.Millisecond)
-	}))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoEngine(VolcanoConfig{AppKey: "app", AccessKey: "access", URL: wsURL})
-	if err := eng.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := eng.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestVolcanoEngineInitialError(t *testing.T) {
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

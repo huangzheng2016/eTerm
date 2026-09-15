@@ -210,17 +210,13 @@ func migrateLegacyVolcanoParams(database *gorm.DB, mk *security.MasterKeyManager
 		return
 	}
 	var keys struct {
-		APIKey    string `json:"api_key"`
-		AppKey    string `json:"app_key"`
-		AccessKey string `json:"access_key"`
+		APIKey string `json:"api_key"`
 	}
 	if json.Unmarshal(plain, &keys) != nil {
 		return
 	}
 	params := map[string]string{
-		"api_key":    keys.APIKey,
-		"app_key":    keys.AppKey,
-		"access_key": keys.AccessKey,
+		"api_key": keys.APIKey,
 	}
 	if persistEngineParams(database, mk, voiceEngineVolcano, params) != nil {
 		return
