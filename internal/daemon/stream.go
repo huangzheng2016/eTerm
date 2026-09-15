@@ -205,15 +205,19 @@ type streamRelay struct {
 	wake          chan struct{}
 	stop          chan struct{}
 	stopOnce      sync.Once
+	stallAfter    time.Duration
+	stallInterval time.Duration
 }
 
 func newStreamRelay(is *internalssh.InteractiveSession) *streamRelay {
 	s := &streamRelay{
-		is:    is,
-		ring:  newOutputRing(),
-		input: make(chan []byte, inputQueueSize),
-		wake:  make(chan struct{}, 1),
-		stop:  make(chan struct{}),
+		is:            is,
+		ring:          newOutputRing(),
+		input:         make(chan []byte, inputQueueSize),
+		wake:          make(chan struct{}, 1),
+		stop:          make(chan struct{}),
+		stallAfter:    stallLogAfter,
+		stallInterval: stallLogInterval,
 	}
 	go s.inputPump()
 	return s
@@ -334,7 +338,13 @@ func (s *streamRelay) drainIfGenChanged(gen uint64, sid uint32, sender *frameSen
 	s.mu.Unlock()
 }
 
+const (
+	stallLogAfter    = 60 * time.Second
+	stallLogInterval = 60 * time.Second
+)
+
 func (s *streamRelay) waitCredit() bool {
+	var nextLog time.Time
 	for {
 		s.mu.Lock()
 		ok := s.ring.End()-s.ack < outputWindowBytes
@@ -342,10 +352,25 @@ func (s *streamRelay) waitCredit() bool {
 		if ok {
 			return true
 		}
+		now := time.Now()
+		if nextLog.IsZero() {
+			nextLog = now.Add(s.stallAfter)
+		}
+		if !now.Before(nextLog) {
+			s.mu.Lock()
+			ack, end, detached := s.ack, s.ring.End(), s.detachedSince
+			s.mu.Unlock()
+			log.Printf("eterm daemon stream %d output stalled ack=%d ringEnd=%d detachedSince=%v", s.sidV.Load(), ack, end, detached)
+			nextLog = now.Add(s.stallInterval)
+		}
+		timer := time.NewTimer(time.Until(nextLog))
 		select {
 		case <-s.wake:
+			timer.Stop()
 		case <-s.stop:
+			timer.Stop()
 			return false
+		case <-timer.C:
 		}
 	}
 }
