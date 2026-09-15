@@ -20,9 +20,12 @@ type laneQueue struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	closeConn func()
+	label     string
 }
 
 const relaySendQueueSize = 1024
+
+var laneSendBlockTimeout = 30 * time.Second
 
 func newLaneQueue() *laneQueue {
 	return &laneQueue{
@@ -42,9 +45,23 @@ func (q *laneQueue) send(ctx context.Context, f relay.Frame, bulk bool) bool {
 	select {
 	case ch <- f:
 		return true
+	default:
+	}
+	timer := time.NewTimer(laneSendBlockTimeout)
+	defer timer.Stop()
+	select {
+	case ch <- f:
+		return true
 	case <-ctx.Done():
 		return false
 	case <-q.done:
+		return false
+	case <-timer.C:
+		log.Printf("syncd relay %s send blocked %s; closing connection stream=%d type=%#x", q.label, laneSendBlockTimeout, f.StreamID, byte(f.Type))
+		q.close()
+		if q.closeConn != nil {
+			q.closeConn()
+		}
 		return false
 	}
 }
@@ -81,14 +98,22 @@ func NewRelayHub(peers *PeerRegistry) *RelayHub {
 	}
 }
 
-func (h *RelayHub) setSession(id uint32, s relaySession) error {
+func (h *RelayHub) setSession(id uint32, s relaySession) {
+	h.mu.Lock()
+	old, replaced := h.sessions[id]
+	h.sessions[id] = s
+	h.mu.Unlock()
+	if replaced && old.client != s.client {
+		old.client.sendCtl(relay.Frame{Type: relay.FrameClose, StreamID: id, Payload: []byte(relay.CloseSessionTakenOver)})
+	}
+}
+
+func (h *RelayHub) closeSessionIfOwner(id uint32, owner *laneQueue) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.sessions[id]; ok {
-		return fmt.Errorf("stream already exists")
+	if s, ok := h.sessions[id]; ok && s.client == owner {
+		delete(h.sessions, id)
 	}
-	h.sessions[id] = s
-	return nil
 }
 
 func (h *RelayHub) session(id uint32) (relaySession, bool) {
@@ -189,6 +214,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			tenant = hello.Tenant
+			send.label = fmt.Sprintf("daemon tenant=%s peer=%s addr=%s", shortID(tenant), hello.PeerID, r.RemoteAddr)
 			peerID = h.peers.Register(tenant, PeerInfo{ID: hello.PeerID, Name: hello.Name, LastSeen: time.Now()}, send)
 			log.Printf("syncd relay daemon registered tenant=%s peer=%s name=%q", shortID(tenant), peerID, hello.Name)
 			continue
@@ -201,7 +227,7 @@ func (h *RelayHub) daemonWS(w http.ResponseWriter, r *http.Request) {
 				if ctx.Err() != nil {
 					return
 				}
-				h.closeSession(f.StreamID)
+				h.closeClientSessions(s.client)
 				continue
 			}
 			if f.Type == relay.FrameClose || f.Type == relay.FrameOpenErr {
@@ -222,6 +248,8 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 	defer c.CloseNow()
 
 	send := newLaneQueue()
+	send.closeConn = func() { c.CloseNow() }
+	send.label = fmt.Sprintf("client tenant=%s addr=%s", shortID(r.Header.Get("X-ETerm-Tenant")), r.RemoteAddr)
 	ctx := r.Context()
 	done := make(chan struct{})
 	stop := make(chan struct{})
@@ -266,15 +294,12 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 				send.sendCtl(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("peer offline")})
 				continue
 			}
-			if err := h.setSession(f.StreamID, relaySession{client: send, daemon: peer.Send}); err != nil {
-				send.sendCtl(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
-				continue
-			}
+			h.setSession(f.StreamID, relaySession{client: send, daemon: peer.Send})
 			if !peer.Send.send(ctx, f, false) {
 				if ctx.Err() != nil {
 					return
 				}
-				h.closeSession(f.StreamID)
+				h.closeDaemonSessions(peer.Send)
 				continue
 			}
 			continue
@@ -287,7 +312,7 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 				if ctx.Err() != nil {
 					return
 				}
-				h.closeSession(f.StreamID)
+				h.closeDaemonSessions(s.daemon)
 				continue
 			}
 			if f.Type == relay.FrameClose {

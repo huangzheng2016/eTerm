@@ -165,11 +165,13 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 	}
 
 	q := newLaneQueue()
+	q.closeConn = func() { c.CloseNow() }
+	q.label = "share viewer addr=" + r.RemoteAddr
 	streamID := st.streamID
 	resumeFrom := st.acked.Load()
 	defer func() {
 		dieWith(shareExitGuest)
-		h.closeSession(streamID)
+		h.closeSessionIfOwner(streamID, q)
 		q.close()
 		switch cause {
 		case shareExitReplaced:
@@ -195,11 +197,9 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 			Cols:          80,
 			ResumeFromSeq: resumeFrom,
 		})
-		if err := h.setSession(streamID, relaySession{client: q, daemon: peer.Send}); err != nil {
-			return relay.Frame{}, false
-		}
+		h.setSession(streamID, relaySession{client: q, daemon: peer.Send})
 		if !peer.Send.send(ctx, relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: open}, false) {
-			h.closeSession(streamID)
+			h.closeSessionIfOwner(streamID, q)
 			return relay.Frame{}, false
 		}
 		timer := time.NewTimer(10 * time.Second)
@@ -222,7 +222,7 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 
 	f, opened := openAndWait()
 	if opened && f.Type == relay.FrameOpenErr && !fresh {
-		h.closeSession(streamID)
+		h.closeSessionIfOwner(streamID, q)
 		id, err := randomStreamID()
 		if err != nil {
 			dieWith(shareExitFatal)
