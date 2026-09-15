@@ -40,6 +40,33 @@ func TestBuildFullClientRequest(t *testing.T) {
 	if req["model_name"] != "bigmodel" || req["enable_itn"] != true || req["enable_punc"] != true || req["show_utterances"] != true {
 		t.Fatalf("request: %v", req)
 	}
+	if _, ok := value["corpus"]; ok {
+		t.Fatalf("corpus present without context: %v", value)
+	}
+}
+
+func TestBuildFullClientRequestWithContext(t *testing.T) {
+	cfg := VolcanoConfig{SampleRate: 16000, SmartFormat: true, Context: `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"kubectl get pods"}]}`}
+	frame, err := buildFullClientRequest(cfg, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := int(binary.BigEndian.Uint32(frame[8:]))
+	payload, err := gunzipData(frame[12 : 12+size])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(payload, &value); err != nil {
+		t.Fatal(err)
+	}
+	corpus, ok := value["corpus"].(map[string]any)
+	if !ok {
+		t.Fatalf("corpus missing: %v", value)
+	}
+	if corpus["context"] != cfg.Context {
+		t.Fatalf("corpus.context = %v", corpus)
+	}
 }
 
 func TestBuildAudioFrameNegativeSeqIsFinal(t *testing.T) {

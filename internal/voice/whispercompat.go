@@ -211,6 +211,8 @@ func (e *WhisperCompatFeedEngine) SetVAD(p VADParams) error {
 
 func (e *WhisperCompatFeedEngine) SetModel(string, string) error { return nil }
 
+func (e *WhisperCompatFeedEngine) SetContext(string) error { return nil }
+
 func (e *WhisperCompatFeedEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {

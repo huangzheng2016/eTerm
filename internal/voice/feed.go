@@ -166,6 +166,17 @@ func (e *VolcanoFeedEngine) SetVAD(p VADParams) error {
 
 func (e *VolcanoFeedEngine) SetModel(string, string) error { return nil }
 
+func (e *VolcanoFeedEngine) SetContext(ctx string) error {
+	e.mu.Lock()
+	e.vcfg.Context = ctx
+	vol := e.vol
+	e.mu.Unlock()
+	if vol != nil {
+		return vol.SetContext(ctx)
+	}
+	return nil
+}
+
 func (e *VolcanoFeedEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {

@@ -16,6 +16,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/voice"
 )
 
@@ -27,6 +28,7 @@ const (
 	voiceVADSettingKey         = "voice_vad_threshold"
 	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
+	voiceContextSettingKey     = "voice_context"
 	voiceModelSettingKey       = "voice_model"
 	voiceModelInt8SettingKey   = "voice_model_int8"
 	voiceCustomModelSettingKey = "voice_custom_model"
@@ -42,6 +44,7 @@ type voiceSettings struct {
 	VADThreshold   float64
 	VADSilenceMs   int
 	SentenceEnd    voice.SentenceEnd
+	Context        bool
 	Params         map[string]map[string]string
 	ModelID        string
 	ModelInt8      bool
@@ -131,6 +134,9 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 		case voice.SentenceEndEnter, voice.SentenceEndSpace:
 			cfg.SentenceEnd = voice.SentenceEnd(v)
 		}
+	}
+	if v, err := db.GetSetting(database, voiceContextSettingKey); err == nil {
+		cfg.Context = v == "1"
 	}
 	if v, err := db.GetSetting(database, voiceModelSettingKey); err == nil && v != "" {
 		if newID, int8, legacy := voice.LegacyModelID(v); legacy {
@@ -227,6 +233,13 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 		return err
 	}
 	if err := db.SetSetting(database, voiceSentenceEndSettingKey, string(cfg.SentenceEnd)); err != nil {
+		return err
+	}
+	context := "0"
+	if cfg.Context {
+		context = "1"
+	}
+	if err := db.SetSetting(database, voiceContextSettingKey, context); err != nil {
 		return err
 	}
 	if err := db.SetSetting(database, voiceModelSettingKey, cfg.ModelID); err != nil {
@@ -511,6 +524,7 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	a.voiceStartedAt = time.Now()
 	a.voiceTickSeq++
 	_ = a.voiceEngine.SetVAD(a.voiceCfg.vadParams())
+	_ = a.voiceEngine.SetContext(a.voiceContextString())
 	cmds = append(cmds, voiceStartCmd(a.voiceEngine), voiceTick(a.voiceTickSeq))
 	return a, tea.Batch(cmds...)
 }
@@ -688,6 +702,34 @@ func (a App) handleVoiceDownload(msg voiceDownloadMsg) (App, tea.Cmd) {
 		a.voiceDlActive = false
 	}
 	return a, waitVoiceDownload(a.voiceDlCh)
+}
+
+const voiceContextTailBytes = 16 * 1024
+
+// voiceContextString builds the Volcano corpus.context for this recording
+// start: recent AI dialog turns when the AI panel is open, otherwise the
+// tail of the active terminal transcript. Empty when the setting is off or
+// nothing usable was found.
+func (a App) voiceContextString() string {
+	if !a.voiceCfg.Context {
+		return ""
+	}
+	if a.aiVisible && a.aiView != nil && a.aiBridge != nil {
+		turns := a.aiBridge.voiceContextTurns(voice.DefaultContextMaxTurns)
+		return voice.BuildDialogContext(turns, voice.DefaultContextMaxTokens)
+	}
+	if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isTerminalTab(a.tabs[a.activeTab].Type) {
+		if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok {
+			tail := transcriptTail(m.PlainTranscript(voiceContextTailBytes), voiceContextTailBytes)
+			lines := voice.CleanTerminalContextLines(strings.Split(tail, "\n"), voice.DefaultContextMaxLines)
+			turns := make([]voice.ContextTurn, len(lines))
+			for i, ln := range lines {
+				turns[i] = voice.ContextTurn{Speaker: "user", Text: ln}
+			}
+			return voice.BuildDialogContext(turns, voice.DefaultContextMaxTokens)
+		}
+	}
+	return ""
 }
 
 func (a App) deliverVoiceText(text string) (App, tea.Cmd) {

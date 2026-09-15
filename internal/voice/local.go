@@ -171,6 +171,8 @@ func (e *LocalEngine) SetModel(dir, kind string) error {
 	return e.sendLocked(helperCommand{Cmd: "set_model", Path: dir, Kind: kind})
 }
 
+func (e *LocalEngine) SetContext(string) error { return nil }
+
 func (e *LocalEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {

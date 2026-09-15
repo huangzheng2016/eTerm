@@ -36,6 +36,7 @@ type VolcanoConfig struct {
 	Language    string
 	SampleRate  int
 	SmartFormat bool
+	Context     string
 }
 
 type VolcanoEngine struct {
@@ -218,6 +219,13 @@ func abs32(v int32) int32 {
 }
 
 func (e *VolcanoEngine) SetVAD(p VADParams) error {
+	return nil
+}
+
+func (e *VolcanoEngine) SetContext(ctx string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg.Context = ctx
 	return nil
 }
 

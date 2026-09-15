@@ -185,6 +185,8 @@ func (e *DeepgramEngine) SetVAD(VADParams) error {
 	return nil
 }
 
+func (e *DeepgramEngine) SetContext(string) error { return nil }
+
 func (e *DeepgramEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {
@@ -413,6 +415,8 @@ func (e *streamFeedEngine) SetVAD(p VADParams) error {
 }
 
 func (e *streamFeedEngine) SetModel(string, string) error { return nil }
+
+func (e *streamFeedEngine) SetContext(string) error { return nil }
 
 func (e *streamFeedEngine) Close() error {
 	e.mu.Lock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,6 +33,7 @@ type fakeVoiceEngine struct {
 	closed    bool
 	modelDir  string
 	modelKind string
+	context   string
 }
 
 func findVoiceRow(m *voiceSettingsModel, kind int) int {
@@ -61,6 +63,10 @@ func (f *fakeVoiceEngine) SetVAD(p voice.VADParams) error {
 func (f *fakeVoiceEngine) SetModel(dir, kind string) error {
 	f.modelDir = dir
 	f.modelKind = kind
+	return nil
+}
+func (f *fakeVoiceEngine) SetContext(ctx string) error {
+	f.context = ctx
 	return nil
 }
 func (f *fakeVoiceEngine) Events() <-chan voice.Event { return f.events }
@@ -824,6 +830,7 @@ func (g *gateVoiceEngine) Stop() error {
 
 func (g *gateVoiceEngine) SetVAD(voice.VADParams) error  { return nil }
 func (g *gateVoiceEngine) SetModel(string, string) error { return nil }
+func (g *gateVoiceEngine) SetContext(string) error       { return nil }
 func (g *gateVoiceEngine) Events() <-chan voice.Event    { return g.events }
 func (g *gateVoiceEngine) Close() error                  { return nil }
 
@@ -1841,5 +1848,169 @@ func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 	a = upd.(App)
 	if a.voiceSettingsView.testText != "" {
 		t.Fatal("partial leaked into the panel")
+	}
+}
+
+func TestVoiceContextSettingTogglePersists(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+
+	m.cursor = findVoiceRow(m, vrowContext)
+	if m.cursor < 0 {
+		t.Fatal("context row missing")
+	}
+	if got := loadVoiceSettings(database, mk); got.Context {
+		t.Fatal("context default on")
+	}
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	chg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || !chg.cfg.Context || !chg.keepEngine {
+		t.Fatalf("context toggle msg = %#v", chg)
+	}
+	if got := loadVoiceSettings(database, mk); !got.Context {
+		t.Fatal("context toggle not persisted")
+	}
+	if view := m.View(); !strings.Contains(view, "Context awareness") || !strings.Contains(view, "on") {
+		t.Fatalf("context row not rendered:\n%s", view)
+	}
+}
+
+func TestVoiceContextAIHistoryTurns(t *testing.T) {
+	var msgs []map[string]string
+	msgs = append(msgs, map[string]string{"role": "system", "content": "be helpful"})
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, map[string]string{"role": "user", "content": fmt.Sprintf("question %d", i)})
+		msgs = append(msgs, map[string]string{"role": "assistant", "content": fmt.Sprintf("answer %d", i)})
+	}
+	msgs = append(msgs, map[string]string{"role": "tool", "content": "tool output"})
+	history, err := json.Marshal(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &aiBridge{agent: &historyAgent{history: history}}
+
+	turns := b.voiceContextTurns(voice.DefaultContextMaxTurns)
+	if len(turns) != 20 {
+		t.Fatalf("turns = %d, want 20", len(turns))
+	}
+	if turns[0].Speaker != "user" || turns[0].Text != "question 2" {
+		t.Fatalf("oldest turn = %+v", turns[0])
+	}
+	if turns[1].Speaker != "bot" || turns[1].Text != "answer 2" {
+		t.Fatalf("second turn = %+v", turns[1])
+	}
+	if turns[19].Text != "answer 11" {
+		t.Fatalf("newest turn = %+v", turns[19])
+	}
+}
+
+func TestVoiceContextStringFromAIOverlay(t *testing.T) {
+	history, err := json.Marshal([]map[string]string{
+		{"role": "user", "content": "how do I list pods"},
+		{"role": "assistant", "content": "kubectl get pods"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.aiBridge = &aiBridge{agent: &historyAgent{history: history}}
+	fake := aiview.NewFakeRunner()
+	a.aiView = aiview.New(fake, fake, fake)
+	a.aiVisible = true
+	a.voiceCfg.Context = true
+
+	got := a.voiceContextString()
+	if !strings.Contains(got, `"context_type":"dialog_ctx"`) {
+		t.Fatalf("context = %q", got)
+	}
+	if !strings.Contains(got, "kubectl get pods") {
+		t.Fatalf("assistant turn missing: %q", got)
+	}
+	if strings.Contains(got, "corpus\x00") {
+		t.Fatal("junk in context")
+	}
+
+	a.voiceCfg.Context = false
+	if got := a.voiceContextString(); got != "" {
+		t.Fatalf("context not cleared: %q", got)
+	}
+}
+
+func TestVoiceContextStringFromTerminalTab(t *testing.T) {
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	feedSSHChunk(sv, "┌──────────┐\r\n│ degraded │\r\n└──────────┘\r\nkubectl   get   pods\r\nkubectl get pods\r\n$ ")
+
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.activeTab = 0
+	a.voiceCfg.Context = true
+
+	got := a.voiceContextString()
+	if !strings.Contains(got, "kubectl get pods") {
+		t.Fatalf("terminal context = %q", got)
+	}
+	if !strings.Contains(got, "degraded") {
+		t.Fatalf("bordered text lost: %q", got)
+	}
+	if strings.ContainsAny(got, "│┌┐└┘─") {
+		t.Fatalf("border runes leaked: %q", got)
+	}
+}
+
+func TestVoiceToggleSetsEngineContext(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.voiceCfg.Context = true
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	feedSSHChunk(sv, "kubectl get pods\r\n")
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.activeTab = 0
+
+	upd, cmd := a.toggleVoice()
+	a = upd
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStartedMsg)
+		return ok
+	}) {
+		upd2, _ := a.Update(m)
+		a = upd2.(App)
+	}
+	if !strings.Contains(fe.context, `"dialog_ctx"`) || !strings.Contains(fe.context, "kubectl get pods") {
+		t.Fatalf("engine context = %q", fe.context)
+	}
+
+	upd, cmd = a.toggleVoice()
+	a = upd
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStoppedMsg)
+		return ok
+	}) {
+		upd2, _ := a.Update(m)
+		a = upd2.(App)
+	}
+
+	a.voiceCfg.Context = false
+	upd, cmd = a.toggleVoice()
+	a = upd
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStartedMsg)
+		return ok
+	}) {
+		upd2, _ := a.Update(m)
+		a = upd2.(App)
+	}
+	if fe.context != "" {
+		t.Fatalf("engine context not cleared: %q", fe.context)
 	}
 }

@@ -26,6 +26,7 @@ const (
 	vrowThreshold
 	vrowSilence
 	vrowSentenceEnd
+	vrowContext
 	vrowParam
 	vrowModel
 	vrowCustomPath
@@ -143,6 +144,7 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 		voiceRow{kind: vrowThreshold},
 		voiceRow{kind: vrowSilence},
 		voiceRow{kind: vrowSentenceEnd},
+		voiceRow{kind: vrowContext},
 	)
 	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
 		for _, p := range d.Params {
@@ -224,6 +226,9 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		} else {
 			m.cfg.SentenceEnd = voice.SentenceEndEnter
 		}
+		return m.persist(true)
+	case vrowContext:
+		m.cfg.Context = !m.cfg.Context
 		return m.persist(true)
 	case vrowPrecision:
 		m.cfg.ModelInt8 = !m.cfg.ModelInt8
@@ -690,6 +695,12 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 		label, value = "end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)
 	case vrowSentenceEnd:
 		label, value = "Sentence end", string(m.cfg.SentenceEnd)
+	case vrowContext:
+		label = "Context awareness"
+		value = "off"
+		if m.cfg.Context {
+			value = "on"
+		}
 	case vrowParam:
 		label = r.param.Label
 		v := m.cfg.engineParams(m.cfg.Engine)[r.param.Key]

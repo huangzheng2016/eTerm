@@ -104,6 +104,9 @@ func buildFullClientRequest(cfg VolcanoConfig, seq int32) ([]byte, error) {
 			"show_utterances": true,
 		},
 	}
+	if cfg.Context != "" {
+		payload["corpus"] = map[string]any{"context": cfg.Context}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
