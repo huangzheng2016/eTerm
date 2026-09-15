@@ -38,6 +38,7 @@ type Executor interface {
 	ListTabs(ctx context.Context) ([]TabInfo, error)
 	ReadTab(ctx context.Context, id string, maxBytes, skipFromEnd int) (text string, totalBytes int, err error)
 	SendKeys(ctx context.Context, id string, keys string, waitMs int) (string, error)
+	ShellHistory(ctx context.Context, limit int) (shell, path string, commands []string, err error)
 	ListDaemons(ctx context.Context) ([]DaemonInfo, error)
 	ListDaemonSessions(ctx context.Context, daemon string) ([]SessionInfo, error)
 	EnterDaemon(ctx context.Context, daemon, session string) error
@@ -81,6 +82,17 @@ type SendKeysOutput struct {
 	Success bool   `json:"success"`
 	Screen  string `json:"screen,omitempty"`
 	Error   string `json:"error,omitempty"`
+}
+
+type ShellHistoryInput struct {
+	Limit int `json:"limit,omitempty" jsonschema_description:"Number of most recent commands to return (default 50, max 500)"`
+}
+
+type ShellHistoryOutput struct {
+	Shell    string   `json:"shell,omitempty"`
+	Path     string   `json:"path,omitempty"`
+	Commands []string `json:"commands,omitempty"`
+	Error    string   `json:"error,omitempty"`
 }
 
 type ListDaemonsInput struct{}
@@ -192,6 +204,10 @@ func BuildTools(exec Executor, cron *CronScheduler, daemons bool) ([]tool.BaseTo
 	if err != nil {
 		return nil, fmt.Errorf("build send_keys: %w", err)
 	}
+	shellHistory, err := utils.InferTool("shell_history", "Read the user's local shell command history (auto-detects zsh ~/.zsh_history, bash ~/.bash_history or fish ~/.local/share/fish/fish_history, in that order) and return the most recent commands, newest first. Read-only: use it to answer what was run before without opening or typing into any terminal", tb.shellHistory)
+	if err != nil {
+		return nil, fmt.Errorf("build shell_history: %w", err)
+	}
 	openLocal, err := utils.InferTool("open_local_terminal", "Open a new local shell tab on the user's machine and return the new tab id, ready for read_tab/send_keys", tb.openLocalTerminal)
 	if err != nil {
 		return nil, fmt.Errorf("build open_local_terminal: %w", err)
@@ -217,7 +233,7 @@ func BuildTools(exec Executor, cron *CronScheduler, daemons bool) ([]tool.BaseTo
 		return nil, fmt.Errorf("build notify: %w", err)
 	}
 
-	tools := []tool.BaseTool{listTabs, readTab, sendKeys, openLocal, listHosts, openSSH, listTmux, openTmux, notify}
+	tools := []tool.BaseTool{listTabs, readTab, sendKeys, shellHistory, openLocal, listHosts, openSSH, listTmux, openTmux, notify}
 	if daemons {
 		daemonTools, err := buildDaemonTools(tb)
 		if err != nil {
@@ -297,6 +313,21 @@ func (tb *toolBuilder) sendKeys(ctx context.Context, in *SendKeysInput) (*SendKe
 		return &SendKeysOutput{Error: err.Error()}, nil
 	}
 	return &SendKeysOutput{Success: true, Screen: screen}, nil
+}
+
+func (tb *toolBuilder) shellHistory(ctx context.Context, in *ShellHistoryInput) (*ShellHistoryOutput, error) {
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	shell, path, cmds, err := tb.exec.ShellHistory(ctx, limit)
+	if err != nil {
+		return &ShellHistoryOutput{Error: err.Error()}, nil
+	}
+	return &ShellHistoryOutput{Shell: shell, Path: path, Commands: cmds}, nil
 }
 
 func (tb *toolBuilder) listDaemons(ctx context.Context, in *ListDaemonsInput) (*ListDaemonsOutput, error) {

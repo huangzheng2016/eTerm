@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +100,86 @@ func tailRunes(s string, max int) string {
 		return s
 	}
 	return "<output clipped>\n" + string(runes[len(runes)-max:])
+}
+
+var shellHistoryFiles = []struct {
+	shell string
+	rel   string
+}{
+	{"zsh", ".zsh_history"},
+	{"bash", ".bash_history"},
+	{"fish", filepath.Join(".local", "share", "fish", "fish_history")},
+}
+
+var zshExtendedPrefix = regexp.MustCompile(`^: \d+:\d+;`)
+
+func ReadShellHistory(home string, limit int) (shell, path string, commands []string, err error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var looked []string
+	for _, c := range shellHistoryFiles {
+		p := filepath.Join(home, c.rel)
+		looked = append(looked, p)
+		info, statErr := os.Stat(p)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return "", "", nil, fmt.Errorf("stat %s: %w", p, statErr)
+		}
+		if info.IsDir() {
+			continue
+		}
+		data, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return "", "", nil, fmt.Errorf("read %s: %w", p, readErr)
+		}
+		cmds := parseShellHistory(c.shell, string(data))
+		if len(cmds) > limit {
+			cmds = cmds[len(cmds)-limit:]
+		}
+		slices.Reverse(cmds)
+		return c.shell, p, cmds, nil
+	}
+	return "", "", nil, fmt.Errorf("no shell history file found (looked for %s)", strings.Join(looked, ", "))
+}
+
+func parseShellHistory(shell, data string) []string {
+	var out []string
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimRight(line, "\r")
+		switch shell {
+		case "zsh":
+			line = zshExtendedPrefix.ReplaceAllString(line, "")
+		case "bash":
+			if isBashTimestamp(line) {
+				continue
+			}
+		case "fish":
+			if !strings.HasPrefix(line, "- cmd: ") {
+				continue
+			}
+			line = strings.TrimPrefix(line, "- cmd: ")
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func isBashTimestamp(line string) bool {
+	if len(line) < 2 || line[0] != '#' {
+		return false
+	}
+	for i := 1; i < len(line); i++ {
+		if line[i] < '0' || line[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type BashInput struct {
