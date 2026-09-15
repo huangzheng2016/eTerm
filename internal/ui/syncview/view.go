@@ -10,6 +10,7 @@ import (
 
 var (
 	formStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7D56F4")).Padding(1, 3).Width(60)
+	catStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4"))
 	labelStyle  = lipgloss.NewStyle().Width(16).Foreground(lipgloss.Color("#7D56F4"))
 	focusLabel  = lipgloss.NewStyle().Width(16).Foreground(lipgloss.Color("#FF79C6")).Bold(true)
 	arrowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666"))
@@ -27,49 +28,75 @@ func (m *Model) View() tea.View {
 	title := headerStyle.Render("Sync Settings")
 	rows = append(rows, title, "")
 
-	vf := m.visibleFields()
-	for i, f := range vf {
-		focused := i == m.focused
-		lbl := labelStyle
-		if focused {
-			lbl = focusLabel
+	idx := 0
+	for si, sec := range m.sections() {
+		if si > 0 {
+			rows = append(rows, "")
 		}
-
-		var value string
-		switch f {
-		case fieldEnabled:
-			value = m.renderSelector(enableOptions[m.enableIdx], focused)
-		case fieldMode:
-			value = m.renderSelector(modeOptions[m.modeIdx], focused)
-		case fieldInsecureTLS:
-			value = m.renderSelector(insecureOptions[m.insecureIdx], focused)
-		case fieldSSHHost:
-			name := "(none)"
-			if m.hostIdx >= 0 && m.hostIdx < len(m.hostOpts) {
-				h := m.hostOpts[m.hostIdx]
-				name = fmt.Sprintf("%s (%s@%s:%d)", h.Alias, h.Username, h.Hostname, h.Port)
-			}
-			value = m.renderSelector(name, focused)
-		default:
-			idx := m.inputIdxForField(f)
-			if idx >= 0 {
-				value = m.inputs[idx].View()
-			}
+		rows = append(rows, catStyle.Render("  "+sec.title))
+		if sec.note != "" {
+			rows = append(rows, "  "+hintStyle.Render(sec.note))
 		}
+		for _, f := range sec.fields {
+			focused := idx == m.focused
+			idx++
+			lbl := labelStyle
+			if focused {
+				lbl = focusLabel
+			}
 
-		label := m.fieldLabel(f)
-		rows = append(rows, fmt.Sprintf("  %s  %s", lbl.Render(label), value))
+			var value string
+			switch f {
+			case fieldEnabled:
+				value = m.renderSelector(enableOptions[m.enableIdx], focused)
+			case fieldMode:
+				value = m.renderSelector(modeOptions[m.modeIdx], focused)
+			case fieldInsecureTLS:
+				value = m.renderSelector(insecureOptions[m.insecureIdx], focused)
+			case fieldSSHHost:
+				name := "(none)"
+				if m.hostIdx >= 0 && m.hostIdx < len(m.hostOpts) {
+					h := m.hostOpts[m.hostIdx]
+					name = fmt.Sprintf("%s (%s@%s:%d)", h.Alias, h.Username, h.Hostname, h.Port)
+				}
+				value = m.renderSelector(name, focused)
+			case fieldAPIKey:
+				value = m.secretValue(inAPIKey, m.effectiveAPIKey())
+			case fieldPassphrase:
+				value = m.secretValue(inPassphrase, m.effectivePass())
+			default:
+				i := m.inputIdxForField(f)
+				if i >= 0 {
+					value = m.inputs[i].View()
+				}
+			}
+
+			label := m.fieldLabel(f)
+			rows = append(rows, fmt.Sprintf("  %s  %s", lbl.Render(label), value))
+		}
 	}
 
 	rows = append(rows, "")
-	if m.err != "" {
+	if m.editing >= 0 {
+		rows = append(rows, "  "+errStyle.Render("Enter "+m.fieldLabel(m.currentField())+"... (enter to accept, esc to cancel)"))
+	} else if m.err != "" {
 		rows = append(rows, "  "+errStyle.Render(m.err))
 	}
-	rows = append(rows, "  "+hintStyle.Render("Tab:next | Left/Right:select | C-s:save | F5:test | C-y:sync | Esc:close"))
+	rows = append(rows, "  "+hintStyle.Render("Tab:next | Left/Right:select | Enter:edit | C-s:save | F5:test | C-y:sync | Esc:close"))
 
 	content := strings.Join(rows, "\n")
 	box := formStyle.Render(content)
 	return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box))
+}
+
+func (m *Model) secretValue(inputIdx int, effective string) string {
+	if m.editing == inputIdx {
+		return m.inputs[inputIdx].View()
+	}
+	if effective == "" {
+		return hintStyle.Render("(not set)")
+	}
+	return "(set)"
 }
 
 func (m *Model) renderSelector(text string, focused bool) string {
