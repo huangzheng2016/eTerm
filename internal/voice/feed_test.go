@@ -667,3 +667,35 @@ func TestVolcanoFeedContextEmptyThenPanicReusesLastGood(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestVolcanoFeedNilProviderRestoresStaticContext(t *testing.T) {
+	eng, srv := newContextFeedTestEngine(t)
+
+	static := `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"static"}]}`
+	if err := eng.SetContext(static); err != nil {
+		t.Fatal(err)
+	}
+	eng.SetContextProvider(func() string {
+		return `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"dynamic"}]}`
+	})
+
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"dynamic"`) {
+		t.Fatalf("provider value not used: %q", got)
+	}
+
+	eng.SetContextProvider(nil)
+	eng.onUtteranceEnd()
+
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"static"`) || strings.Contains(got, `"dynamic"`) {
+		t.Fatalf("nil provider did not restore static context: %q", got)
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -54,6 +54,7 @@ type VolcanoFeedEngine struct {
 	idleCh    chan struct{}
 	pumped    bool
 	contextFn func() string
+	staticCtx string
 	lastGood  string
 
 	ctx    context.Context
@@ -172,7 +173,7 @@ func (e *VolcanoFeedEngine) SetModel(string, string) error { return nil }
 
 func (e *VolcanoFeedEngine) SetContext(ctx string) error {
 	e.mu.Lock()
-	e.vcfg.Context = ctx
+	e.staticCtx = ctx
 	vol := e.vol
 	e.mu.Unlock()
 	if vol != nil {
@@ -204,7 +205,7 @@ func (e *VolcanoFeedEngine) dialConfigLocked() VolcanoConfig {
 // the last-good value (empty when none). Callers must hold e.mu.
 func (e *VolcanoFeedEngine) contextFromProvider() string {
 	if e.contextFn == nil {
-		return e.vcfg.Context
+		return e.staticCtx
 	}
 	s, ok := callContext(e.contextFn)
 	if !ok {
