@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/huangzheng2016/eTerm/internal/sftp"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
@@ -36,6 +38,14 @@ type remoteTerminalOpenedMsg struct {
 	replaceTabAt int
 	reconnect    *types.RemoteReconnect
 	background   bool
+	reconnectGen uint64
+	fallbackAt   time.Time
+}
+
+type remoteReconnectRetryMsg struct {
+	streamID uint64
+	gen      uint64
+	next     types.RemoteShellReconnectMsg
 }
 
 type remoteTmuxRenameAppliedMsg struct {

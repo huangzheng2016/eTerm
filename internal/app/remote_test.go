@@ -271,29 +271,36 @@ func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 
-	_, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+	next, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
 		StreamID:    tab.StreamID(),
 		Spec:        *tab.RemoteReconnect(),
 		Auto:        true,
 		Attempt:     1,
 		MaxAttempts: 3,
 	})
+	a = next
 	msg := lastBatchMessage(t, cmd)
-	next, ok := msg.(types.RemoteShellReconnectMsg)
+	retry, ok := msg.(remoteReconnectRetryMsg)
 	if !ok {
-		t.Fatalf("got %T want RemoteShellReconnectMsg", msg)
+		t.Fatalf("got %T want remoteReconnectRetryMsg", msg)
 	}
-	if !next.Auto || next.Attempt != 2 || next.MaxAttempts != 3 {
-		t.Fatalf("next reconnect = %+v", next)
+	if !retry.next.Auto || retry.next.Attempt != 2 || retry.next.MaxAttempts != 3 {
+		t.Fatalf("next reconnect = %+v", retry.next)
 	}
 
-	_, cmd = a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
-		StreamID:    tab.StreamID(),
-		Spec:        *tab.RemoteReconnect(),
-		Auto:        true,
-		Attempt:     3,
-		MaxAttempts: 3,
-	})
+	up, cmd := a.Update(retry)
+	a = up.(App)
+	msg = lastBatchMessage(t, cmd)
+	retry, ok = msg.(remoteReconnectRetryMsg)
+	if !ok {
+		t.Fatalf("got %T want remoteReconnectRetryMsg", msg)
+	}
+	if retry.next.Attempt != 3 {
+		t.Fatalf("next reconnect = %+v", retry.next)
+	}
+
+	up, cmd = a.Update(retry)
+	a = up.(App)
 	msg = lastBatchMessage(t, cmd)
 	if _, ok := msg.(types.ConnErrorMsg); !ok {
 		t.Fatalf("got %T want ConnErrorMsg", msg)
@@ -350,7 +357,7 @@ func TestApplyRemoteTerminalOpenedFreshReconnectKeepsModel(t *testing.T) {
 		SessionID: "work",
 	})
 	a := remoteHTTPTestApp(t)
-	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab, reconnectGen: 1, reconnectInFlight: true}}
 
 	newSess := &internalssh.InteractiveSession{}
 	next, _ := a.applyRemoteTerminalOpened(remoteTerminalOpenedMsg{
@@ -359,6 +366,7 @@ func TestApplyRemoteTerminalOpenedFreshReconnectKeepsModel(t *testing.T) {
 		tabType:      SSHTab,
 		replaceTabAt: 0,
 		reconnect:    tab.RemoteReconnect(),
+		reconnectGen: 1,
 	})
 	a = next
 
@@ -373,6 +381,9 @@ func TestApplyRemoteTerminalOpenedFreshReconnectKeepsModel(t *testing.T) {
 	}
 	if tab.Disconnected() {
 		t.Fatal("tab still marked disconnected after reconnect")
+	}
+	if a.tabs[0].reconnectInFlight {
+		t.Fatal("delivery did not clear in-flight")
 	}
 	if a.activeTab != 0 {
 		t.Fatalf("activeTab = %d, want 0", a.activeTab)
@@ -786,5 +797,207 @@ func TestRemoteTmuxAutoReconnectExhaustedSurfacesOpenError(t *testing.T) {
 	retry, ok := connErr.Retry.(types.RemoteShellReconnectMsg)
 	if !ok || retry.Auto {
 		t.Fatalf("retry = %+v, want manual RemoteShellReconnectMsg", connErr.Retry)
+	}
+}
+
+type closeTracker struct{ closed *bool }
+
+func (c closeTracker) Write(p []byte) (int, error) { return len(p), nil }
+func (c closeTracker) Close() error                { *c.closed = true; return nil }
+
+func TestApplyRemoteShellReconnectDropsDuplicateWhileInFlight(t *testing.T) {
+	oldOpen := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
+	opens := 0
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		opens++
+		return &internalssh.InteractiveSession{}, "", nil
+	}
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a := remoteHTTPTestApp(t)
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
+	msg := types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     1,
+		MaxAttempts: 3,
+	}
+
+	next, cmd := a.applyRemoteShellReconnect(msg)
+	a = next
+	if cmd == nil {
+		t.Fatal("first reconnect should start")
+	}
+	if !a.tabs[0].reconnectInFlight {
+		t.Fatal("first reconnect did not mark in-flight")
+	}
+
+	next, dup := a.applyRemoteShellReconnect(msg)
+	a = next
+	if dup != nil {
+		t.Fatal("duplicate reconnect started a second command")
+	}
+
+	opened, ok := lastBatchMessage(t, cmd).(remoteTerminalOpenedMsg)
+	if !ok {
+		t.Fatal("first reconnect did not deliver remoteTerminalOpenedMsg")
+	}
+	if opens != 1 {
+		t.Fatalf("opens = %d, want 1", opens)
+	}
+	next, _ = a.applyRemoteTerminalOpened(opened)
+	a = next
+	if a.tabs[0].reconnectInFlight {
+		t.Fatal("delivery did not clear in-flight")
+	}
+	if tab.Disconnected() {
+		t.Fatal("tab still disconnected after delivery")
+	}
+}
+
+func TestApplyRemoteTerminalOpenedDropsStaleGeneration(t *testing.T) {
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a := remoteHTTPTestApp(t)
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab, reconnectGen: 2, reconnectInFlight: true}}
+
+	closed := false
+	stale := &internalssh.InteractiveSession{Stdin: closeTracker{closed: &closed}}
+	next, cmd := a.applyRemoteTerminalOpened(remoteTerminalOpenedMsg{
+		is:           stale,
+		title:        "[T]peer-work",
+		tabType:      SSHTab,
+		replaceTabAt: 0,
+		reconnect:    tab.RemoteReconnect(),
+		reconnectGen: 1,
+	})
+	a = next
+	if cmd != nil {
+		t.Fatal("stale delivery should be dropped without commands")
+	}
+	if !closed {
+		t.Fatal("stale delivery did not close the extra session")
+	}
+	if tab.Session() == stale {
+		t.Fatal("stale delivery swapped the session")
+	}
+	if !tab.Disconnected() {
+		t.Fatal("stale delivery resumed the tab")
+	}
+	if !a.tabs[0].reconnectInFlight || a.tabs[0].reconnectGen != 2 {
+		t.Fatal("stale delivery disturbed the in-flight chain")
+	}
+
+	up, cmd := a.Update(remoteReconnectRetryMsg{
+		streamID: tab.StreamID(),
+		gen:      1,
+		next:     types.RemoteShellReconnectMsg{StreamID: tab.StreamID(), Spec: *tab.RemoteReconnect(), Auto: true, Attempt: 2, MaxAttempts: 3},
+	})
+	a = up.(App)
+	if cmd != nil {
+		t.Fatal("stale retry should be dropped without commands")
+	}
+	if !a.tabs[0].reconnectInFlight || a.tabs[0].reconnectGen != 2 {
+		t.Fatal("stale retry disturbed the in-flight chain")
+	}
+}
+
+func TestUnlockResetClosesTerminalSessions(t *testing.T) {
+	a := tickTestApp(t)
+	closed := false
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: closeTracker{closed: &closed}}, "[R]peer", 0, viewkeys.SSHKeys{})
+	a.tabs = append(a.tabs, Tab{Type: SSHTab, Title: "[R]peer", Model: tab})
+
+	next, _ := a.Update(types.MasterKeyUnlockedMsg{})
+	a = next.(App)
+
+	if !closed {
+		t.Fatal("unlock reset leaked the terminal session")
+	}
+	if len(a.tabs) != 1 || a.tabs[0].Type != HomeTab {
+		t.Fatalf("tabs after unlock = %+v", a.tabs)
+	}
+}
+
+func TestUnlockResetDropsInFlightReconnectDelivery(t *testing.T) {
+	oldOpen := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
+	deliveredClosed := false
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		return &internalssh.InteractiveSession{Stdin: closeTracker{closed: &deliveredClosed}}, "", nil
+	}
+	a := tickTestApp(t)
+	if err := db.SetSetting(a.db, "sync_mode", "http"); err != nil {
+		t.Fatal(err)
+	}
+	origClosed := false
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: closeTracker{closed: &origClosed}}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a.tabs = append(a.tabs,
+		Tab{Type: HomeTab, Title: "List"},
+		Tab{Type: SSHTab, Title: "[T]peer-work", Model: tab},
+	)
+
+	next, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     1,
+		MaxAttempts: 3,
+	})
+	a = next
+	if cmd == nil || !a.tabs[1].reconnectInFlight {
+		t.Fatal("reconnect did not start on the ssh tab")
+	}
+
+	up, _ := a.Update(types.MasterKeyUnlockedMsg{})
+	a = up.(App)
+	if !origClosed {
+		t.Fatal("unlock reset did not close the original session")
+	}
+	if len(a.tabs) != 1 || a.tabs[0].Type != HomeTab {
+		t.Fatalf("tabs after unlock = %+v", a.tabs)
+	}
+
+	opened, ok := lastBatchMessage(t, cmd).(remoteTerminalOpenedMsg)
+	if !ok {
+		t.Fatal("in-flight reconnect did not deliver remoteTerminalOpenedMsg")
+	}
+	if opened.replaceTabAt != 1 {
+		t.Fatalf("replaceTabAt = %d, want 1", opened.replaceTabAt)
+	}
+	up, cmd = a.Update(opened)
+	a = up.(App)
+	if cmd != nil {
+		t.Fatal("stale delivery should be dropped without commands")
+	}
+	if !deliveredClosed {
+		t.Fatal("stale delivery did not close the extra session")
+	}
+	if len(a.tabs) != 1 || a.tabs[0].Type != HomeTab {
+		t.Fatalf("stale delivery resurrected a tab: %+v", a.tabs)
 	}
 }
