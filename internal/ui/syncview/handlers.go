@@ -14,6 +14,9 @@ import (
 )
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.editing >= 0 {
+		return m.handleSecretEdit(msg)
+	}
 	f := m.currentField()
 	ks := msg.String()
 
@@ -36,6 +39,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.handleSelectorRight(f)
 			return m, m.focusCurrent()
 		}
+	case "enter":
+		if isSecretField(f) {
+			return m, m.startSecretEdit(m.inputIdxForField(f))
+		}
 	case "ctrl+s":
 		return m, m.save()
 	case "f5":
@@ -49,12 +56,44 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	idx := m.inputIdxForField(f)
-	if idx >= 0 {
+	if idx >= 0 && !isSecretField(f) {
 		var cmd tea.Cmd
 		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m *Model) startSecretEdit(idx int) tea.Cmd {
+	m.editing = idx
+	m.inputs[idx].SetValue("")
+	return m.inputs[idx].Focus()
+}
+
+func (m *Model) handleSecretEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		v := m.inputs[m.editing].Value()
+		if m.editing == inAPIKey {
+			m.pendAPIKey, m.apiKeyDirty = v, true
+		} else {
+			m.pendPass, m.passDirty = v, true
+		}
+		m.endSecretEdit()
+		return m, nil
+	case "esc":
+		m.endSecretEdit()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.inputs[m.editing], cmd = m.inputs[m.editing].Update(msg)
+	return m, cmd
+}
+
+func (m *Model) endSecretEdit() {
+	m.inputs[m.editing].SetValue("")
+	m.inputs[m.editing].Blur()
+	m.editing = -1
 }
 
 func (m *Model) saveAndSync() tea.Cmd {
@@ -120,7 +159,7 @@ func (m *Model) save() tea.Cmd {
 			m.err = "Server URL is required"
 			return nil
 		}
-		if m.inputs[inPassphrase].Value() == "" {
+		if m.effectivePass() == "" {
 			m.err = "Passphrase is required"
 			return nil
 		}
@@ -160,8 +199,8 @@ func (m *Model) save() tea.Cmd {
 		remotePort = "18443"
 	}
 	serverURL := m.inputs[inServerURL].Value()
-	apiKeyPlain := m.inputs[inAPIKey].Value()
-	passPlain := m.inputs[inPassphrase].Value()
+	apiKeyDirty, passDirty := m.apiKeyDirty, m.passDirty
+	apiKeyPend, passPend := m.pendAPIKey, m.pendPass
 	interval := m.inputs[inInterval].Value()
 
 	return func() tea.Msg {
@@ -182,28 +221,35 @@ func (m *Model) save() tea.Cmd {
 			}
 		}
 
-		if apiKeyPlain != m.loadedAPIKey || passPlain != m.loadedPass {
+		if apiKeyDirty || passDirty {
 			k := mk.GetKey()
 			if k == nil {
 				return types.ErrorMsg{Err: fmt.Errorf("master key required to save secrets")}
 			}
 			defer k.Clear()
-			for _, kv := range [][2]string{
-				{"sync_api_key", apiKeyPlain},
-				{"sync_passphrase", passPlain},
+			for _, kv := range []struct {
+				key   string
+				value string
+				dirty bool
+			}{
+				{"sync_api_key", apiKeyPend, apiKeyDirty},
+				{"sync_passphrase", passPend, passDirty},
 			} {
-				if kv[1] == "" {
-					if err := set(kv[0], ""); err != nil {
-						return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv[0], err)}
+				if !kv.dirty {
+					continue
+				}
+				if kv.value == "" {
+					if err := set(kv.key, ""); err != nil {
+						return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv.key, err)}
 					}
 					continue
 				}
-				enc, err := security.Encrypt([]byte(kv[1]), k.Bytes())
+				enc, err := security.Encrypt([]byte(kv.value), k.Bytes())
 				if err != nil {
-					return types.ErrorMsg{Err: fmt.Errorf("encrypt %s: %w", kv[0], err)}
+					return types.ErrorMsg{Err: fmt.Errorf("encrypt %s: %w", kv.key, err)}
 				}
-				if err := set(kv[0], enc); err != nil {
-					return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv[0], err)}
+				if err := set(kv.key, enc); err != nil {
+					return types.ErrorMsg{Err: fmt.Errorf("save %s: %w", kv.key, err)}
 				}
 			}
 		}
@@ -221,14 +267,14 @@ func (m *Model) save() tea.Cmd {
 
 func (m *Model) testConnection() tea.Cmd {
 	serverURL := m.inputs[inServerURL].Value()
-	apiKey := m.inputs[inAPIKey].Value()
+	apiKey := m.effectiveAPIKey()
 	insecureTLS := m.insecureIdx == 1
 	mode := m.modeIdx
 	remotePort, _ := strconv.Atoi(m.inputs[inRemotePort].Value())
 	if remotePort <= 0 {
 		remotePort = 18443
 	}
-	passphrase := m.inputs[inPassphrase].Value()
+	passphrase := m.effectivePass()
 	hostIdx := m.hostIdx
 	hostOpts := m.hostOpts
 	database := m.db

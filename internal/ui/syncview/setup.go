@@ -10,7 +10,7 @@ import (
 )
 
 func New(database *gorm.DB, mk *security.MasterKeyManager) *Model {
-	m := &Model{db: database, masterKey: mk, hostIdx: -1}
+	m := &Model{db: database, masterKey: mk, hostIdx: -1, editing: -1}
 
 	m.inputs[inRemotePort] = textinput.New()
 	m.inputs[inRemotePort].Placeholder = "18443"
@@ -88,8 +88,6 @@ func (m *Model) loadFromDB() {
 	m.inputs[inServerURL].SetValue(get("sync_server_url", ""))
 	m.loadedAPIKey = decrypt("sync_api_key")
 	m.loadedPass = decrypt("sync_passphrase")
-	m.inputs[inAPIKey].SetValue(m.loadedAPIKey)
-	m.inputs[inPassphrase].SetValue(m.loadedPass)
 	m.inputs[inInterval].SetValue(get("sync_interval", ""))
 
 	m.db.Order("alias").Find(&m.hostOpts)
