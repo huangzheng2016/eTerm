@@ -205,40 +205,51 @@ func (m *voiceSettingsModel) sections() []voiceSection {
 	for i := range enginePickerDescriptors() {
 		engine.rows = append(engine.rows, voiceRow{kind: vrowEngineOption, engineIdx: i})
 	}
-	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); !ok {
+	if _, ok := voice.EngineDescriptorByID(m.cfg.Engine); !ok {
 		engine.rows = append(engine.rows, voiceRow{kind: vrowEngineOption, engineIdx: -1})
-	} else {
-		for _, p := range d.Params {
-			engine.rows = append(engine.rows, voiceRow{kind: vrowParam, param: p})
-		}
 	}
 	sections := []voiceSection{engine}
 
-	if m.cfg.Engine == voiceEngineLocal {
-		models := voiceSection{title: "Models"}
-		models.rows = append(models.rows, voiceRow{kind: vrowHelper})
-		for i := range voice.ModelCatalog() {
-			models.rows = append(models.rows, voiceRow{kind: vrowModel, modelIdx: i})
+	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok && len(d.Params) > 0 {
+		params := voiceSection{title: d.Label + " 设置"}
+		for _, p := range d.Params {
+			params.rows = append(params.rows, voiceRow{kind: vrowParam, param: p})
 		}
-		models.rows = append(models.rows, voiceRow{kind: vrowCustomPath})
-		if m.precisionAvailable() {
-			models.rows = append(models.rows, voiceRow{kind: vrowPrecision})
-		}
-		sections = append(sections, models)
+		sections = append(sections, params)
 	}
 
-	input := voiceSection{title: "Input"}
-	input.rows = append(input.rows,
-		voiceRow{kind: vrowTest},
-		voiceRow{kind: vrowThreshold},
-		voiceRow{kind: vrowSilence},
-		voiceRow{kind: vrowSentenceEnd},
-	)
-	sections = append(sections, input)
+	if m.cfg.Engine == voiceEngineLocal {
+		model := voiceSection{title: "Model"}
+		for i := range voice.ModelCatalog() {
+			model.rows = append(model.rows, voiceRow{kind: vrowModel, modelIdx: i})
+		}
+		model.rows = append(model.rows, voiceRow{kind: vrowCustomPath})
+		if m.precisionAvailable() {
+			model.rows = append(model.rows, voiceRow{kind: vrowPrecision})
+		}
+		sections = append(sections, model, voiceSection{
+			title: "Voice Helper",
+			rows:  []voiceRow{{kind: vrowHelper}},
+		})
+	}
+
+	sections = append(sections, voiceSection{
+		title: "Input",
+		rows: []voiceRow{
+			{kind: vrowThreshold},
+			{kind: vrowSilence},
+			{kind: vrowSentenceEnd},
+		},
+	})
+
+	sections = append(sections, voiceSection{
+		title: "Microphone test",
+		rows:  []voiceRow{{kind: vrowTest}},
+	})
 
 	if m.cfg.Engine == voiceEngineVolcano {
 		sections = append(sections, voiceSection{
-			title: "Extra features",
+			title: "Volcano features",
 			rows:  []voiceRow{{kind: vrowContext}, {kind: vrowDDC}},
 		})
 	}

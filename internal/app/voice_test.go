@@ -631,8 +631,19 @@ func TestVoiceSettingsParamOptionsCycle(t *testing.T) {
 
 func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m.SetSize(80, 30)
 
+	titles := func() string {
+		var out []string
+		for _, s := range m.sections() {
+			out = append(out, s.title)
+		}
+		return strings.Join(out, "|")
+	}
+
+	if got := titles(); got != "Engine|Model|Voice Helper|Input|Microphone test" {
+		t.Fatalf("local sections = %q", got)
+	}
 	if findVoiceRow(m, vrowHelper) < 0 || findVoiceRow(m, vrowModel) < 0 {
 		t.Fatal("local helper/model rows missing")
 	}
@@ -640,21 +651,29 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 		t.Fatal("local shows engine param rows")
 	}
 	if findVoiceRow(m, vrowContext) >= 0 {
-		t.Fatal("local shows the extra feature rows")
+		t.Fatal("local shows the volcano feature rows")
 	}
-	if view := m.View().Content; !strings.Contains(view, "Voice Helper") || !strings.Contains(view, "Models") {
+	if view := m.View().Content; !strings.Contains(view, "Voice Helper") {
 		t.Fatalf("local rows not rendered:\n%s", view)
 	}
-	if strings.Contains(m.View().Content, "Extra features") {
-		t.Fatal("local rendered the extra features section")
+	if strings.Contains(m.View().Content, "Volcano features") {
+		t.Fatal("local rendered the volcano features section")
 	}
 
 	m.cfg.Engine = voiceEngineVolcano
+	if got := titles(); got != "Engine|Volcano Engine 设置|Input|Microphone test|Volcano features" {
+		t.Fatalf("volcano sections = %q", got)
+	}
+	for _, r := range m.sections()[0].rows {
+		if r.kind != vrowEngineOption {
+			t.Fatal("engine section holds non-option rows")
+		}
+	}
 	if findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModel) >= 0 {
 		t.Fatal("volcano shows local-only rows")
 	}
 	if findVoiceRow(m, vrowContext) < 0 || findVoiceRow(m, vrowDDC) < 0 {
-		t.Fatal("volcano missing the extra feature rows")
+		t.Fatal("volcano missing the volcano feature rows")
 	}
 	n := 0
 	for _, r := range m.rows() {
@@ -666,13 +685,19 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 		t.Fatalf("volcano param rows = %d", n)
 	}
 	view := m.View().Content
-	for _, label := range []string{"Volcano API key", "Volcano model", voice.ResourceIDSeedASR, "Extra features"} {
+	for _, label := range []string{"Volcano API key", "Volcano model", voice.ResourceIDSeedASR, "Volcano features"} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("missing %q:\n%s", label, view)
 		}
 	}
+	if strings.Contains(view, "Extra features") {
+		t.Fatal("old section title still rendered")
+	}
 
 	m.cfg.Engine = "mystery"
+	if got := titles(); got != "Engine|Input|Microphone test" {
+		t.Fatalf("unknown engine sections = %q", got)
+	}
 	if findVoiceRow(m, vrowTest) < 0 {
 		t.Fatal("unknown engine lost shared rows")
 	}
@@ -1164,11 +1189,12 @@ func TestVoiceSettingsModelRows(t *testing.T) {
 	}
 
 	rows := m.rows()
-	if len(rows) < helperIdx+5 || rows[helperIdx].kind != vrowHelper || rows[helperIdx+1].kind != vrowModel || rows[helperIdx+2].kind != vrowModel || rows[helperIdx+3].kind != vrowCustomPath || rows[helperIdx+4].kind != vrowPrecision {
+	modelIdx := findVoiceRow(m, vrowModel)
+	if modelIdx < 0 || len(rows) < modelIdx+5 || rows[modelIdx+1].kind != vrowModel || rows[modelIdx+2].kind != vrowCustomPath || rows[modelIdx+3].kind != vrowPrecision || rows[modelIdx+4].kind != vrowHelper {
 		t.Fatalf("model rows = %+v", rows)
 	}
 
-	m.cursor = helperIdx + 2
+	m.cursor = modelIdx + 1
 	_, cmd = m.Update(enter)
 	req, ok = cmd().(voiceDownloadRequestMsg)
 	if !ok || req.target != voice.ModelCatalog()[1].ID {
@@ -2139,10 +2165,10 @@ func TestVoiceSettingsExtraRows(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m.SetSize(80, 30)
 
 	if findVoiceRow(m, vrowContext) >= 0 || findVoiceRow(m, vrowDDC) >= 0 {
-		t.Fatal("local engine shows the extra feature rows")
+		t.Fatal("local engine shows the volcano feature rows")
 	}
 	m.cfg.Engine = voiceEngineVolcano
 	if findVoiceRow(m, vrowContext) < 0 || findVoiceRow(m, vrowDDC) < 0 {
@@ -2177,8 +2203,8 @@ func TestVoiceSettingsExtraRows(t *testing.T) {
 	if got.DDC || !got.Context {
 		t.Fatalf("persisted = %+v", got)
 	}
-	if view := m.View().Content; !strings.Contains(view, "Semantic smoothing (DDC)") || !strings.Contains(view, "Extra features") {
-		t.Fatalf("extra rows not rendered:\n%s", view)
+	if view := m.View().Content; !strings.Contains(view, "Semantic smoothing (DDC)") || !strings.Contains(view, "Volcano features") {
+		t.Fatalf("volcano feature rows not rendered:\n%s", view)
 	}
 }
 
