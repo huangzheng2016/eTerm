@@ -934,3 +934,70 @@ func TestUnlockResetClosesTerminalSessions(t *testing.T) {
 		t.Fatalf("tabs after unlock = %+v", a.tabs)
 	}
 }
+
+func TestUnlockResetDropsInFlightReconnectDelivery(t *testing.T) {
+	oldOpen := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
+	deliveredClosed := false
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		return &internalssh.InteractiveSession{Stdin: closeTracker{closed: &deliveredClosed}}, "", nil
+	}
+	a := tickTestApp(t)
+	if err := db.SetSetting(a.db, "sync_mode", "http"); err != nil {
+		t.Fatal(err)
+	}
+	origClosed := false
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: closeTracker{closed: &origClosed}}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	tab = updated.(*sshview.Model)
+	a.tabs = append(a.tabs,
+		Tab{Type: HomeTab, Title: "List"},
+		Tab{Type: SSHTab, Title: "[T]peer-work", Model: tab},
+	)
+
+	next, cmd := a.applyRemoteShellReconnect(types.RemoteShellReconnectMsg{
+		StreamID:    tab.StreamID(),
+		Spec:        *tab.RemoteReconnect(),
+		Auto:        true,
+		Attempt:     1,
+		MaxAttempts: 3,
+	})
+	a = next
+	if cmd == nil || !a.tabs[1].reconnectInFlight {
+		t.Fatal("reconnect did not start on the ssh tab")
+	}
+
+	up, _ := a.Update(types.MasterKeyUnlockedMsg{})
+	a = up.(App)
+	if !origClosed {
+		t.Fatal("unlock reset did not close the original session")
+	}
+	if len(a.tabs) != 1 || a.tabs[0].Type != HomeTab {
+		t.Fatalf("tabs after unlock = %+v", a.tabs)
+	}
+
+	opened, ok := lastBatchMessage(t, cmd).(remoteTerminalOpenedMsg)
+	if !ok {
+		t.Fatal("in-flight reconnect did not deliver remoteTerminalOpenedMsg")
+	}
+	if opened.replaceTabAt != 1 {
+		t.Fatalf("replaceTabAt = %d, want 1", opened.replaceTabAt)
+	}
+	up, cmd = a.Update(opened)
+	a = up.(App)
+	if cmd != nil {
+		t.Fatal("stale delivery should be dropped without commands")
+	}
+	if !deliveredClosed {
+		t.Fatal("stale delivery did not close the extra session")
+	}
+	if len(a.tabs) != 1 || a.tabs[0].Type != HomeTab {
+		t.Fatalf("stale delivery resurrected a tab: %+v", a.tabs)
+	}
+}

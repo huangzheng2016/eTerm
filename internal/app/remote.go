@@ -367,9 +367,9 @@ func remoteTmuxTabTitle(peerName, sessionID string) string {
 
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
-	if msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
-		if !a.tabs[msg.replaceTabAt].reconnectInFlight || a.tabs[msg.replaceTabAt].reconnectGen != msg.reconnectGen {
-			appDebugf("drop stale remote reconnect delivery: idx=%d gen=%d tabGen=%d inFlight=%v", msg.replaceTabAt, msg.reconnectGen, a.tabs[msg.replaceTabAt].reconnectGen, a.tabs[msg.replaceTabAt].reconnectInFlight)
+	if msg.replaceTabAt >= 0 {
+		if msg.replaceTabAt >= len(a.tabs) || !a.tabs[msg.replaceTabAt].reconnectInFlight || a.tabs[msg.replaceTabAt].reconnectGen != msg.reconnectGen {
+			appDebugf("drop stale remote reconnect delivery: idx=%d gen=%d tabs=%d", msg.replaceTabAt, msg.reconnectGen, len(a.tabs))
 			remote.CloseSessionNow(msg.is)
 			return a, nil
 		}
