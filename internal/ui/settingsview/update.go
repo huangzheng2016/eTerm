@@ -13,30 +13,32 @@ import (
 )
 
 const (
-	cursorSaveTranscript = 0
-	cursorGridStatus     = 1
-	cursorLocalShell     = 2
-	cursorTmuxConfigFile = 3
-	cursorShareMaxHours  = 4
-	cursorReplaySessions = 5
-	cursorPassword       = 6
-	bindingCursorBase    = 7
+	cursorSaveTranscript = iota
+	cursorReplaySessions
+	cursorGridStatus
+	cursorLocalShell
+	cursorTmuxConfigFile
+	cursorShareMaxHours
+	cursorPassword
 )
 
 func (m *Model) Init() tea.Cmd {
 	return nil
 }
 
-func (m *Model) maxCursor() int {
-	if len(m.entries) == 0 {
-		return cursorPassword
-	}
-	return bindingCursorBase - 1 + len(m.entries)
-}
-
 func (m *Model) openPasswordOverlay() (tea.Model, tea.Cmd) {
 	m.pwd = newPasswordOverlay(m.noPasswordMode, m.width, m.height)
 	return m, m.pwd.Init()
+}
+
+func (m *Model) resetToFactory() {
+	m.saveSessionTranscript = true
+	m.replaySessions = true
+	m.gridStatusWords = false
+	m.localTerminalShell = ""
+	m.tmuxConfigFile = ""
+	m.shareMaxHours = "4"
+	m.modified = true
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -46,10 +48,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg { return types.ErrorMsg{Err: msg.Err} }
 		}
 		m.modified = false
-		return m, tea.Batch(
-			func() tea.Msg { return types.KeyBindingsChangedMsg{} },
-			func() tea.Msg { return types.RefreshListMsg{} },
-		)
+		return m, func() tea.Msg { return types.RefreshListMsg{} }
 
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height)
@@ -59,14 +58,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseWheelMsg:
-		if m.pwd != nil {
+		if m.pwd != nil || m.confirmReset.IsActive() {
 			return m, nil
 		}
 		if m.state != stateNormal {
 			return m, nil
 		}
 		n := m.totalScrollLines()
-		vis := m.visibleRows()
+		vis := visibleRowsFor(m.height)
 		maxScr := n - vis
 		if maxScr < 0 {
 			maxScr = 0
@@ -85,6 +84,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if m.pwd != nil {
+			return m, nil
+		}
+		if m.confirmReset.IsActive() {
+			if msg.Button == tea.MouseLeft {
+				ox, oy := dialogOrigin(m.confirmReset.View(), m.width, m.height)
+				mm := msg.Mouse()
+				mm.X -= ox
+				mm.Y -= oy
+				msg = tea.MouseClickMsg(mm)
+			}
+			m.confirmReset, _ = m.confirmReset.Update(msg)
+			if !m.confirmReset.IsActive() && m.confirmReset.Result() {
+				m.resetToFactory()
+			}
 			return m, nil
 		}
 		if m.state != stateNormal {
@@ -106,16 +119,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cursor = li
-		if li == cursorPassword {
+		switch li {
+		case cursorPassword:
 			return m.openPasswordOverlay()
-		}
-		if li == cursorLocalShell {
+		case cursorLocalShell:
 			return m.startShellEdit()
-		}
-		if li == cursorTmuxConfigFile {
+		case cursorTmuxConfigFile:
 			return m.startTmuxConfigEdit()
-		}
-		if li == cursorShareMaxHours {
+		case cursorShareMaxHours:
 			return m.startShareHoursEdit()
 		}
 		return m, nil
@@ -135,6 +146,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pwd = next
 			return m, cmd
 		}
+		if m.confirmReset.IsActive() {
+			m.confirmReset, _ = m.confirmReset.Update(msg)
+			if !m.confirmReset.IsActive() && m.confirmReset.Result() {
+				m.resetToFactory()
+			}
+			return m, nil
+		}
 		if m.state == stateShell {
 			return m.handleShellEdit(msg)
 		}
@@ -143,13 +161,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateShareHours {
 			return m.handleShareHoursEdit(msg)
-		}
-		if m.state == stateCapture || m.state == stateAppend {
-			if m.cursor < bindingCursorBase {
-				m.state = stateNormal
-				return m, nil
-			}
-			return m.handleCapture(msg)
 		}
 		return m.handleNormal(msg)
 	}
@@ -163,115 +174,40 @@ func (m *Model) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cursor--
 		}
 	case "down", "j":
-		if m.cursor < m.maxCursor() {
+		if m.cursor < cursorPassword {
 			m.cursor++
 		}
-	case " ":
-		if m.cursor == cursorReplaySessions {
+	case " ", "enter":
+		switch m.cursor {
+		case cursorSaveTranscript:
+			m.saveSessionTranscript = !m.saveSessionTranscript
+			m.modified = true
+		case cursorReplaySessions:
 			m.replaySessions = !m.replaySessions
 			m.modified = true
-			return m, nil
-		}
-		if m.cursor < cursorLocalShell {
-			if m.cursor == cursorSaveTranscript {
-				m.saveSessionTranscript = !m.saveSessionTranscript
-			} else {
-				m.gridStatusWords = !m.gridStatusWords
-			}
+		case cursorGridStatus:
+			m.gridStatusWords = !m.gridStatusWords
 			m.modified = true
-			return m, nil
-		}
-		if m.cursor == cursorPassword {
+		case cursorPassword:
 			return m.openPasswordOverlay()
 		}
-	case "enter":
-		if m.cursor == cursorReplaySessions {
-			m.replaySessions = !m.replaySessions
-			m.modified = true
-			return m, nil
-		}
-		if m.cursor < cursorLocalShell {
-			if m.cursor == cursorSaveTranscript {
-				m.saveSessionTranscript = !m.saveSessionTranscript
-			} else {
-				m.gridStatusWords = !m.gridStatusWords
+		if msg.String() == "enter" {
+			switch m.cursor {
+			case cursorLocalShell:
+				return m.startShellEdit()
+			case cursorTmuxConfigFile:
+				return m.startTmuxConfigEdit()
+			case cursorShareMaxHours:
+				return m.startShareHoursEdit()
 			}
-			m.modified = true
-			return m, nil
-		}
-		if m.cursor == cursorLocalShell {
-			return m.startShellEdit()
-		}
-		if m.cursor == cursorTmuxConfigFile {
-			return m.startTmuxConfigEdit()
-		}
-		if m.cursor == cursorShareMaxHours {
-			return m.startShareHoursEdit()
-		}
-		if m.cursor == cursorPassword {
-			return m.openPasswordOverlay()
-		}
-		m.state = stateCapture
-	case "+", "=":
-		if m.cursor >= bindingCursorBase {
-			m.state = stateAppend
-		}
-	case "backspace", "delete":
-		if m.cursor < bindingCursorBase {
-			return m, nil
-		}
-		idx := m.cursor - bindingCursorBase
-		if len(m.entries[idx].Keys) > 0 {
-			m.entries[idx].Keys = nil
-			m.modified = true
 		}
 	case "ctrl+s":
 		return m, m.save()
 	case "ctrl+r":
-		m.entries = buildEntries(m.defaultsJSON)
-		m.saveSessionTranscript = true
-		m.replaySessions = true
-		m.gridStatusWords = false
-		m.localTerminalShell = ""
-		m.tmuxConfigFile = ""
-		m.shareMaxHours = "4"
-		m.modified = true
+		m.confirmReset = m.confirmReset.Show()
 	case "esc":
 		return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 	}
-	return m, nil
-}
-
-func (m *Model) handleCapture(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	idx := m.cursor - bindingCursorBase
-	if idx < 0 || idx >= len(m.entries) {
-		m.state = stateNormal
-		return m, nil
-	}
-	ks := keyString(msg)
-
-	if ks == "esc" || ks == "escape" {
-		m.state = stateNormal
-		return m, nil
-	}
-
-	if m.state == stateAppend {
-		found := false
-		for _, k := range m.entries[idx].Keys {
-			if k == ks {
-				found = true
-				break
-			}
-		}
-		if !found {
-			m.entries[idx].Keys = append(m.entries[idx].Keys, ks)
-		}
-	} else {
-		m.entries[idx].Keys = []string{ks}
-	}
-	m.modified = true
-	m.state = stateNormal
-
 	return m, nil
 }
 
@@ -361,7 +297,6 @@ func (m *Model) handleShareHoursEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) save() tea.Cmd {
 	database := m.db
-	configData := m.ConfigJSON()
 	saveTr := "true"
 	if !m.saveSessionTranscript {
 		saveTr = "false"
@@ -378,9 +313,6 @@ func (m *Model) save() tea.Cmd {
 	tmuxConfigFile := strings.TrimSpace(m.tmuxConfigFile)
 	shareMaxHours := strings.TrimSpace(m.shareMaxHours)
 	return func() tea.Msg {
-		if err := db.SetSetting(database, "keybindings", string(configData)); err != nil {
-			return types.SettingsSavedMsg{Err: err}
-		}
 		if err := db.SetSetting(database, "save_session_transcript", saveTr); err != nil {
 			return types.SettingsSavedMsg{Err: err}
 		}

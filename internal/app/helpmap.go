@@ -277,6 +277,8 @@ func (a App) contextualHelpKeyMap() bubbleshelp.KeyMap {
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case SettingsTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
+	case ShortcutsTab:
+		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case SyncTab:
 		return editorAppHelpMap{a.keyMap, a.kbConfig}
 	case VoiceTab:

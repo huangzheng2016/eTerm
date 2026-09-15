@@ -14,6 +14,7 @@ type escMenuItem int
 const (
 	escMenuQuit escMenuItem = iota
 	escMenuSettings
+	escMenuShortcuts
 	escMenuVoice
 	escMenuImport
 	escMenuExport
@@ -44,6 +45,8 @@ func (m *escMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
 			return true, func() tea.Msg { return types.QuitRequestMsg{} }
 		case escMenuSettings:
 			return true, func() tea.Msg { return types.OpenSettingsMsg{} }
+		case escMenuShortcuts:
+			return true, func() tea.Msg { return openShortcutsMsg{} }
 		case escMenuVoice:
 			return true, func() tea.Msg { return openVoiceSettingsMsg{} }
 		case escMenuImport:
@@ -59,6 +62,8 @@ func (m *escMenuModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
 		return true, func() tea.Msg { return types.QuitRequestMsg{} }
 	case "s":
 		return true, func() tea.Msg { return types.OpenSettingsMsg{} }
+	case "c":
+		return true, func() tea.Msg { return openShortcutsMsg{} }
 	case "v":
 		return true, func() tea.Msg { return openVoiceSettingsMsg{} }
 	case "i":
@@ -78,6 +83,7 @@ func (m *escMenuModel) View() string {
 	}{
 		{"  Quit          ", "q"},
 		{"  Settings      ", "s"},
+		{"  Shortcuts     ", "c"},
 		{"  Voice Input   ", "v"},
 		{"  Import        ", "i"},
 		{"  Export        ", "e"},

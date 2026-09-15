@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/ui/fwdview"
 	"github.com/huangzheng2016/eTerm/internal/ui/keyview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sessionhistview"
@@ -101,13 +102,47 @@ func (a App) openSettingsTab() (App, tea.Cmd) {
 			return a, nil
 		}
 	}
-	configData, _ := json.Marshal(a.kbConfig)
-	defaultsData, _ := json.Marshal(DefaultKeyBindingConfig())
-	sm := settingsview.New(a.db, configData, defaultsData, a.noPasswordMode)
+	sm := settingsview.New(a.db, a.noPasswordMode)
 	if a.width > 0 {
 		sm.SetSize(a.width, a.mainContentHeightForType(SettingsTab))
 	}
 	tab := Tab{Type: SettingsTab, Title: "Settings", Model: sm}
+	a.tabs = append(a.tabs, tab)
+	a.activeTab = len(a.tabs) - 1
+	a.syncTabBar()
+	return a, sm.Init()
+}
+
+func (a App) openShortcutsTab() (App, tea.Cmd) {
+	for i, tab := range a.tabs {
+		if tab.Type == ShortcutsTab {
+			a.activeTab = i
+			a.tabBar = a.tabBar.SetActive(a.activeTab)
+			return a, nil
+		}
+	}
+	configData, _ := json.Marshal(a.kbConfig)
+	if raw, err := db.GetSetting(a.db, keybindingsSettingKey); err == nil && raw != "" {
+		var extra map[string]json.RawMessage
+		if json.Unmarshal([]byte(raw), &extra) == nil {
+			var known map[string]json.RawMessage
+			_ = json.Unmarshal(configData, &known)
+			for k, v := range extra {
+				if _, ok := known[k]; !ok {
+					known[k] = v
+				}
+			}
+			if merged, err := json.Marshal(known); err == nil {
+				configData = merged
+			}
+		}
+	}
+	defaultsData, _ := json.Marshal(DefaultKeyBindingConfig())
+	sm := settingsview.NewShortcuts(a.db, configData, defaultsData)
+	if a.width > 0 {
+		sm.SetSize(a.width, a.mainContentHeightForType(ShortcutsTab))
+	}
+	tab := Tab{Type: ShortcutsTab, Title: "Shortcuts", Model: sm}
 	a.tabs = append(a.tabs, tab)
 	a.activeTab = len(a.tabs) - 1
 	a.syncTabBar()
@@ -156,3 +191,5 @@ func (a App) openVoiceSettingsTab(fromHotkey bool) (App, tea.Cmd) {
 	a.syncTabBar()
 	return a, m.Init()
 }
+
+type openShortcutsMsg struct{}
