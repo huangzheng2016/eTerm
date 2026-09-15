@@ -128,6 +128,25 @@ func TestShortcutsCtrlRRequiresConfirm(t *testing.T) {
 	}
 }
 
+func TestShortcutsCtrlRConfirmMouseYes(t *testing.T) {
+	configJSON := []byte(`{"quit_app":["ctrl+shift+x"]}`)
+	m := testShortcutsDB(t, configJSON)
+	m.SetSize(80, 24)
+
+	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if !m.confirmReset.IsActive() {
+		t.Fatal("ctrl+r must ask for confirmation before resetting")
+	}
+	ox, oy := dialogOrigin(m.confirmReset.View(), m.width, m.height)
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: ox + 4, Y: oy + 6, Button: tea.MouseLeft}))
+	if m.confirmReset.IsActive() {
+		t.Fatal("Yes click did not close the dialog")
+	}
+	if got := entryByField(m, "quit_app").Keys; len(got) != 1 || got[0] != "ctrl+shift+q" {
+		t.Fatalf("Yes click did not restore defaults: %v", got)
+	}
+}
+
 func TestShortcutsGroupJump(t *testing.T) {
 	m := testShortcutsDB(t, nil)
 	starts := m.groupStarts()

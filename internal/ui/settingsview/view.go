@@ -234,3 +234,14 @@ func centerDialog(dialog string, width, height int) string {
 	}
 	return lipgloss.Place(width, h, lipgloss.Center, lipgloss.Center, dialog)
 }
+
+func dialogOrigin(dialog string, width, height int) (int, int) {
+	if width <= 0 {
+		return 0, 0
+	}
+	h := height
+	if h <= 0 {
+		h = lipgloss.Height(dialog) + 2
+	}
+	return (width - lipgloss.Width(dialog)) / 2, (h - lipgloss.Height(dialog)) / 2
+}

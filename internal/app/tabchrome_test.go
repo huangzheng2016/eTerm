@@ -6,10 +6,12 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/relay"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
+	"github.com/huangzheng2016/eTerm/internal/ui/settingsview"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 	"github.com/huangzheng2016/eTerm/internal/voice"
@@ -181,5 +183,30 @@ func TestVoiceHotkeySkippedInShortcutsTab(t *testing.T) {
 	}
 	if a.voiceEngine != nil {
 		t.Fatal("engine was built")
+	}
+}
+
+func TestOpenShortcutsTabPreservesUnknownKeybindingFields(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/app.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := `{"quit_app":["ctrl+shift+x"],"future_binding":["f9"]}`
+	if err := db.SetSetting(database, keybindingsSettingKey, stored); err != nil {
+		t.Fatal(err)
+	}
+	a := App{db: database, kbConfig: LoadKeyBindingConfig(database)}
+
+	a, _ = a.openShortcutsTab()
+	sm, ok := a.tabs[a.activeTab].Model.(*settingsview.ShortcutsModel)
+	if !ok {
+		t.Fatalf("model = %T", a.tabs[a.activeTab].Model)
+	}
+	out := string(sm.ConfigJSON())
+	if !strings.Contains(out, `"future_binding":["f9"]`) {
+		t.Fatalf("unknown field lost: %s", out)
+	}
+	if !strings.Contains(out, `"quit_app":["ctrl+shift+x"]`) {
+		t.Fatalf("stored binding not effective: %s", out)
 	}
 }

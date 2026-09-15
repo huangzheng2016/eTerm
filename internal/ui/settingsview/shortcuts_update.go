@@ -86,6 +86,13 @@ func (m *ShortcutsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if m.confirmReset.IsActive() {
+			if msg.Button == tea.MouseLeft {
+				ox, oy := dialogOrigin(m.confirmReset.View(), m.width, m.height)
+				mm := msg.Mouse()
+				mm.X -= ox
+				mm.Y -= oy
+				msg = tea.MouseClickMsg(mm)
+			}
 			m.confirmReset, _ = m.confirmReset.Update(msg)
 			if !m.confirmReset.IsActive() && m.confirmReset.Result() {
 				m.resetToFactory()

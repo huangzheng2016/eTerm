@@ -121,6 +121,34 @@ func TestCtrlRResetCancelledKeepsValues(t *testing.T) {
 	}
 }
 
+func TestCtrlRConfirmMouseYesAndNo(t *testing.T) {
+	m := testSettingsDB(t)
+	m.SetSize(80, 24)
+	m.gridStatusWords = true
+	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if !m.confirmReset.IsActive() {
+		t.Fatal("ctrl+r must ask for confirmation before resetting")
+	}
+	ox, oy := dialogOrigin(m.confirmReset.View(), m.width, m.height)
+
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: ox + 16, Y: oy + 6, Button: tea.MouseLeft}))
+	if m.confirmReset.IsActive() {
+		t.Fatal("No click did not close the dialog")
+	}
+	if !m.gridStatusWords {
+		t.Fatal("No click applied the reset")
+	}
+
+	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	m.Update(tea.MouseClickMsg(tea.Mouse{X: ox + 4, Y: oy + 6, Button: tea.MouseLeft}))
+	if m.confirmReset.IsActive() {
+		t.Fatal("Yes click did not close the dialog")
+	}
+	if m.gridStatusWords {
+		t.Fatal("Yes click did not apply the reset")
+	}
+}
+
 func TestBuildEntriesIncludesTabPageKeys(t *testing.T) {
 	data, err := json.Marshal(map[string][]string{
 		"tab_page_left":  {"alt+shift+left"},
