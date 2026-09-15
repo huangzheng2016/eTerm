@@ -171,6 +171,14 @@ func (e *aiExecutor) SendKeys(ctx context.Context, id string, keys string, waitM
 	return r.text, err
 }
 
+func (e *aiExecutor) ShellHistory(_ context.Context, limit int) (string, string, []string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", nil, err
+	}
+	return ai.ReadShellHistory(home, limit)
+}
+
 func (e *aiExecutor) EnterDaemon(ctx context.Context, daemon, session string) error {
 	_, err := e.roundTrip(ctx, aiToolRequest{op: aiToolEnterDaemon, id: daemon, arg: session})
 	return err

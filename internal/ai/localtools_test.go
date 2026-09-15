@@ -123,16 +123,24 @@ func TestAgentInstructionIncludesLocalTools(t *testing.T) {
 	if !strings.Contains(on, "str_replace_editor") || !strings.Contains(on, "bash:") {
 		t.Fatal("local tools missing from the prompt")
 	}
-	for _, s := range []string{"open_local_terminal", "open_ssh", "open_tmux", "list_hosts", "list_tmux_sessions", "notify"} {
+	for _, s := range []string{"open_local_terminal", "open_ssh", "open_tmux", "list_hosts", "list_tmux_sessions", "notify", "shell_history"} {
 		if !strings.Contains(on, s) {
 			t.Fatalf("base prompt missing %q", s)
+		}
+	}
+	for _, s := range []string{"read-only tools first", "shell_history, list_tabs", "genuinely cannot be read"} {
+		if !strings.Contains(on, s) {
+			t.Fatalf("read-only guidance missing %q", s)
 		}
 	}
 	if !strings.Contains(on, "list_daemons") || !strings.Contains(on, "kill_session") {
 		t.Fatal("daemon section missing while enabled")
 	}
+	if !strings.Contains(on, "enter_daemon attaches an interactive tab") {
+		t.Fatal("daemon read-only guidance missing while enabled")
+	}
 	off := agentInstruction(false)
-	if strings.Contains(off, "list_daemons") || strings.Contains(off, "kill_session") {
+	if strings.Contains(off, "list_daemons") || strings.Contains(off, "kill_session") || strings.Contains(off, "enter_daemon") {
 		t.Fatal("daemon section present while disabled")
 	}
 	for _, s := range []string{"open_local_terminal", "str_replace_editor", "notify"} {
@@ -155,7 +163,7 @@ func TestBuildToolsIncludesSessionOpenTools(t *testing.T) {
 		}
 		names[info.Name] = true
 	}
-	for _, want := range []string{"open_local_terminal", "list_hosts", "open_ssh", "list_tmux_sessions", "open_tmux", "notify"} {
+	for _, want := range []string{"open_local_terminal", "list_hosts", "open_ssh", "list_tmux_sessions", "open_tmux", "notify", "shell_history"} {
 		if !names[want] {
 			t.Fatalf("missing %s in %v", want, names)
 		}
@@ -233,5 +241,156 @@ func TestTailRunes(t *testing.T) {
 	got := tailRunes("0123456789", 4)
 	if !strings.HasPrefix(got, "<output clipped>") || !strings.HasSuffix(got, "6789") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func writeHistoryFile(t *testing.T, home, rel, content string) {
+	t.Helper()
+	p := filepath.Join(home, rel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadShellHistoryZsh(t *testing.T) {
+	home := t.TempDir()
+	writeHistoryFile(t, home, ".zsh_history", ": 1694760000:0;git status\n: 1694760001:0;ls -la\nplain command\n")
+	shell, path, cmds, err := ReadShellHistory(home, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shell != "zsh" || path != filepath.Join(home, ".zsh_history") {
+		t.Fatalf("shell=%q path=%q", shell, path)
+	}
+	want := []string{"plain command", "ls -la", "git status"}
+	if strings.Join(cmds, "|") != strings.Join(want, "|") {
+		t.Fatalf("cmds = %v, want %v", cmds, want)
+	}
+}
+
+func TestReadShellHistoryLimit(t *testing.T) {
+	home := t.TempDir()
+	writeHistoryFile(t, home, ".zsh_history", "one\ntwo\nthree\nfour\n")
+	_, _, cmds, err := ReadShellHistory(home, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cmds) != 2 || cmds[0] != "four" || cmds[1] != "three" {
+		t.Fatalf("cmds = %v", cmds)
+	}
+}
+
+func TestReadShellHistoryBash(t *testing.T) {
+	home := t.TempDir()
+	writeHistoryFile(t, home, ".bash_history", "#1694760000\necho hi\n#1694760001\nmake build\n")
+	shell, _, cmds, err := ReadShellHistory(home, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shell != "bash" {
+		t.Fatalf("shell = %q", shell)
+	}
+	if len(cmds) != 2 || cmds[0] != "make build" || cmds[1] != "echo hi" {
+		t.Fatalf("cmds = %v", cmds)
+	}
+}
+
+func TestReadShellHistoryFish(t *testing.T) {
+	home := t.TempDir()
+	writeHistoryFile(t, home, filepath.Join(".local", "share", "fish", "fish_history"), "- cmd: echo hi\n  when: 1694760000\n- cmd: cd /tmp\n  when: 1694760001\n  paths:\n    - /tmp\n")
+	shell, _, cmds, err := ReadShellHistory(home, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shell != "fish" {
+		t.Fatalf("shell = %q", shell)
+	}
+	if len(cmds) != 2 || cmds[0] != "cd /tmp" || cmds[1] != "echo hi" {
+		t.Fatalf("cmds = %v", cmds)
+	}
+}
+
+func TestReadShellHistoryProbeOrder(t *testing.T) {
+	home := t.TempDir()
+	writeHistoryFile(t, home, ".zsh_history", "from zsh\n")
+	writeHistoryFile(t, home, ".bash_history", "from bash\n")
+	shell, _, cmds, err := ReadShellHistory(home, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shell != "zsh" || len(cmds) != 1 || cmds[0] != "from zsh" {
+		t.Fatalf("shell=%q cmds=%v", shell, cmds)
+	}
+}
+
+func TestReadShellHistoryMissing(t *testing.T) {
+	_, _, _, err := ReadShellHistory(t.TempDir(), 50)
+	if err == nil || !strings.Contains(err.Error(), "no shell history file found") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestReadShellHistoryUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read anything")
+	}
+	home := t.TempDir()
+	writeHistoryFile(t, home, ".zsh_history", "hidden command\n")
+	p := filepath.Join(home, ".zsh_history")
+	if err := os.Chmod(p, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+	_, _, _, err := ReadShellHistory(home, 50)
+	if err == nil || !strings.Contains(err.Error(), p) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type historyExecutor struct {
+	Executor
+	limit int
+	shell string
+	path  string
+	cmds  []string
+	err   error
+}
+
+func (e *historyExecutor) ShellHistory(_ context.Context, limit int) (string, string, []string, error) {
+	e.limit = limit
+	return e.shell, e.path, e.cmds, e.err
+}
+
+func TestShellHistoryTool(t *testing.T) {
+	exec := &historyExecutor{shell: "zsh", path: "/home/u/.zsh_history", cmds: []string{"ls", "pwd"}}
+	tools, err := BuildTools(exec, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh := invokable(t, tools, "shell_history")
+	out, err := sh.InvokableRun(context.Background(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.limit != 50 {
+		t.Fatalf("default limit = %d, want 50", exec.limit)
+	}
+	if !strings.Contains(out, `"zsh"`) || !strings.Contains(out, "ls") || !strings.Contains(out, "/home/u/.zsh_history") {
+		t.Fatalf("out = %q", out)
+	}
+
+	exec.err = errors.New("no shell history file found")
+	out, err = sh.InvokableRun(context.Background(), `{"limit":10}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.limit != 10 {
+		t.Fatalf("limit = %d, want 10", exec.limit)
+	}
+	if !strings.Contains(out, "no shell history file found") {
+		t.Fatalf("out = %q", out)
 	}
 }
