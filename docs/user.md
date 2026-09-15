@@ -47,7 +47,7 @@ helper 或模型未就绪时按 `C-r` 会打开设置面板引导下载。设置
 - speech sensitivity (0-1)：VAD 触发灵敏度
 - end-of-sentence silence (ms)：句尾静音判停时长
 - Sentence end：句尾动作 enter / space
-- Context awareness：上下文感知开关（默认关，仅火山引擎生效）。开启后开始录音会把上下文作为 `corpus.context`（dialog_ctx，800 token 上限）传给火山引擎提高识别率：当前是 AI 面板时取最近 20 轮对话（user/assistant 交替）；当前是终端标签页时取屏幕尾部最近 20 行，先清洗（去表格线/边框等结构符号、压缩空白、丢弃无字母数字或汉字的行、相邻重复行去重）
+- Context awareness：上下文感知开关（默认关，仅火山引擎生效）。开启后开始录音会把上下文作为 `corpus.context`（dialog_ctx，800 token 上限）传给火山引擎提高识别率：当前是 AI 面板时取最近 20 轮对话（user/assistant 交替）；当前是终端标签页时取屏幕尾部最近 20 行，先清洗（去表格线/边框等结构符号、压缩空白、丢弃无字母数字或汉字的行、相邻重复行去重）。上下文在每一句话（utterance）边界自动刷新
 - 测试录音：验证当前配置
 
 ## 多设备同步

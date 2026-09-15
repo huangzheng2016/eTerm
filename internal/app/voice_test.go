@@ -34,6 +34,7 @@ type fakeVoiceEngine struct {
 	modelDir  string
 	modelKind string
 	context   string
+	contextFn func() string
 }
 
 func findVoiceRow(m *voiceSettingsModel, kind int) int {
@@ -68,6 +69,9 @@ func (f *fakeVoiceEngine) SetModel(dir, kind string) error {
 func (f *fakeVoiceEngine) SetContext(ctx string) error {
 	f.context = ctx
 	return nil
+}
+func (f *fakeVoiceEngine) SetContextProvider(fn func() string) {
+	f.contextFn = fn
 }
 func (f *fakeVoiceEngine) Events() <-chan voice.Event { return f.events }
 func (f *fakeVoiceEngine) Close() error               { f.closed = true; close(f.events); return nil }
@@ -1966,7 +1970,7 @@ func TestVoiceContextStringFromTerminalTab(t *testing.T) {
 	}
 }
 
-func TestVoiceToggleSetsEngineContext(t *testing.T) {
+func TestVoiceToggleSetsEngineContextProvider(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
 	a.voiceCfg.Context = true
@@ -1986,8 +1990,18 @@ func TestVoiceToggleSetsEngineContext(t *testing.T) {
 		upd2, _ := a.Update(m)
 		a = upd2.(App)
 	}
-	if !strings.Contains(fe.context, `"dialog_ctx"`) || !strings.Contains(fe.context, "kubectl get pods") {
-		t.Fatalf("engine context = %q", fe.context)
+	if fe.contextFn == nil {
+		t.Fatal("engine got no context provider")
+	}
+	if got := fe.contextFn(); !strings.Contains(got, `"dialog_ctx"`) || !strings.Contains(got, "kubectl get pods") {
+		t.Fatalf("provider context = %q", got)
+	}
+
+	// The provider reads live state: newly fed terminal content shows up
+	// without restarting the recording.
+	feedSSHChunk(sv, "docker compose up\r\n")
+	if got := fe.contextFn(); !strings.Contains(got, "docker compose up") {
+		t.Fatalf("provider did not pick up fresh transcript: %q", got)
 	}
 
 	upd, cmd = a.toggleVoice()
@@ -2010,7 +2024,7 @@ func TestVoiceToggleSetsEngineContext(t *testing.T) {
 		upd2, _ := a.Update(m)
 		a = upd2.(App)
 	}
-	if fe.context != "" {
-		t.Fatalf("engine context not cleared: %q", fe.context)
+	if got := fe.contextFn(); got != "" {
+		t.Fatalf("provider not cleared with the switch off: %q", got)
 	}
 }

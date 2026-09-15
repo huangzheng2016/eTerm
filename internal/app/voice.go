@@ -524,7 +524,9 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	a.voiceStartedAt = time.Now()
 	a.voiceTickSeq++
 	_ = a.voiceEngine.SetVAD(a.voiceCfg.vadParams())
-	_ = a.voiceEngine.SetContext(a.voiceContextString())
+	if cp, ok := a.voiceEngine.(voice.ContextProvider); ok {
+		cp.SetContextProvider(a.voiceContextProvider())
+	}
 	cmds = append(cmds, voiceStartCmd(a.voiceEngine), voiceTick(a.voiceTickSeq))
 	return a, tea.Batch(cmds...)
 }
@@ -705,6 +707,13 @@ func (a App) handleVoiceDownload(msg voiceDownloadMsg) (App, tea.Cmd) {
 }
 
 const voiceContextTailBytes = 16 * 1024
+
+// voiceContextProvider returns a closure that computes the corpus.context at
+// dial time, so every connection (including per-utterance redials) gets a
+// fresh context. Returns "" when the setting is off.
+func (a App) voiceContextProvider() func() string {
+	return func() string { return a.voiceContextString() }
+}
 
 // voiceContextString builds the Volcano corpus.context for this recording
 // start: recent AI dialog turns when the AI panel is open, otherwise the

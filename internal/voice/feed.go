@@ -43,14 +43,15 @@ type VolcanoFeedEngine struct {
 	vcfg VolcanoConfig
 	hcfg LocalConfig
 
-	mu      sync.Mutex
-	helper  *LocalEngine
-	vol     *VolcanoEngine
-	buf     []byte
-	started bool
-	closed  bool
-	idleCh  chan struct{}
-	pumped  bool
+	mu        sync.Mutex
+	helper    *LocalEngine
+	vol       *VolcanoEngine
+	buf       []byte
+	started   bool
+	closed    bool
+	idleCh    chan struct{}
+	pumped    bool
+	contextFn func() string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -83,7 +84,7 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 		return nil
 	}
 
-	vol := NewVolcanoEngine(e.vcfg)
+	vol := NewVolcanoEngine(e.dialConfigLocked())
 	if err := vol.Start(ctx); err != nil {
 		return err
 	}
@@ -177,6 +178,36 @@ func (e *VolcanoFeedEngine) SetContext(ctx string) error {
 	return nil
 }
 
+// SetContextProvider installs a func that returns fresh corpus.context before
+// every dial (Start and each per-utterance redial). A nil func restores the
+// static SetContext value. A panicking func is treated as empty context.
+func (e *VolcanoFeedEngine) SetContextProvider(fn func() string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.contextFn = fn
+}
+
+// dialConfigLocked returns vcfg with corpus.context refreshed from the
+// provider. Callers must hold e.mu.
+func (e *VolcanoFeedEngine) dialConfigLocked() VolcanoConfig {
+	e.vcfg.Context = safeContext(e.contextFn, e.vcfg.Context)
+	return e.vcfg
+}
+
+// safeContext calls fn and returns its value; a nil or panicking fn yields
+// the fallback static context.
+func safeContext(fn func() string, fallback string) (s string) {
+	if fn == nil {
+		return fallback
+	}
+	defer func() {
+		if recover() != nil {
+			s = ""
+		}
+	}()
+	return fn()
+}
+
 func (e *VolcanoFeedEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {
@@ -255,7 +286,10 @@ func (e *VolcanoFeedEngine) onUtteranceEnd() {
 	}
 	dialed := make(chan redial, 1)
 	go func() {
-		vol := NewVolcanoEngine(e.vcfg)
+		e.mu.Lock()
+		cfg := e.dialConfigLocked()
+		e.mu.Unlock()
+		vol := NewVolcanoEngine(cfg)
 		ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
 		err := vol.Start(ctx)
 		cancel()

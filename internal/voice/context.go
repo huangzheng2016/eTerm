@@ -21,6 +21,12 @@ const (
 	contextSpeakerBot  = "bot"
 )
 
+// ContextProvider is implemented by engines that can refresh corpus.context
+// before every connection dial instead of using a static string.
+type ContextProvider interface {
+	SetContextProvider(fn func() string)
+}
+
 // ContextTurn is one dialog_ctx entry for the Volcano corpus.context field.
 type ContextTurn struct {
 	Speaker string `json:"speaker"`

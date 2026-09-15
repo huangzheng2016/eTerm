@@ -487,3 +487,110 @@ func TestVolcanoFeedSetContextInheritsOnRedial(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func feedConfigContext(t *testing.T, cfg []byte) string {
+	t.Helper()
+	var v struct {
+		Corpus struct {
+			Context string `json:"context"`
+		} `json:"corpus"`
+	}
+	if err := json.Unmarshal(cfg, &v); err != nil {
+		t.Fatalf("config frame: %v", err)
+	}
+	return v.Corpus.Context
+}
+
+func newContextFeedTestEngine(t *testing.T) (*VolcanoFeedEngine, *feedServer) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	t.Cleanup(func() { os.Unsetenv("GO_FAKE_PROTOCOL") })
+	os.Setenv("GO_FAKE_NO_AUDIO", "1")
+	t.Cleanup(func() { os.Unsetenv("GO_FAKE_NO_AUDIO") })
+
+	srv := newFeedServer(t)
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	t.Cleanup(httpSrv.Close)
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
+		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
+	})
+	return eng, srv
+}
+
+func TestVolcanoFeedRefreshesContextFromProviderOnRedial(t *testing.T) {
+	eng, srv := newContextFeedTestEngine(t)
+
+	current := `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"first"}]}`
+	eng.SetContextProvider(func() string { return current })
+
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"first"`) {
+		t.Fatalf("start dial did not use provider value: %q", got)
+	}
+
+	current = `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"second"}]}`
+	eng.onUtteranceEnd()
+
+	select {
+	case <-srv.conn2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no redialed session")
+	}
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"second"`) || strings.Contains(got, `"first"`) {
+		t.Fatalf("redial did not use provider value: %q", got)
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVolcanoFeedPanickingProviderDoesNotBreakRecording(t *testing.T) {
+	eng, srv := newContextFeedTestEngine(t)
+	eng.SetContextProvider(func() string { panic("boom") })
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	if got := feedConfigContext(t, <-srv.configs); got != "" {
+		t.Fatalf("panicking provider leaked context: %q", got)
+	}
+
+	eng.onUtteranceEnd()
+
+	select {
+	case <-srv.conn2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("redial after provider panic did not happen")
+	}
+	if got := feedConfigContext(t, <-srv.configs); got != "" {
+		t.Fatalf("panicking provider leaked context on redial: %q", got)
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVolcanoFeedEmptyProviderMeansNoContext(t *testing.T) {
+	eng, srv := newContextFeedTestEngine(t)
+	if err := eng.SetContext(`{"context_type":"dialog_ctx"}`); err != nil {
+		t.Fatal(err)
+	}
+	eng.SetContextProvider(func() string { return "" })
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	if got := feedConfigContext(t, <-srv.configs); got != "" {
+		t.Fatalf("empty provider result must drop static context: %q", got)
+	}
+}
