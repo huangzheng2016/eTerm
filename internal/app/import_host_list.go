@@ -118,7 +118,7 @@ func (m *importHostListModel) Update(msg tea.KeyPressMsg) (closed bool, proceed 
 			} else if len(item.rec.Aliases) > 1 {
 				m.state = hostListStateAlias
 				m.aliasCursor = 0
-			} else if item.nameConflict {
+			} else {
 				m.state = hostListStateRename
 				m.renameFromAlias = false
 				m.renameInput.SetValue(item.chosenAlias)
