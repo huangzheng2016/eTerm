@@ -594,3 +594,76 @@ func TestVolcanoFeedEmptyProviderMeansNoContext(t *testing.T) {
 		t.Fatalf("empty provider result must drop static context: %q", got)
 	}
 }
+
+func TestVolcanoFeedContextReusesLastGoodOnProviderPanic(t *testing.T) {
+	eng, srv := newContextFeedTestEngine(t)
+
+	mode := "good"
+	eng.SetContextProvider(func() string {
+		if mode == "panic" {
+			panic("boom")
+		}
+		return `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"first"}]}`
+	})
+
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"first"`) {
+		t.Fatalf("first dial context = %q", got)
+	}
+
+	mode = "panic"
+	eng.onUtteranceEnd()
+
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"first"`) {
+		t.Fatalf("panic dial did not reuse last good context: %q", got)
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVolcanoFeedContextEmptyThenPanicReusesLastGood(t *testing.T) {
+	eng, srv := newContextFeedTestEngine(t)
+
+	mode := "good"
+	eng.SetContextProvider(func() string {
+		switch mode {
+		case "panic":
+			panic("boom")
+		case "empty":
+			return ""
+		default:
+			return `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"cached"}]}`
+		}
+	})
+
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"cached"`) {
+		t.Fatalf("first dial context = %q", got)
+	}
+
+	mode = "empty"
+	eng.onUtteranceEnd()
+	if got := feedConfigContext(t, <-srv.configs); got != "" {
+		t.Fatalf("empty provider result must mean no context: %q", got)
+	}
+
+	mode = "panic"
+	eng.onUtteranceEnd()
+	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"cached"`) {
+		t.Fatalf("panic dial did not reuse the earlier good context: %q", got)
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+}

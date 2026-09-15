@@ -54,6 +54,7 @@ type VolcanoFeedEngine struct {
 	idleCh    chan struct{}
 	pumped    bool
 	contextFn func() string
+	lastGood  string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -181,8 +182,10 @@ func (e *VolcanoFeedEngine) SetContext(ctx string) error {
 }
 
 // SetContextProvider installs a func that returns fresh corpus.context before
-// every dial (Start and each per-utterance redial). A nil func restores the
-// static SetContext value. A panicking func is treated as empty context.
+// every dial (Start and each per-utterance redial). A non-empty result is
+// cached as the last-good context; a panicking func falls back to the
+// last-good value (empty when none). A nil func restores the static
+// SetContext value.
 func (e *VolcanoFeedEngine) SetContextProvider(fn func() string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -192,22 +195,35 @@ func (e *VolcanoFeedEngine) SetContextProvider(fn func() string) {
 // dialConfigLocked returns vcfg with corpus.context refreshed from the
 // provider. Callers must hold e.mu.
 func (e *VolcanoFeedEngine) dialConfigLocked() VolcanoConfig {
-	e.vcfg.Context = safeContext(e.contextFn, e.vcfg.Context)
+	e.vcfg.Context = e.contextFromProvider()
 	return e.vcfg
 }
 
-// safeContext calls fn and returns its value; a nil or panicking fn yields
-// the fallback static context.
-func safeContext(fn func() string, fallback string) (s string) {
-	if fn == nil {
-		return fallback
+// contextFromProvider resolves corpus.context for the next dial. A non-empty
+// provider result becomes the last-good value; a panicking provider reuses
+// the last-good value (empty when none). Callers must hold e.mu.
+func (e *VolcanoFeedEngine) contextFromProvider() string {
+	if e.contextFn == nil {
+		return e.vcfg.Context
 	}
+	s, ok := callContext(e.contextFn)
+	if !ok {
+		return e.lastGood
+	}
+	if s != "" {
+		e.lastGood = s
+	}
+	return s
+}
+
+// callContext calls fn, reporting failure on panic.
+func callContext(fn func() string) (s string, ok bool) {
 	defer func() {
 		if recover() != nil {
-			s = ""
+			s, ok = "", false
 		}
 	}()
-	return fn()
+	return fn(), true
 }
 
 func (e *VolcanoFeedEngine) Close() error {
