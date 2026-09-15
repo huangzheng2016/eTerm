@@ -13,18 +13,16 @@ func init() {
 		Label: "Volcano Engine",
 		Params: []ParamSpec{
 			{Key: "api_key", Label: "Volcano API key", Secret: true, Required: true},
-			{Key: "app_key", Label: "Volcano App key", Secret: true, Required: true},
-			{Key: "access_key", Label: "Volcano Access key", Secret: true, Required: true},
+			{Key: "resource_id", Label: "Volcano model", Default: ResourceIDSeedASR, Options: VolcanoResourceIDs},
 		},
 		Ready: func(params map[string]string) bool {
-			return params["api_key"] != "" && params["app_key"] != "" && params["access_key"] != ""
+			return params["api_key"] != ""
 		},
 		New: func(params map[string]string, feed FeedDeps) (Engine, error) {
 			return NewVolcanoFeedEngine(VolcanoFeedConfig{
 				Volcano: VolcanoConfig{
-					APIKey:    params["api_key"],
-					AppKey:    params["app_key"],
-					AccessKey: params["access_key"],
+					APIKey:     params["api_key"],
+					ResourceID: params["resource_id"],
 				},
 				Helper: LocalConfig{
 					VAD:                feed.VAD,
