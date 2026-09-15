@@ -154,6 +154,9 @@ func TestEngineRegistry(t *testing.T) {
 	if feed.vcfg.APIKey != "a" || feed.vcfg.ResourceID != ResourceIDBigASR {
 		t.Fatalf("volcano cfg = %+v", feed.vcfg)
 	}
+	if !feed.vcfg.SmartFormat {
+		t.Fatal("SmartFormat not enabled by default")
+	}
 	veng.Close()
 
 	RegisterEngine(EngineDescriptor{

@@ -33,7 +33,7 @@ func TestVolcanoLiveRecognition(t *testing.T) {
 	if rid == "" {
 		rid = ResourceIDSeedASR
 	}
-	text := recognizeLive(t, VolcanoConfig{APIKey: apiKey, ResourceID: rid, URL: url, SampleRate: 16000}, pcm)
+	text := recognizeLive(t, VolcanoConfig{APIKey: apiKey, ResourceID: rid, URL: url, SampleRate: 16000, SmartFormat: true}, pcm)
 	t.Logf("recognized: %s", text)
 }
 

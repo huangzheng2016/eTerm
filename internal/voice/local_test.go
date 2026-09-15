@@ -49,8 +49,16 @@ func fakeHelperMain() {
 		case strings.Contains(line, `"cmd":"start_passthrough"`):
 			passthrough = true
 			fmt.Println(`{"type":"state","state":"listening"}`)
-			fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})))
-			fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString([]byte{5, 6, 7, 8})))
+			if os.Getenv("GO_FAKE_NO_AUDIO") == "1" {
+				continue
+			}
+			if n, _ := strconv.Atoi(os.Getenv("GO_FAKE_CHUNK")); n > 0 {
+				fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, n))))
+				fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, n))))
+			} else {
+				fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})))
+				fmt.Printf(`{"type":"audio","data":%s}`+"\n", strconv.Quote(base64.StdEncoding.EncodeToString([]byte{5, 6, 7, 8})))
+			}
 			fmt.Println(`{"type":"utterance_end"}`)
 		case strings.Contains(line, `"cmd":"start"`):
 			if crashAlways {
