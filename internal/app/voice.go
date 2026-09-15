@@ -496,9 +496,7 @@ func (a App) toggleVoice() (App, tea.Cmd) {
 	if !a.voiceRec {
 		a = a.ensureVoiceCfg()
 		if !a.voiceReadyFn()(a.voiceCfg) {
-			a.voiceSettingsView = newVoiceSettingsModel(a.db, a.masterKey, a.voiceCfg)
-			a.voiceSettingsView.fromHotkey = true
-			return a, nil
+			return a.openVoiceSettingsTab(true)
 		}
 		if a.voiceTest {
 			a.voiceTest = false
@@ -561,16 +559,18 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.ev.Type {
 	case voice.EventPartial:
-		if a.voiceTest && a.voiceSettingsView != nil {
-			a.voiceSettingsView.testPartial(msg.ev.Text)
+		if a.voiceTest {
+			if vt := a.voiceTab(); vt != nil {
+				vt.testPartial(msg.ev.Text)
+			}
 		}
 	case voice.EventFinal:
 		if a.voiceTest {
 			a.voiceTest = false
 			a.voiceTestSeq++
 			a.voiceCfg.Verified = true
-			if a.voiceSettingsView != nil {
-				a.voiceSettingsView.testDone(msg.ev.Text)
+			if vt := a.voiceTab(); vt != nil {
+				vt.testDone(msg.ev.Text)
 			}
 			var cmds []tea.Cmd
 			if a.db != nil {
@@ -605,8 +605,8 @@ func (a App) handleVoiceEvent(msg voiceEventMsg) (App, tea.Cmd) {
 		if a.voiceTest {
 			a.voiceTest = false
 			a.voiceTestSeq++
-			if a.voiceSettingsView != nil {
-				a.voiceSettingsView.testError(msg.ev.Msg)
+			if vt := a.voiceTab(); vt != nil {
+				vt.testError(msg.ev.Msg)
 			}
 			if !a.voiceBusy && a.voiceEngine != nil {
 				a.voiceBusy = true
@@ -629,15 +629,15 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 		return a.endVoiceTest()
 	}
 	if a.voiceRec {
-		if a.voiceSettingsView != nil {
-			a.voiceSettingsView.testError("stop dictation (ctrl+r) before running the test")
+		if vt := a.voiceTab(); vt != nil {
+			vt.testError("stop dictation (ctrl+r) before running the test")
 		}
 		return a, nil
 	}
 	a = a.ensureVoiceCfg()
 	if !a.voiceReadyFn()(a.voiceCfg) {
-		if a.voiceSettingsView != nil {
-			a.voiceSettingsView.testError("setup incomplete: " + voiceSetupIssue(a.voiceCfg, voice.ModelsRoot()))
+		if vt := a.voiceTab(); vt != nil {
+			vt.testError("setup incomplete: " + voiceSetupIssue(a.voiceCfg, voice.ModelsRoot()))
 		}
 		return a, nil
 	}
@@ -651,8 +651,8 @@ func (a App) handleVoiceTestRequest(msg voiceTestRequestMsg) (App, tea.Cmd) {
 	a.voiceTest = true
 	a.voiceBusy = true
 	a.voiceTestSeq++
-	if a.voiceSettingsView != nil {
-		a.voiceSettingsView.testStarted()
+	if vt := a.voiceTab(); vt != nil {
+		vt.testStarted()
 	}
 	p := a.voiceCfg.vadParams()
 	p.NoSpeechTimeout = voiceTestNoSpeechSecs
@@ -668,8 +668,8 @@ func (a App) endVoiceTest() (App, tea.Cmd) {
 	a.voiceTest = false
 	a.voiceTestSeq++
 	a.voiceSwallowFinal = true
-	if a.voiceSettingsView != nil {
-		a.voiceSettingsView.testStopped()
+	if vt := a.voiceTab(); vt != nil {
+		vt.testStopped()
 	}
 	if a.voiceBusy || a.voiceEngine == nil {
 		return a, nil
@@ -701,15 +701,15 @@ func (a App) handleVoiceDownloadRequest(msg voiceDownloadRequestMsg) (App, tea.C
 		})
 		ch <- voiceDownloadMsg{target: target, err: err, done: true}
 	}()
-	if a.voiceSettingsView != nil {
-		a.voiceSettingsView.downloadStarted(target)
+	if vt := a.voiceTab(); vt != nil {
+		vt.downloadStarted(target)
 	}
 	return a, waitVoiceDownload(ch)
 }
 
 func (a App) handleVoiceDownload(msg voiceDownloadMsg) (App, tea.Cmd) {
-	if a.voiceSettingsView != nil {
-		a.voiceSettingsView.downloadUpdate(msg)
+	if vt := a.voiceTab(); vt != nil {
+		vt.downloadUpdate(msg)
 	}
 	if msg.done {
 		a.voiceDlActive = false

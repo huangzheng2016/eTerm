@@ -132,3 +132,27 @@ func (a App) openSyncTab() (App, tea.Cmd) {
 	a.syncTabBar()
 	return a, sm.Init()
 }
+
+func (a App) openVoiceSettingsTab(fromHotkey bool) (App, tea.Cmd) {
+	for i, tab := range a.tabs {
+		if tab.Type == VoiceTab {
+			a.activeTab = i
+			a.tabBar = a.tabBar.SetActive(a.activeTab)
+			if m, ok := tab.Model.(*voiceSettingsModel); ok && fromHotkey {
+				m.fromHotkey = true
+			}
+			return a, nil
+		}
+	}
+	a = a.ensureVoiceCfg()
+	m := newVoiceSettingsModel(a.db, a.masterKey, a.voiceCfg)
+	m.fromHotkey = fromHotkey
+	if a.width > 0 {
+		m.SetSize(a.width, a.mainContentHeightForType(VoiceTab))
+	}
+	tab := Tab{Type: VoiceTab, Title: "Voice", Model: m}
+	a.tabs = append(a.tabs, tab)
+	a.activeTab = len(a.tabs) - 1
+	a.syncTabBar()
+	return a, m.Init()
+}
