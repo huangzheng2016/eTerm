@@ -12,6 +12,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
@@ -344,6 +345,47 @@ func (b *aiBridge) ContextUsage() (used, max int) {
 		return u.Usage()
 	}
 	return 0, 0
+}
+
+// voiceContextTurns returns the most recent user/assistant turns of the
+// current agent history as Volcano dialog_ctx turns.
+func (b *aiBridge) voiceContextTurns(limit int) []voice.ContextTurn {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent == nil {
+		return nil
+	}
+	data, err := agent.ExportHistory(0)
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(data, &msgs) != nil {
+		return nil
+	}
+	turns := make([]voice.ContextTurn, 0, limit)
+	for i := len(msgs) - 1; i >= 0 && len(turns) < limit; i-- {
+		speaker := ""
+		switch msgs[i].Role {
+		case "user":
+			speaker = "user"
+		case "assistant":
+			speaker = "bot"
+		}
+		text := strings.TrimSpace(msgs[i].Content)
+		if speaker == "" || text == "" {
+			continue
+		}
+		turns = append(turns, voice.ContextTurn{Speaker: speaker, Text: text})
+	}
+	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+		turns[i], turns[j] = turns[j], turns[i]
+	}
+	return turns
 }
 
 func aiEventToView(ev ai.Event) (aiview.AgentEvent, bool) {

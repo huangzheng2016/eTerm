@@ -28,14 +28,17 @@ var VolcanoResourceIDs = []string{
 }
 
 type VolcanoConfig struct {
-	APIKey      string
-	AppKey      string
-	AccessKey   string
-	ResourceID  string
-	URL         string
-	Language    string
-	SampleRate  int
-	SmartFormat bool
+	APIKey        string
+	AppKey        string
+	AccessKey     string
+	ResourceID    string
+	URL           string
+	Language      string
+	SampleRate    int
+	SmartFormat   bool
+	DDC           bool
+	EndWindowSize int
+	Context       string
 }
 
 type VolcanoEngine struct {
@@ -218,6 +221,13 @@ func abs32(v int32) int32 {
 }
 
 func (e *VolcanoEngine) SetVAD(p VADParams) error {
+	return nil
+}
+
+func (e *VolcanoEngine) SetContext(ctx string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg.Context = ctx
 	return nil
 }
 

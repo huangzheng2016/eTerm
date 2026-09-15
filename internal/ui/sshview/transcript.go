@@ -11,6 +11,8 @@ func (m *Model) PlainTranscript(maxBytes int) string {
 	if m == nil || m.emu == nil {
 		return ""
 	}
+	m.emuMu.RLock()
+	defer m.emuMu.RUnlock()
 	if maxBytes <= 0 {
 		maxBytes = MaxTranscriptBytes
 	}
@@ -54,6 +56,8 @@ func (m *Model) ANSITranscript(maxBytes int) string {
 	if m == nil || m.emu == nil {
 		return ""
 	}
+	m.emuMu.RLock()
+	defer m.emuMu.RUnlock()
 	if maxBytes <= 0 {
 		maxBytes = MaxTranscriptBytes
 	}

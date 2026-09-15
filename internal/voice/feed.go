@@ -21,9 +21,11 @@ func init() {
 		New: func(params map[string]string, feed FeedDeps) (Engine, error) {
 			return NewVolcanoFeedEngine(VolcanoFeedConfig{
 				Volcano: VolcanoConfig{
-					APIKey:      params["api_key"],
-					ResourceID:  params["resource_id"],
-					SmartFormat: true,
+					APIKey:        params["api_key"],
+					ResourceID:    params["resource_id"],
+					SmartFormat:   true,
+					DDC:           feed.DDC,
+					EndWindowSize: feed.EndWindowSize,
 				},
 				Helper: LocalConfig{
 					VAD:                feed.VAD,
@@ -43,14 +45,17 @@ type VolcanoFeedEngine struct {
 	vcfg VolcanoConfig
 	hcfg LocalConfig
 
-	mu      sync.Mutex
-	helper  *LocalEngine
-	vol     *VolcanoEngine
-	buf     []byte
-	started bool
-	closed  bool
-	idleCh  chan struct{}
-	pumped  bool
+	mu        sync.Mutex
+	helper    *LocalEngine
+	vol       *VolcanoEngine
+	buf       []byte
+	started   bool
+	closed    bool
+	idleCh    chan struct{}
+	pumped    bool
+	contextFn func() string
+	staticCtx string
+	lastGood  string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -83,7 +88,7 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 		return nil
 	}
 
-	vol := NewVolcanoEngine(e.vcfg)
+	vol := NewVolcanoEngine(e.dialConfigLocked())
 	if err := vol.Start(ctx); err != nil {
 		return err
 	}
@@ -166,6 +171,62 @@ func (e *VolcanoFeedEngine) SetVAD(p VADParams) error {
 
 func (e *VolcanoFeedEngine) SetModel(string, string) error { return nil }
 
+func (e *VolcanoFeedEngine) SetContext(ctx string) error {
+	e.mu.Lock()
+	e.staticCtx = ctx
+	vol := e.vol
+	e.mu.Unlock()
+	if vol != nil {
+		return vol.SetContext(ctx)
+	}
+	return nil
+}
+
+// SetContextProvider installs a func that returns fresh corpus.context before
+// every dial (Start and each per-utterance redial). A non-empty result is
+// cached as the last-good context; a panicking func falls back to the
+// last-good value (empty when none). A nil func restores the static
+// SetContext value.
+func (e *VolcanoFeedEngine) SetContextProvider(fn func() string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.contextFn = fn
+}
+
+// dialConfigLocked returns vcfg with corpus.context refreshed from the
+// provider. Callers must hold e.mu.
+func (e *VolcanoFeedEngine) dialConfigLocked() VolcanoConfig {
+	e.vcfg.Context = e.contextFromProvider()
+	return e.vcfg
+}
+
+// contextFromProvider resolves corpus.context for the next dial. A non-empty
+// provider result becomes the last-good value; a panicking provider reuses
+// the last-good value (empty when none). Callers must hold e.mu.
+func (e *VolcanoFeedEngine) contextFromProvider() string {
+	if e.contextFn == nil {
+		return e.staticCtx
+	}
+	s, ok := callContext(e.contextFn)
+	if !ok {
+		return e.lastGood
+	}
+	if s != "" {
+		e.lastGood = s
+	}
+	return s
+}
+
+// callContext calls fn, reporting failure on panic.
+func callContext(fn func() string) (s string, ok bool) {
+	defer func() {
+		if recover() != nil {
+			s, ok = "", false
+		}
+	}()
+	return fn(), true
+}
+
 func (e *VolcanoFeedEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {
@@ -244,7 +305,10 @@ func (e *VolcanoFeedEngine) onUtteranceEnd() {
 	}
 	dialed := make(chan redial, 1)
 	go func() {
-		vol := NewVolcanoEngine(e.vcfg)
+		e.mu.Lock()
+		cfg := e.dialConfigLocked()
+		e.mu.Unlock()
+		vol := NewVolcanoEngine(cfg)
 		ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
 		err := vol.Start(ctx)
 		cancel()

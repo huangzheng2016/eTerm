@@ -197,6 +197,7 @@ func (m *Model) renderScreenWithCursor() string {
 		highlight.Width = 1
 	}
 
+	m.emuMu.Lock()
 	m.emu.SetCell(cx, cy, &highlight)
 	var out string
 	if m.emu.IsAltScreen() {
@@ -205,6 +206,7 @@ func (m *Model) renderScreenWithCursor() string {
 		out = m.emu.Render()
 	}
 	m.emu.SetCell(cx, cy, &saved)
+	m.emuMu.Unlock()
 	return out
 }
 

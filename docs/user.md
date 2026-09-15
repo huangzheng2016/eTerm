@@ -45,9 +45,14 @@ helper 或模型未就绪时按 `C-r` 会打开设置面板引导下载。设置
 - 模型：SenseVoice 2024-07-17（约 1 GB，默认；同包含 fp32/int8 两套权重）/ Paraformer zh-small int8（约 74 MB）；模型含两套权重时主视图显示 Precision 开关（自定义目录需同时有 model.onnx 与 model.int8.onnx）
 - Engine：enter 进入子菜单选择，顺序为 local（sherpa-onnx 离线识别）/ volcano（火山引擎云端识别，只需一个 API key，加密存储；模型版本用左右键在四个 resource id 间切换，默认 volc.seedasr.sauc.duration）/ 其他云端引擎
 - speech sensitivity (0-1)：VAD 触发灵敏度
-- end-of-sentence silence (ms)：句尾静音判停时长
+- end-of-sentence silence (ms)：句尾静音判停时长。同时作为火山引擎的 end_window_size（服务端判停窗口，clamp 300-5000）传入
 - Sentence end：句尾动作 enter / space
+- Extra features >：额外功能子菜单
+  - Context awareness：上下文感知开关（默认关，仅火山引擎生效）。开启后开始录音会把上下文作为 `corpus.context`（dialog_ctx，800 token 上限）传给火山引擎提高识别率：当前是 AI 面板时取最近 20 轮对话（user/assistant 交替）；当前是终端标签页时取屏幕尾部最近 20 行，先清洗（去表格线/边框等结构符号、压缩空白、丢弃无字母数字或汉字的行、相邻重复行去重）。上下文在每一句话（utterance）边界自动刷新，计算失败时复用上一轮成功的上下文
+  - Semantic smoothing (DDC)：语义顺滑开关（默认开），对应火山 enable_ddc
 - 测试录音：验证当前配置
+
+注：火山引擎的 vad_segment_duration 不传——官方说明当 end_window_size 已配置时 vad_segment_duration 不生效，保持缺省即可。
 
 ## 多设备同步
 

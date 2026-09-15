@@ -81,6 +81,7 @@ type resizeRequest struct {
 type Model struct {
 	sess     *internalssh.InteractiveSession
 	emu      *vt.Emulator
+	emuMu    sync.RWMutex
 	streamID uint64
 
 	alias     string
@@ -153,8 +154,16 @@ type Model struct {
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
 
-func (m *Model) FocusSession() { m.emu.Focus() }
-func (m *Model) BlurSession()  { m.emu.Blur() }
+func (m *Model) FocusSession() {
+	m.emuMu.Lock()
+	defer m.emuMu.Unlock()
+	m.emu.Focus()
+}
+func (m *Model) BlurSession() {
+	m.emuMu.Lock()
+	defer m.emuMu.Unlock()
+	m.emu.Blur()
+}
 
 func (m *Model) SetRemoteReconnect(r *types.RemoteReconnect) { m.remote = r }
 
@@ -532,7 +541,9 @@ func (m *Model) SetSize(w, h int) {
 	if termH < 1 {
 		termH = 1
 	}
+	m.emuMu.Lock()
 	m.emu.Resize(w, termH)
+	m.emuMu.Unlock()
 	if m.recorder != nil {
 		m.recorder.Resize(termH, w)
 	}
@@ -741,6 +752,8 @@ func (m *Model) closeResizeQueue() {
 }
 
 func (m *Model) writeEmulator(data []byte) {
+	m.emuMu.Lock()
+	defer m.emuMu.Unlock()
 	defer func() {
 		if recover() == nil {
 			return
@@ -764,11 +777,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.FocusMsg:
-		m.emu.Focus()
+		m.FocusSession()
 		return m, nil
 
 	case tea.BlurMsg:
-		m.emu.Blur()
+		m.BlurSession()
 		return m, nil
 
 	case ChunkMsg:
@@ -1161,6 +1174,8 @@ func (m *Model) sendRemoteMouse(msg tea.Msg) bool {
 	if m.disconnected || !m.mouseMode {
 		return false
 	}
+	m.emuMu.Lock()
+	defer m.emuMu.Unlock()
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
 		mm := uv.Mouse(msg.Mouse())
