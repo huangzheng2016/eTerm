@@ -36,6 +36,7 @@ func daemonLaunchdPlist(programArgs []string, logPath string) string {
 	b.WriteString("\t</array>\n")
 	b.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")
 	b.WriteString("\t\t<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n")
+	b.WriteString("\t\t<key>LANG</key>\n\t\t<string>en_US.UTF-8</string>\n")
 	b.WriteString("\t</dict>\n")
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n")
 	b.WriteString("\t<key>KeepAlive</key>\n\t<true/>\n")

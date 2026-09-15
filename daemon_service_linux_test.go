@@ -81,7 +81,7 @@ func readDaemonServiceUnit(t *testing.T, dir string) string {
 
 func TestDaemonServiceUnitContents(t *testing.T) {
 	unit := daemonServiceUnit([]string{"/usr/local/bin/eterm", "daemon", "run", "-c", "/tmp/e.db", "-name", "box", "-pprof", "127.0.0.1:6061"})
-	want := "[Unit]\nDescription=eTerm sync daemon\n\n[Service]\nExecStart=/usr/local/bin/eterm daemon run -c /tmp/e.db -name box -pprof 127.0.0.1:6061\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
+	want := "[Unit]\nDescription=eTerm sync daemon\n\n[Service]\nEnvironment=LANG=C.UTF-8\nExecStart=/usr/local/bin/eterm daemon run -c /tmp/e.db -name box -pprof 127.0.0.1:6061\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
 	if unit != want {
 		t.Fatalf("unit = %q, want %q", unit, want)
 	}
@@ -122,7 +122,7 @@ func TestDaemonServiceEnableWritesUnitAndCommands(t *testing.T) {
 	if err := daemonServiceEnable(daemonOptions{DBPath: dbPath}); err != nil {
 		t.Fatal(err)
 	}
-	want := "[Unit]\nDescription=eTerm sync daemon\n\n[Service]\nExecStart=" + testExecutable(t) + " daemon run -c " + dbPath + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
+	want := "[Unit]\nDescription=eTerm sync daemon\n\n[Service]\nEnvironment=LANG=C.UTF-8\nExecStart=" + testExecutable(t) + " daemon run -c " + dbPath + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
 	if got := readDaemonServiceUnit(t, dir); got != want {
 		t.Fatalf("unit = %q, want %q", got, want)
 	}

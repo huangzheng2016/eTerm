@@ -23,6 +23,7 @@ func TestDaemonLaunchdPlistContents(t *testing.T) {
 		"<string>127.0.0.1:6061</string>",
 		"<key>EnvironmentVariables</key>",
 		"<key>PATH</key>\n\t\t<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>",
+		"<key>LANG</key>\n\t\t<string>en_US.UTF-8</string>",
 		"<key>RunAtLoad</key>\n\t<true/>",
 		"<key>KeepAlive</key>\n\t<true/>",
 		"<key>StandardOutPath</key>\n\t<string>/Users/u/.config/eterm/daemon.log</string>",
