@@ -54,6 +54,10 @@ type Tab struct {
 	TmuxSession   string
 	tmuxRestoreID uint64
 	userRenamed   bool
+
+	reconnectGen            uint64
+	reconnectInFlight       bool
+	lastReconnectFallbackAt time.Time
 }
 
 type App struct {

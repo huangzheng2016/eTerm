@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"gorm.io/gorm"
 )
+
+const remoteReconnectFallbackMinInterval = 2 * time.Second
 
 var (
 	remoteOpenWithProgress            = remote.OpenWithProgress
@@ -137,6 +140,10 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 	if idx < 0 {
 		return a, nil
 	}
+	if a.tabs[idx].reconnectInFlight {
+		appDebugf("remote reconnect already in flight, drop: tab=%q stream=%d", a.tabs[idx].Title, msg.StreamID)
+		return a, nil
+	}
 	if msg.Auto {
 		if msg.Attempt <= 0 {
 			msg.Attempt = 1
@@ -148,6 +155,10 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 			sm.SetReconnecting(msg.Attempt, msg.MaxAttempts)
 		}
 	}
+	a.tabs[idx].reconnectGen++
+	gen := a.tabs[idx].reconnectGen
+	a.tabs[idx].reconnectInFlight = true
+	lastFallbackAt := a.tabs[idx].lastReconnectFallbackAt
 	var relayStreamID uint32
 	var resumeSeq uint64
 	canResume := false
@@ -170,6 +181,7 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		baseURL, tunnel, err := a.syncHTTPBase(cfg)
 		var is *internalssh.InteractiveSession
 		resumed := false
+		fallbackAt := time.Time{}
 		if err == nil {
 			if canResume {
 				op := relay.OpenRequest{PeerID: spec.Peer.ID, Target: spec.Target, HostSyncID: spec.HostSyncID, SessionID: spec.SessionID, Rows: rows, Cols: cols}
@@ -178,6 +190,12 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 				})
 				if rerr == nil {
 					is, resumed = ris, true
+				} else {
+					if wait := remoteReconnectFallbackMinInterval - time.Since(lastFallbackAt); wait > 0 {
+						time.Sleep(wait)
+					}
+					fallbackAt = time.Now()
+					log.Printf("eterm app: remote reconnect resume failed, fresh attach: tab=%q stream=%d session=%q err=%v", title, streamID, spec.SessionID, rerr)
 				}
 			}
 			if !resumed {
@@ -197,7 +215,7 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 				tunnel.Close()
 			}
 			if msg.Auto && attempt < maxAttempts {
-				return types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec, Auto: true, Attempt: attempt + 1, MaxAttempts: maxAttempts}
+				return remoteReconnectRetryMsg{streamID: streamID, gen: gen, next: types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec, Auto: true, Attempt: attempt + 1, MaxAttempts: maxAttempts}}
 			}
 			return types.ConnErrorMsg{Err: err, Target: title, Retry: types.RemoteShellReconnectMsg{StreamID: streamID, Spec: spec}}
 		}
@@ -209,7 +227,7 @@ func (a App) applyRemoteShellReconnect(msg types.RemoteShellReconnectMsg) (App, 
 		if spec.Target == relay.TargetLocal {
 			tabType = LocalTab
 		}
-		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy, background: msg.Auto}
+		return remoteTerminalOpenedMsg{is: is, title: title, tabType: tabType, replaceTabAt: idx, reconnect: &specCopy, background: msg.Auto, reconnectGen: gen, fallbackAt: fallbackAt}
 	})
 }
 
@@ -350,6 +368,15 @@ func remoteTmuxTabTitle(peerName, sessionID string) string {
 func (a App) applyRemoteTerminalOpened(msg remoteTerminalOpenedMsg) (App, tea.Cmd) {
 	a = a.stopConnectProgress()
 	if msg.replaceTabAt >= 0 && msg.replaceTabAt < len(a.tabs) {
+		if !a.tabs[msg.replaceTabAt].reconnectInFlight || a.tabs[msg.replaceTabAt].reconnectGen != msg.reconnectGen {
+			appDebugf("drop stale remote reconnect delivery: idx=%d gen=%d tabGen=%d inFlight=%v", msg.replaceTabAt, msg.reconnectGen, a.tabs[msg.replaceTabAt].reconnectGen, a.tabs[msg.replaceTabAt].reconnectInFlight)
+			remote.CloseSessionNow(msg.is)
+			return a, nil
+		}
+		a.tabs[msg.replaceTabAt].reconnectInFlight = false
+		if !msg.fallbackAt.IsZero() {
+			a.tabs[msg.replaceTabAt].lastReconnectFallbackAt = msg.fallbackAt
+		}
 		if old, ok := a.tabs[msg.replaceTabAt].Model.(*sshview.Model); ok {
 			cmd := old.ResumeSession(msg.is)
 			if !msg.background {

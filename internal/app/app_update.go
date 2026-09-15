@@ -828,6 +828,21 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case types.RemoteShellReconnectMsg:
 		return a.applyRemoteShellReconnect(msg)
 
+	case remoteReconnectRetryMsg:
+		for i := range a.tabs {
+			sm, ok := a.tabs[i].Model.(*sshview.Model)
+			if !ok || sm.StreamID() != msg.streamID {
+				continue
+			}
+			if !a.tabs[i].reconnectInFlight || a.tabs[i].reconnectGen != msg.gen {
+				appDebugf("drop stale remote reconnect retry: stream=%d gen=%d tabGen=%d", msg.streamID, msg.gen, a.tabs[i].reconnectGen)
+				return a, nil
+			}
+			a.tabs[i].reconnectInFlight = false
+			return a.applyRemoteShellReconnect(msg.next)
+		}
+		return a, nil
+
 	case types.RemoteShellOpenMsg:
 		return a.openRemoteShell(msg)
 
@@ -1021,6 +1036,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		homeModel := home.New(a.db, a.masterKey, BuildHomeKeyConfig(a.kbConfig))
 		homeModel.SetSize(listContentWidth(a.width), a.mainContentHeightForType(HomeTab))
+		a.finalizeTerminalSessions()
 		a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: homeModel}}
 		a.activeTab = 0
 		a.syncTabBar()
@@ -1116,6 +1132,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if retry, ok := msg.Retry.(types.RemoteShellReconnectMsg); ok {
 			for i := range a.tabs {
 				if sm, ok := a.tabs[i].Model.(*sshview.Model); ok && sm.StreamID() == retry.StreamID {
+					a.tabs[i].reconnectInFlight = false
 					sm.SetReconnecting(0, 0)
 					break
 				}
