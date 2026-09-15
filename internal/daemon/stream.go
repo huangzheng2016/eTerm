@@ -203,6 +203,7 @@ type streamRelay struct {
 	sidV          atomic.Uint32
 	input         chan []byte
 	wake          chan struct{}
+	creditWake    chan struct{}
 	stop          chan struct{}
 	stopOnce      sync.Once
 	stallAfter    time.Duration
@@ -216,6 +217,7 @@ func newStreamRelay(is *internalssh.InteractiveSession) *streamRelay {
 		ring:          newOutputRing(),
 		input:         make(chan []byte, inputQueueSize),
 		wake:          make(chan struct{}, 1),
+		creditWake:    make(chan struct{}, 1),
 		stop:          make(chan struct{}),
 		stallAfter:    stallLogAfter,
 		stallInterval: stallLogInterval,
@@ -262,6 +264,13 @@ func (s *streamRelay) notify() {
 	}
 }
 
+func (s *streamRelay) notifyCredit() {
+	select {
+	case s.creditWake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *streamRelay) shutdown() {
 	s.stopOnce.Do(func() { close(s.stop) })
 }
@@ -280,6 +289,7 @@ func (s *streamRelay) setAck(ack uint64) {
 	}
 	s.mu.Unlock()
 	s.notify()
+	s.notifyCredit()
 }
 
 func (s *streamRelay) markDetached() {
@@ -288,7 +298,7 @@ func (s *streamRelay) markDetached() {
 		s.detachedSince = time.Now()
 	}
 	s.mu.Unlock()
-	s.notify()
+	s.notifyCredit()
 }
 
 func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK relay.Frame) error {
@@ -306,6 +316,7 @@ func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK 
 	s.mu.Unlock()
 	if err == nil {
 		s.notify()
+		s.notifyCredit()
 	}
 	return err
 }
@@ -329,6 +340,7 @@ func (s *streamRelay) attachClamped(streamID uint32, fromSeq uint64, sender *fra
 	s.mu.Unlock()
 	if err == nil {
 		s.notify()
+		s.notifyCredit()
 	}
 	return err
 }
@@ -391,7 +403,7 @@ func (s *streamRelay) waitCredit(mgr *sessionManager) bool {
 		}
 		timer := time.NewTimer(time.Until(wakeAt))
 		select {
-		case <-s.wake:
+		case <-s.creditWake:
 			timer.Stop()
 		case <-s.stop:
 			timer.Stop()
