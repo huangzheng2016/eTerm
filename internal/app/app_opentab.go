@@ -101,13 +101,32 @@ func (a App) openSettingsTab() (App, tea.Cmd) {
 			return a, nil
 		}
 	}
-	configData, _ := json.Marshal(a.kbConfig)
-	defaultsData, _ := json.Marshal(DefaultKeyBindingConfig())
-	sm := settingsview.New(a.db, configData, defaultsData, a.noPasswordMode)
+	sm := settingsview.New(a.db, a.noPasswordMode)
 	if a.width > 0 {
 		sm.SetSize(a.width, a.mainContentHeightForType(SettingsTab))
 	}
 	tab := Tab{Type: SettingsTab, Title: "Settings", Model: sm}
+	a.tabs = append(a.tabs, tab)
+	a.activeTab = len(a.tabs) - 1
+	a.syncTabBar()
+	return a, sm.Init()
+}
+
+func (a App) openShortcutsTab() (App, tea.Cmd) {
+	for i, tab := range a.tabs {
+		if tab.Type == ShortcutsTab {
+			a.activeTab = i
+			a.tabBar = a.tabBar.SetActive(a.activeTab)
+			return a, nil
+		}
+	}
+	configData, _ := json.Marshal(a.kbConfig)
+	defaultsData, _ := json.Marshal(DefaultKeyBindingConfig())
+	sm := settingsview.NewShortcuts(a.db, configData, defaultsData)
+	if a.width > 0 {
+		sm.SetSize(a.width, a.mainContentHeightForType(ShortcutsTab))
+	}
+	tab := Tab{Type: ShortcutsTab, Title: "Shortcuts", Model: sm}
 	a.tabs = append(a.tabs, tab)
 	a.activeTab = len(a.tabs) - 1
 	a.syncTabBar()
@@ -156,3 +175,5 @@ func (a App) openVoiceSettingsTab(fromHotkey bool) (App, tea.Cmd) {
 	a.syncTabBar()
 	return a, m.Init()
 }
+
+type openShortcutsMsg struct{}

@@ -41,6 +41,7 @@ const (
 	LocalTab          TabType = "local"
 	BatchResultTab    TabType = "batch-result"
 	SettingsTab       TabType = "settings"
+	ShortcutsTab      TabType = "shortcuts"
 	SyncTab           TabType = "sync"
 	VoiceTab          TabType = "voice"
 	SessionHistoryTab TabType = "session-hist"
@@ -236,4 +237,11 @@ func (a App) Init() tea.Cmd {
 		return a.loginModel.Init()
 	}
 	return nil
+}
+
+func (a App) activeTabIsShortcuts() bool {
+	if a.viewState != MainView || a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return false
+	}
+	return a.tabs[a.activeTab].Type == ShortcutsTab
 }

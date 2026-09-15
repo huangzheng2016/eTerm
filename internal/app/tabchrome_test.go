@@ -12,6 +12,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 )
 
 func TestMainTabChromeShowsReconnectBadgeOnToastLine(t *testing.T) {
@@ -165,3 +166,20 @@ func TestAltShiftSDoesNotCycleSSHTabs(t *testing.T) {
 type errConnectionResetForTest struct{}
 
 func (errConnectionResetForTest) Error() string { return "read: connection reset by peer" }
+
+func TestVoiceHotkeySkippedInShortcutsTab(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
+	a.tabs = []Tab{{Type: ShortcutsTab, Title: "Shortcuts", Model: nil}}
+	a.activeTab = 0
+
+	upd, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	a = upd.(App)
+	if a.voiceRec {
+		t.Fatal("voice hotkey fired inside the Shortcuts tab")
+	}
+	if a.voiceEngine != nil {
+		t.Fatal("engine was built")
+	}
+}

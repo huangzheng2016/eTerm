@@ -118,15 +118,23 @@ func shareHoursInputLine(value string, editing bool, input string, selected bool
 
 func (m *Model) buildScrollLines() []scrollLine {
 	var out []scrollLine
-	out = append(out, scrollLine{catStyle.Render("  General"), -1})
+	out = append(out, scrollLine{catStyle.Render("  Recording"), -1})
 	out = append(out, scrollLine{
 		prefToggleLine("Save session transcripts", m.saveSessionTranscript, m.cursor == cursorSaveTranscript),
 		cursorSaveTranscript,
 	})
 	out = append(out, scrollLine{
+		prefToggleLine("Record session replay", m.replaySessions, m.cursor == cursorReplaySessions),
+		cursorReplaySessions,
+	})
+	out = append(out, scrollLine{"", -1})
+	out = append(out, scrollLine{catStyle.Render("  Interface"), -1})
+	out = append(out, scrollLine{
 		prefToggleLine("Grid status text", m.gridStatusWords, m.cursor == cursorGridStatus),
 		cursorGridStatus,
 	})
+	out = append(out, scrollLine{"", -1})
+	out = append(out, scrollLine{catStyle.Render("  Terminal"), -1})
 	out = append(out, scrollLine{
 		shellInputLine(m.localTerminalShell, m.state == stateShell, m.shellInput.View(), m.cursor == cursorLocalShell),
 		cursorLocalShell,
@@ -135,13 +143,11 @@ func (m *Model) buildScrollLines() []scrollLine {
 		tmuxConfigInputLine(m.tmuxConfigFile, m.state == stateTmuxConfig, m.tmuxConfigInput.View(), m.cursor == cursorTmuxConfigFile),
 		cursorTmuxConfigFile,
 	})
+	out = append(out, scrollLine{"", -1})
+	out = append(out, scrollLine{catStyle.Render("  Sharing"), -1})
 	out = append(out, scrollLine{
 		shareHoursInputLine(m.shareMaxHours, m.state == stateShareHours, m.shareHoursInput.View(), m.cursor == cursorShareMaxHours),
 		cursorShareMaxHours,
-	})
-	out = append(out, scrollLine{
-		prefToggleLine("Record session replay", m.replaySessions, m.cursor == cursorReplaySessions),
-		cursorReplaySessions,
 	})
 	out = append(out, scrollLine{"", -1})
 	out = append(out, scrollLine{catStyle.Render("  Security"), -1})
@@ -149,38 +155,6 @@ func (m *Model) buildScrollLines() []scrollLine {
 		passwordActionLine(m.cursor == cursorPassword),
 		cursorPassword,
 	})
-	out = append(out, scrollLine{"", -1})
-
-	lastCat := ""
-	for i, e := range m.entries {
-		if e.Category != lastCat {
-			lastCat = e.Category
-			if i > 0 {
-				out = append(out, scrollLine{"", -1})
-			}
-			out = append(out, scrollLine{catStyle.Render("  " + e.Category), -1})
-		}
-
-		logical := bindingCursorBase + i
-		cursor := "  "
-		lbl := labelStyle.Render(e.Label)
-		keys := keyStyle.Render(formatKeys(e.Keys))
-
-		if logical == m.cursor {
-			cursor = "> "
-			lbl = selectedStyle.Render(labelStyle.Render(e.Label))
-			if m.state == stateCapture || m.state == stateAppend {
-				keys = captureStyle.Render("...")
-			} else {
-				keys = selectedStyle.Render(formatKeys(e.Keys))
-			}
-		}
-
-		out = append(out, scrollLine{
-			fmt.Sprintf("%s%s  %s", cursor, lbl, keys),
-			logical,
-		})
-	}
 	return out
 }
 
@@ -193,17 +167,17 @@ func (m *Model) View() tea.View {
 		return tea.NewView(m.pwd.View())
 	}
 
+	if m.confirmReset.IsActive() {
+		return tea.NewView(centerDialog(m.confirmReset.View(), m.width, m.height))
+	}
+
 	var b strings.Builder
 
 	title := headerStyle.Render("Settings")
-	hints := hintStyle.Render("space/enter:toggle/edit  enter:set key  +:add  bksp:clear  C-s:save  C-r:reset  wheel:scroll  esc:close")
+	hints := hintStyle.Render("space/enter:toggle/edit  C-s:save  C-r:reset  esc:close")
 	b.WriteString(title + "  " + hints + "\n")
 
-	if m.state == stateCapture {
-		b.WriteString(captureStyle.Render("  Press a key to bind...  (esc to cancel)") + "\n")
-	} else if m.state == stateAppend {
-		b.WriteString(captureStyle.Render("  Press a key to add...  (esc to cancel)") + "\n")
-	} else if m.state == stateShell {
+	if m.state == stateShell {
 		b.WriteString(captureStyle.Render("  Enter shell path...  (enter to accept, esc to cancel)") + "\n")
 	} else if m.state == stateTmuxConfig {
 		b.WriteString(captureStyle.Render("  Enter tmux config file...  (enter to accept, esc to cancel)") + "\n")
@@ -227,7 +201,7 @@ func (m *Model) View() tea.View {
 		}
 	}
 
-	vis := m.visibleRows()
+	vis := visibleRowsFor(m.height)
 	if m.scroll > cursorLine {
 		m.scroll = cursorLine
 	}
@@ -248,4 +222,15 @@ func (m *Model) View() tea.View {
 	}
 
 	return tea.NewView(b.String())
+}
+
+func centerDialog(dialog string, width, height int) string {
+	if width <= 0 {
+		return dialog
+	}
+	h := height
+	if h <= 0 {
+		h = lipgloss.Height(dialog) + 2
+	}
+	return lipgloss.Place(width, h, lipgloss.Center, lipgloss.Center, dialog)
 }

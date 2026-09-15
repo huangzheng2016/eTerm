@@ -273,7 +273,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.commandPalette.Update(msg)
 		}
 
-		if a.viewState == MainView && !a.activeTabIsSettings() && !a.activeTabIsVoiceSettings() && key.Matches(msg, a.keyMap.VoiceInput) {
+		if a.viewState == MainView && !a.activeTabIsSettings() && !a.activeTabIsVoiceSettings() && !a.activeTabIsShortcuts() && key.Matches(msg, a.keyMap.VoiceInput) {
 			return a.toggleVoice()
 		}
 
@@ -1326,6 +1326,9 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.OpenSettingsMsg:
 		return a.openSettingsTab()
+
+	case openShortcutsMsg:
+		return a.openShortcutsTab()
 
 	case types.OpenSyncMsg:
 		return a.openSyncTab()
