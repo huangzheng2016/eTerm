@@ -21,9 +21,11 @@ func init() {
 		New: func(params map[string]string, feed FeedDeps) (Engine, error) {
 			return NewVolcanoFeedEngine(VolcanoFeedConfig{
 				Volcano: VolcanoConfig{
-					APIKey:      params["api_key"],
-					ResourceID:  params["resource_id"],
-					SmartFormat: true,
+					APIKey:        params["api_key"],
+					ResourceID:    params["resource_id"],
+					SmartFormat:   true,
+					DDC:           feed.DDC,
+					EndWindowSize: feed.EndWindowSize,
 				},
 				Helper: LocalConfig{
 					VAD:                feed.VAD,

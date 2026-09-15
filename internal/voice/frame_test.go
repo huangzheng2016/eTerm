@@ -252,3 +252,67 @@ func TestSentenceEndApply(t *testing.T) {
 		t.Fatalf("default: %q", got)
 	}
 }
+
+func fullClientPayloadMap(t *testing.T, cfg VolcanoConfig) map[string]any {
+	t.Helper()
+	frame, err := buildFullClientRequest(cfg, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := int(binary.BigEndian.Uint32(frame[8:]))
+	payload, err := gunzipData(frame[12 : 12+size])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(payload, &v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestBuildFullClientRequestDDC(t *testing.T) {
+	req := fullClientPayloadMap(t, VolcanoConfig{SampleRate: 16000, DDC: true})["request"].(map[string]any)
+	if req["enable_ddc"] != true {
+		t.Fatalf("enable_ddc = %v", req["enable_ddc"])
+	}
+	req = fullClientPayloadMap(t, VolcanoConfig{SampleRate: 16000})["request"].(map[string]any)
+	if req["enable_ddc"] != false {
+		t.Fatalf("enable_ddc default = %v", req["enable_ddc"])
+	}
+}
+
+func TestBuildFullClientRequestEndWindowSize(t *testing.T) {
+	for in, want := range map[int]float64{1050: 1050, 50: 300, 8000: 5000, 300: 300, 5000: 5000} {
+		req := fullClientPayloadMap(t, VolcanoConfig{SampleRate: 16000, EndWindowSize: in})["request"].(map[string]any)
+		if req["end_window_size"] != want {
+			t.Fatalf("end_window_size(%d) = %v, want %v", in, req["end_window_size"], want)
+		}
+	}
+	req := fullClientPayloadMap(t, VolcanoConfig{SampleRate: 16000})["request"].(map[string]any)
+	if _, ok := req["end_window_size"]; ok {
+		t.Fatalf("end_window_size present without config: %v", req)
+	}
+}
+
+func TestVolcanoRegistryPassesDDCAndEndWindow(t *testing.T) {
+	d, ok := EngineDescriptorByID("volcano")
+	if !ok {
+		t.Fatal("volcano descriptor missing")
+	}
+	eng, err := d.New(map[string]string{"api_key": "k", "resource_id": ResourceIDSeedASR}, FeedDeps{
+		VAD:           VADParams{TrailingSilence: 1},
+		DDC:           true,
+		EndWindowSize: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, ok := eng.(*VolcanoFeedEngine)
+	if !ok {
+		t.Fatalf("engine = %T", eng)
+	}
+	if !feed.vcfg.DDC || feed.vcfg.EndWindowSize != 1000 {
+		t.Fatalf("vcfg = %+v", feed.vcfg)
+	}
+}

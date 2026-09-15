@@ -17,6 +17,8 @@ type ParamSpec struct {
 
 type FeedDeps struct {
 	VAD                VADParams
+	DDC                bool
+	EndWindowSize      int
 	OnDownloadProgress func(pct float64)
 }
 

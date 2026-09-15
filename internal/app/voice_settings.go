@@ -26,7 +26,9 @@ const (
 	vrowThreshold
 	vrowSilence
 	vrowSentenceEnd
+	vrowExtra
 	vrowContext
+	vrowDDC
 	vrowParam
 	vrowModel
 	vrowCustomPath
@@ -38,6 +40,7 @@ const (
 	voiceViewMain = iota
 	voiceViewModels
 	voiceViewEngines
+	voiceViewExtra
 )
 
 const voiceHelperTarget = "helper"
@@ -132,6 +135,9 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 		}
 		return rows
 	}
+	if m.view == voiceViewExtra {
+		return []voiceRow{{kind: vrowContext}, {kind: vrowDDC}}
+	}
 	rows := []voiceRow{{kind: vrowEngine}}
 	if m.cfg.Engine == voiceEngineLocal {
 		rows = append(rows, voiceRow{kind: vrowHelper}, voiceRow{kind: vrowModels})
@@ -144,7 +150,7 @@ func (m *voiceSettingsModel) rows() []voiceRow {
 		voiceRow{kind: vrowThreshold},
 		voiceRow{kind: vrowSilence},
 		voiceRow{kind: vrowSentenceEnd},
-		voiceRow{kind: vrowContext},
+		voiceRow{kind: vrowExtra},
 	)
 	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
 		for _, p := range d.Params {
@@ -230,6 +236,9 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 	case vrowContext:
 		m.cfg.Context = !m.cfg.Context
 		return m.persist(true)
+	case vrowDDC:
+		m.cfg.DDC = !m.cfg.DDC
+		return m.persist(false)
 	case vrowPrecision:
 		m.cfg.ModelInt8 = !m.cfg.ModelInt8
 		m.cfg.Verified = false
@@ -347,6 +356,21 @@ func (m *voiceSettingsModel) leaveEngines() {
 	m.cursor = 0
 }
 
+func (m *voiceSettingsModel) enterExtra() {
+	m.view = voiceViewExtra
+	m.cursor = 0
+}
+
+func (m *voiceSettingsModel) leaveExtra() {
+	m.view = voiceViewMain
+	m.cursor = 0
+	for i, r := range m.rows() {
+		if r.kind == vrowExtra {
+			m.cursor = i
+		}
+	}
+}
+
 func (m *voiceSettingsModel) selectEngine(idx int) tea.Cmd {
 	descs := enginePickerDescriptors()
 	if idx < 0 || idx >= len(descs) {
@@ -421,6 +445,9 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 		case voiceViewEngines:
 			m.leaveEngines()
 			return false, nil
+		case voiceViewExtra:
+			m.leaveExtra()
+			return false, nil
 		}
 		return true, nil
 	case "left", "h":
@@ -430,6 +457,9 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 			return false, nil
 		case voiceViewEngines:
 			m.leaveEngines()
+			return false, nil
+		case voiceViewExtra:
+			m.leaveExtra()
 			return false, nil
 		}
 		return false, m.adjust(-1)
@@ -450,6 +480,9 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 			case vrowEngine:
 				m.enterEngines()
 				return false, nil
+			case vrowExtra:
+				m.enterExtra()
+				return false, nil
 			}
 		}
 		return false, m.adjust(1)
@@ -464,6 +497,9 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 			return false, m.helperAction()
 		case vrowModels:
 			m.enterModels()
+			return false, nil
+		case vrowExtra:
+			m.enterExtra()
 			return false, nil
 		case vrowTest:
 			if m.testing {
@@ -695,10 +731,18 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 		label, value = "end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)
 	case vrowSentenceEnd:
 		label, value = "Sentence end", string(m.cfg.SentenceEnd)
+	case vrowExtra:
+		label = "Extra features >"
 	case vrowContext:
 		label = "Context awareness"
 		value = "off"
 		if m.cfg.Context {
+			value = "on"
+		}
+	case vrowDDC:
+		label = "Semantic smoothing (DDC)"
+		value = "off"
+		if m.cfg.DDC {
 			value = "on"
 		}
 	case vrowParam:
@@ -743,6 +787,9 @@ func (m *voiceSettingsModel) View() string {
 	case voiceViewEngines:
 		title = "Voice Input - Engine"
 		hint = "up/down move · enter select · esc back"
+	case voiceViewExtra:
+		title = "Voice Input - Extra features"
+		hint = "up/down move · left/right change · esc back"
 	}
 	var lines []string
 	lines = append(lines, ui.TitleStyle.Render(title), "")

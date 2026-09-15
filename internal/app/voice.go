@@ -29,6 +29,7 @@ const (
 	voiceSilenceSettingKey     = "voice_vad_silence_ms"
 	voiceSentenceEndSettingKey = "voice_sentence_end"
 	voiceContextSettingKey     = "voice_context"
+	voiceDDCSettingKey         = "voice_ddc"
 	voiceModelSettingKey       = "voice_model"
 	voiceModelInt8SettingKey   = "voice_model_int8"
 	voiceCustomModelSettingKey = "voice_custom_model"
@@ -45,6 +46,7 @@ type voiceSettings struct {
 	VADSilenceMs   int
 	SentenceEnd    voice.SentenceEnd
 	Context        bool
+	DDC            bool
 	Params         map[string]map[string]string
 	ModelID        string
 	ModelInt8      bool
@@ -71,6 +73,7 @@ func defaultVoiceSettings() voiceSettings {
 		Engine:       voiceEngineLocal,
 		VADSilenceMs: 1000,
 		SentenceEnd:  voice.SentenceEndSpace,
+		DDC:          true,
 		ModelID:      voice.ModelCatalog()[0].ID,
 		Params:       defaultEngineParams(),
 	}
@@ -137,6 +140,9 @@ func loadVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager) voiceSe
 	}
 	if v, err := db.GetSetting(database, voiceContextSettingKey); err == nil {
 		cfg.Context = v == "1"
+	}
+	if v, err := db.GetSetting(database, voiceDDCSettingKey); err == nil {
+		cfg.DDC = v == "1"
 	}
 	if v, err := db.GetSetting(database, voiceModelSettingKey); err == nil && v != "" {
 		if newID, int8, legacy := voice.LegacyModelID(v); legacy {
@@ -242,6 +248,13 @@ func persistVoiceSettings(database *gorm.DB, mk *security.MasterKeyManager, cfg 
 	if err := db.SetSetting(database, voiceContextSettingKey, context); err != nil {
 		return err
 	}
+	ddc := "0"
+	if cfg.DDC {
+		ddc = "1"
+	}
+	if err := db.SetSetting(database, voiceDDCSettingKey, ddc); err != nil {
+		return err
+	}
 	if err := db.SetSetting(database, voiceModelSettingKey, cfg.ModelID); err != nil {
 		return err
 	}
@@ -302,6 +315,8 @@ func defaultVoiceEngine(cfg voiceSettings, onProgress func(float64)) (voice.Engi
 	}
 	return d.New(cfg.engineParams(cfg.Engine), voice.FeedDeps{
 		VAD:                cfg.vadParams(),
+		DDC:                cfg.DDC,
+		EndWindowSize:      cfg.VADSilenceMs,
 		OnDownloadProgress: onProgress,
 	})
 }
@@ -729,7 +744,7 @@ func (a App) voiceContextString() string {
 	}
 	if a.activeTab >= 0 && a.activeTab < len(a.tabs) && isTerminalTab(a.tabs[a.activeTab].Type) {
 		if m, ok := a.tabs[a.activeTab].Model.(*sshview.Model); ok {
-			tail := transcriptTail(m.PlainTranscript(voiceContextTailBytes), voiceContextTailBytes)
+			tail := transcriptTail(m.PlainTranscript(sshview.MaxTranscriptBytes), voiceContextTailBytes)
 			lines := voice.CleanTerminalContextLines(strings.Split(tail, "\n"), voice.DefaultContextMaxLines)
 			turns := make([]voice.ContextTurn, len(lines))
 			for i, ln := range lines {

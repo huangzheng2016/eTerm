@@ -1863,13 +1863,14 @@ func TestVoiceContextSettingTogglePersists(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	if got := loadVoiceSettings(database, mk); got.Context {
+		t.Fatal("context default on")
+	}
 
+	m.enterExtra()
 	m.cursor = findVoiceRow(m, vrowContext)
 	if m.cursor < 0 {
 		t.Fatal("context row missing")
-	}
-	if got := loadVoiceSettings(database, mk); got.Context {
-		t.Fatal("context default on")
 	}
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
 	chg, ok := cmd().(voiceSettingsChangedMsg)
@@ -2026,5 +2027,137 @@ func TestVoiceToggleSetsEngineContextProvider(t *testing.T) {
 	}
 	if got := fe.contextFn(); got != "" {
 		t.Fatalf("provider not cleared with the switch off: %q", got)
+	}
+}
+
+func TestVoiceContextTerminalTailUsesNewestContent(t *testing.T) {
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+
+	var b strings.Builder
+	b.WriteString("OLDMARKER earliest scrollback content\r\n")
+	for i := 0; i < 700; i++ {
+		fmt.Fprintf(&b, "filler line %04d xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n", i)
+	}
+	b.WriteString("NEWMARKER kubectl get pods\r\n")
+	feedSSHChunk(sv, b.String())
+
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.activeTab = 0
+	a.voiceCfg.Context = true
+
+	got := a.voiceContextString()
+	if !strings.Contains(got, "NEWMARKER") {
+		t.Fatalf("newest content missing from context: %q", got)
+	}
+	if strings.Contains(got, "OLDMARKER") {
+		t.Fatalf("oldest scrollback leaked into context: %q", got)
+	}
+}
+
+func TestVoiceSettingsExtraSubmenu(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+
+	if findVoiceRow(m, vrowContext) >= 0 || findVoiceRow(m, vrowDDC) >= 0 {
+		t.Fatal("extra toggles leaked into the main view")
+	}
+	extra := findVoiceRow(m, vrowExtra)
+	if extra < 0 {
+		t.Fatal("extra features row missing")
+	}
+
+	m.cursor = extra
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd != nil {
+		t.Fatal("opening extra features must not change settings")
+	}
+	if m.view != voiceViewExtra {
+		t.Fatal("enter did not open the extra features submenu")
+	}
+	rows := m.rows()
+	if len(rows) != 2 || rows[0].kind != vrowContext || rows[1].kind != vrowDDC {
+		t.Fatalf("extra rows = %+v", rows)
+	}
+	if got := loadVoiceSettings(database, mk); !got.DDC {
+		t.Fatal("DDC default off")
+	}
+
+	m.cursor = findVoiceRow(m, vrowDDC)
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	chg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || chg.cfg.DDC || chg.keepEngine {
+		t.Fatalf("DDC toggle msg = %#v", chg)
+	}
+	if got := loadVoiceSettings(database, mk); got.DDC {
+		t.Fatal("DDC toggle not persisted")
+	}
+	if view := m.View(); !strings.Contains(view, "Semantic smoothing (DDC)") || !strings.Contains(view, "off") {
+		t.Fatalf("DDC row not rendered:\n%s", view)
+	}
+
+	m.cursor = findVoiceRow(m, vrowContext)
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	chg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || !chg.cfg.Context || !chg.keepEngine {
+		t.Fatalf("context toggle msg = %#v", chg)
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	if cmd != nil || m.view != voiceViewMain {
+		t.Fatalf("left did not leave the submenu: view=%d cmd=%v", m.view, cmd)
+	}
+	if m.cursor != extra {
+		t.Fatalf("cursor did not return to the extra row: %d", m.cursor)
+	}
+	m.cursor = extra
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd != nil || m.view != voiceViewExtra {
+		t.Fatalf("re-enter extra: view=%d cmd=%v", m.view, cmd)
+	}
+	closed, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if closed || m.view != voiceViewMain {
+		t.Fatalf("esc in submenu: closed=%v view=%d", closed, m.view)
+	}
+	closed, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if !closed {
+		t.Fatal("esc did not close from the main view")
+	}
+
+	got := loadVoiceSettings(database, mk)
+	if got.DDC || !got.Context {
+		t.Fatalf("persisted = %+v", got)
+	}
+}
+
+func TestVoiceSettingsDDCPersistenceRoundTrip(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loadVoiceSettings(database, nil); !got.DDC {
+		t.Fatal("DDC default off on an empty database")
+	}
+	if err := db.SetSetting(database, voiceDDCSettingKey, "0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadVoiceSettings(database, nil); got.DDC {
+		t.Fatal("stored DDC=0 not honored")
+	}
+	cfg := defaultVoiceSettings()
+	cfg.DDC = false
+	if err := persistVoiceSettings(database, nil, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadVoiceSettings(database, nil); got.DDC {
+		t.Fatal("DDC=0 round trip failed")
 	}
 }

@@ -28,15 +28,17 @@ var VolcanoResourceIDs = []string{
 }
 
 type VolcanoConfig struct {
-	APIKey      string
-	AppKey      string
-	AccessKey   string
-	ResourceID  string
-	URL         string
-	Language    string
-	SampleRate  int
-	SmartFormat bool
-	Context     string
+	APIKey        string
+	AppKey        string
+	AccessKey     string
+	ResourceID    string
+	URL           string
+	Language      string
+	SampleRate    int
+	SmartFormat   bool
+	DDC           bool
+	EndWindowSize int
+	Context       string
 }
 
 type VolcanoEngine struct {
