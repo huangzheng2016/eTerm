@@ -47,6 +47,7 @@ func daemonServiceUnit(programArgs []string) string {
 		"Description=eTerm sync daemon\n" +
 		"\n" +
 		"[Service]\n" +
+		"Environment=LANG=C.UTF-8\n" +
 		"ExecStart=" + strings.Join(quoted, " ") + "\n" +
 		"Restart=on-failure\n" +
 		"RestartSec=2\n" +
