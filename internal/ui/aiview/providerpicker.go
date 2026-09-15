@@ -16,6 +16,7 @@ type providerForm struct {
 	inputs  []textinput.Model
 	focus   int
 	editing string
+	err     string
 }
 
 func newProviderForm(width int) providerForm {
@@ -90,6 +91,9 @@ func (f *providerForm) view() string {
 	rows := []string{ui.TitleStyle.Render(title), ""}
 	for i, label := range providerFormLabels {
 		rows = append(rows, ui.DimStyle.Render(fmt.Sprintf("%-9s", label))+f.inputs[i].View())
+	}
+	if f.err != "" {
+		rows = append(rows, "", ui.ErrorStyle.Render(f.err))
 	}
 	rows = append(rows, "",
 		ui.DimStyle.Render("tab next | enter submit | esc cancel"))
@@ -200,7 +204,10 @@ func (m *Model) updateProviderForm(msg tea.KeyPressMsg) tea.Cmd {
 		p := m.form.provider()
 		if p.Name != "" {
 			if m.form.editing != "" {
-				_ = m.store.Update(m.form.editing, p)
+				if err := m.store.Update(m.form.editing, p); err != nil {
+					m.form.err = err.Error()
+					return nil
+				}
 			} else {
 				m.store.Add(p)
 			}

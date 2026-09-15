@@ -396,6 +396,40 @@ func TestProviderPickerEditDelete(t *testing.T) {
 	m.Update(keyMsg(tea.KeyEscape, 0))
 }
 
+func TestProviderPickerEditConflictKeepsForm(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	m := New(fake, fake, fake)
+	m.SetSize(100, 32)
+
+	m.Update(keyMsg('p', tea.ModCtrl))
+	m.Update(keyMsg('e', 0))
+	if m.form.editing != "openai" {
+		t.Fatal("edit form not open")
+	}
+	m.form.inputs[0].SetValue("anthropic")
+	for i := 0; i < len(m.form.inputs)-1; i++ {
+		m.Update(keyMsg(tea.KeyTab, 0))
+	}
+	m.Update(keyMsg(tea.KeyEnter, 0))
+	if m.mode != modeProviderForm {
+		t.Fatal("conflict submit closed the form")
+	}
+	if m.form.err == "" {
+		t.Fatal("conflict error not shown")
+	}
+	if !strings.Contains(plain(m.form.view()), "already exists") {
+		t.Fatal("error not rendered in form view")
+	}
+	if fake.Models()[0].Label != "openai" {
+		t.Fatalf("provider overwritten: %+v", fake.Models()[0])
+	}
+	m.Update(keyMsg(tea.KeyEscape, 0))
+	if m.mode != modeProviders {
+		t.Fatal("esc did not leave form")
+	}
+}
+
 func TestProviderPickerReadOnlyBlocksEditDelete(t *testing.T) {
 	fake := NewFakeRunner()
 	fake.Delay = 0

@@ -177,6 +177,13 @@ func (f *FakeRunner) Add(p Provider) {
 func (f *FakeRunner) Update(name string, p Provider) error {
 	for i, existing := range f.providers {
 		if existing.Name == name {
+			if p.Name != name {
+				for _, other := range f.providers {
+					if other.Name == p.Name {
+						return fmt.Errorf("provider %q already exists", p.Name)
+					}
+				}
+			}
 			if p.APIKey == "" {
 				p.APIKey = existing.APIKey
 			}
