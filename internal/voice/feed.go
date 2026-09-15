@@ -57,6 +57,10 @@ type VolcanoFeedEngine struct {
 	staticCtx string
 	lastGood  string
 
+	redialing   bool
+	redialAgain bool
+	gen         uint64
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	events chan Event
@@ -104,6 +108,7 @@ func (e *VolcanoFeedEngine) Start(ctx context.Context) error {
 	e.vol = vol
 	e.idleCh = make(chan struct{}, 1)
 	e.started = true
+	e.gen++
 	if err := e.helper.Start(ctx); err != nil {
 		e.started = false
 		e.vol = nil
@@ -253,57 +258,73 @@ func (e *VolcanoFeedEngine) Close() error {
 	return nil
 }
 
-// volcanoPCMFlushBytes is 200ms of 16kHz 16bit mono PCM, the recommended
-// per-frame payload for the volcano streaming API.
-const volcanoPCMFlushBytes = 6400
+// pcmFlushBytes is 200ms of 16kHz 16bit mono PCM, the recommended per-frame
+// payload for streaming speech APIs.
+const pcmFlushBytes = 6400
 
 func (e *VolcanoFeedEngine) onAudio(pcm []byte) {
 	e.mu.Lock()
-	if e.closed || e.vol == nil {
-		e.mu.Unlock()
+	defer e.mu.Unlock()
+	if e.closed || !e.started {
 		return
 	}
 	e.buf = append(e.buf, pcm...)
-	if len(e.buf) < volcanoPCMFlushBytes {
-		e.mu.Unlock()
+	if e.vol == nil || len(e.buf) < pcmFlushBytes {
 		return
 	}
 	chunk := e.buf
 	e.buf = nil
-	vol := e.vol
-	e.mu.Unlock()
-	_ = vol.WriteAudio(chunk)
+	_ = e.vol.WriteAudio(chunk)
 }
 
 func (e *VolcanoFeedEngine) flushAudio() {
 	e.mu.Lock()
-	if len(e.buf) == 0 {
-		e.mu.Unlock()
+	defer e.mu.Unlock()
+	if len(e.buf) == 0 || e.vol == nil {
 		return
 	}
 	chunk := e.buf
 	e.buf = nil
-	vol := e.vol
-	e.mu.Unlock()
-	if vol != nil {
-		_ = vol.WriteAudio(chunk)
-	}
+	_ = e.vol.WriteAudio(chunk)
 }
 
+// onUtteranceEnd starts an asynchronous redial so the helper read loop is
+// never blocked by the dial. The old connection is stopped (after flushing
+// the buffered audio tail to it) while the new connection is dialed in
+// parallel; audio arriving during the redial window stays buffered and is
+// replayed to the new connection once it is ready.
 func (e *VolcanoFeedEngine) onUtteranceEnd() {
 	e.mu.Lock()
 	if !e.started || e.closed {
 		e.mu.Unlock()
 		return
 	}
+	if e.redialing {
+		e.redialAgain = true
+		e.mu.Unlock()
+		return
+	}
+	e.redialing = true
 	old := e.vol
+	e.vol = nil
+	gen := e.gen
+	var tail []byte
+	if old != nil {
+		tail = e.buf
+		e.buf = nil
+	}
+	e.wg.Add(1)
 	e.mu.Unlock()
+	go e.redial(old, tail, gen)
+}
 
-	type redial struct {
+func (e *VolcanoFeedEngine) redial(old *VolcanoEngine, tail []byte, gen uint64) {
+	defer e.wg.Done()
+	type result struct {
 		vol *VolcanoEngine
 		err error
 	}
-	dialed := make(chan redial, 1)
+	dialed := make(chan result, 1)
 	go func() {
 		e.mu.Lock()
 		cfg := e.dialConfigLocked()
@@ -312,34 +333,57 @@ func (e *VolcanoFeedEngine) onUtteranceEnd() {
 		ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
 		err := vol.Start(ctx)
 		cancel()
-		dialed <- redial{vol, err}
+		dialed <- result{vol, err}
 	}()
 
 	if old != nil {
+		if len(tail) > 0 {
+			_ = old.WriteAudio(tail)
+		}
 		old.Stop()
 		old.Close()
 	}
 
 	res := <-dialed
 	e.mu.Lock()
-	if e.vol == old {
-		e.vol = nil
-	}
-	if !e.started || e.closed {
+	if !e.started || e.closed || gen != e.gen {
+		e.redialing = false
+		again := e.redialAgain
+		e.redialAgain = false
 		e.mu.Unlock()
 		res.vol.Close()
+		if again {
+			e.onUtteranceEnd()
+		}
 		return
 	}
 	if res.err != nil {
+		e.redialing = false
+		again := e.redialAgain
+		e.redialAgain = false
 		e.mu.Unlock()
 		e.emit(Event{Type: EventError, Msg: fmt.Sprintf("volcano reconnect: %v", res.err)})
+		if again {
+			e.onUtteranceEnd()
+		}
 		return
 	}
 	e.vol = res.vol
+	replay := e.buf
+	e.buf = nil
+	again := e.redialAgain
+	e.redialAgain = false
+	e.redialing = false
 	e.wg.Add(1)
+	for off := 0; off < len(replay); off += pcmFlushBytes {
+		_ = res.vol.WriteAudio(replay[off:min(off+pcmFlushBytes, len(replay))])
+	}
 	e.mu.Unlock()
 
 	go e.pump(res.vol.Events())
+	if again {
+		e.onUtteranceEnd()
+	}
 }
 
 func (e *VolcanoFeedEngine) emit(ev Event) {

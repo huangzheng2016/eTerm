@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -41,14 +42,17 @@ type deepgramServer struct {
 	t           *testing.T
 	connN       int32
 	audio       chan []byte
+	audio2      chan []byte
 	closeStream chan struct{}
 	conn2       chan struct{}
+	secondDelay time.Duration
 }
 
 func newDeepgramServer(t *testing.T) *deepgramServer {
 	return &deepgramServer{
 		t:           t,
 		audio:       make(chan []byte, 8),
+		audio2:      make(chan []byte, 8),
 		closeStream: make(chan struct{}, 4),
 		conn2:       make(chan struct{}),
 	}
@@ -73,6 +77,9 @@ func (s *deepgramServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	n := atomic.AddInt32(&s.connN, 1)
+	if n == 2 && s.secondDelay > 0 {
+		time.Sleep(s.secondDelay)
+	}
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		s.t.Errorf("accept: %v", err)
@@ -91,7 +98,11 @@ func (s *deepgramServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if typ == websocket.MessageBinary {
-			s.audio <- data
+			if n == 2 {
+				s.audio2 <- data
+			} else {
+				s.audio <- data
+			}
 			if !interimSent {
 				interimSent = true
 				conn.Write(ctx, websocket.MessageText, []byte(`{"type":"Results","is_final":false,"channel":{"alternatives":[{"transcript":"hel"}]}}`))
@@ -173,6 +184,80 @@ func TestDeepgramEngineRequiresKey(t *testing.T) {
 		t.Fatal("expected auth error")
 	}
 	eng.Close()
+}
+
+func TestDeepgramFeedRedialWindowAudioReplayed(t *testing.T) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	os.Setenv("GO_FAKE_NO_AUDIO", "1")
+	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+
+	srv := newDeepgramServer(t)
+	srv.secondDelay = time.Second
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := newDeepgramFeed(DeepgramConfig{APIKey: "test-key", URL: wsURL},
+		LocalConfig{BinPath: fakeHelperWrapper(t)})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	chunkA := []byte{1, 2, 3, 4}
+	chunkB := []byte{5, 6, 7, 8}
+	eng.onAudio(chunkA)
+	select {
+	case got := <-srv.audio:
+		if !bytes.Equal(got, chunkA) {
+			t.Fatalf("conn1 audio = %v, want %v", got, chunkA)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("conn1 did not receive audio")
+	}
+
+	start := time.Now()
+	eng.onUtteranceEnd()
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("onUtteranceEnd blocked for %v", elapsed)
+	}
+	eng.onAudio(chunkB)
+
+	eng.mu.Lock()
+	buffered := bytes.Equal(eng.buf, chunkB)
+	eng.mu.Unlock()
+	if !buffered {
+		t.Fatal("audio during redial window was not buffered")
+	}
+
+	select {
+	case <-srv.closeStream:
+	case <-time.After(5 * time.Second):
+		t.Fatal("old session did not receive CloseStream")
+	}
+	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	if final.Text != "hello world" {
+		t.Fatalf("final transcript = %q", final.Text)
+	}
+
+	select {
+	case <-srv.conn2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no redialed session")
+	}
+	select {
+	case got := <-srv.audio2:
+		if !bytes.Equal(got, chunkB) {
+			t.Fatalf("conn2 replayed audio = %v, want %v", got, chunkB)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("window audio was not replayed to the new session")
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDeepgramFeedRoutesPassthrough(t *testing.T) {
