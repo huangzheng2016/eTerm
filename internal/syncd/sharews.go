@@ -165,6 +165,8 @@ func (h *RelayHub) shareWS(engine *Engine, w http.ResponseWriter, r *http.Reques
 	}
 
 	q := newLaneQueue()
+	q.closeConn = func() { c.CloseNow() }
+	q.label = "share viewer addr=" + r.RemoteAddr
 	streamID := st.streamID
 	resumeFrom := st.acked.Load()
 	defer func() {

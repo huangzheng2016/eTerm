@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -548,5 +549,141 @@ func TestWriteWSPanicRecovered(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "writeWS panic") {
 		t.Fatalf("panic not logged: %q", logs.String())
+	}
+}
+
+func TestLaneQueueSendTimeoutClosesConn(t *testing.T) {
+	old := laneSendBlockTimeout
+	laneSendBlockTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { laneSendBlockTimeout = old })
+	logs := captureSyncdLog(t)
+
+	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
+	q.label = "client tenant=tenant-a addr=127.0.0.1:9000"
+	connClosed := make(chan struct{})
+	q.closeConn = func() { close(connClosed) }
+	q.bulk <- relay.Frame{Type: relay.FrameData, StreamID: 7}
+
+	if q.send(context.Background(), relay.Frame{Type: relay.FrameData, StreamID: 7}, true) {
+		t.Fatal("send returned true with a permanently full queue")
+	}
+	select {
+	case <-connClosed:
+	case <-time.After(time.Second):
+		t.Fatal("dead connection not closed after send timeout")
+	}
+	select {
+	case <-q.done:
+	default:
+		t.Fatal("queue not closed after send timeout")
+	}
+	if out := logs.String(); !strings.Contains(out, "client tenant=tenant-a") || !strings.Contains(out, "stream=7") {
+		t.Fatalf("timeout close not logged with peer/stream: %q", out)
+	}
+}
+
+func TestLaneQueueSendTimeoutSparesSlowClient(t *testing.T) {
+	old := laneSendBlockTimeout
+	laneSendBlockTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { laneSendBlockTimeout = old })
+	logs := captureSyncdLog(t)
+
+	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
+	q.closeConn = func() { t.Error("closeConn called for live slow client") }
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-q.bulk:
+				time.Sleep(40 * time.Millisecond)
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < 5; i++ {
+		if !q.send(context.Background(), relay.Frame{Type: relay.FrameData, StreamID: 3}, true) {
+			t.Fatalf("send %d returned false for live slow client", i)
+		}
+	}
+	if out := logs.String(); strings.Contains(out, "send blocked") {
+		t.Fatalf("live slow client killed: %q", out)
+	}
+}
+
+func TestDaemonWSZombieClientReclaimed(t *testing.T) {
+	old := laneSendBlockTimeout
+	laneSendBlockTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { laneSendBlockTimeout = old })
+	logs := captureSyncdLog(t)
+
+	engine := testEngine(t)
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+
+	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon, "peer-a")
+	waitPeer(t, server.URL)
+
+	zombie := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+	healthy := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	if err := zombie.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 1, Payload: openPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 1 {
+		t.Fatalf("got frame %#v, want OPEN stream 1", f)
+	}
+	if err := healthy.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: openPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 2 {
+		t.Fatalf("got frame %#v, want OPEN stream 2", f)
+	}
+
+	var stopFlood atomic.Bool
+	floodDone := make(chan struct{})
+	go func() {
+		defer close(floodDone)
+		payload := relay.DataPayload(0, bytes.Repeat([]byte("x"), 4096))
+		for !stopFlood.Load() {
+			if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 1, Payload: payload})); err != nil {
+				return
+			}
+		}
+	}()
+
+	f := readFrame(t, ctx, daemon)
+	stopFlood.Store(true)
+	<-floodDone
+	if f.Type != relay.FrameClose || f.StreamID != 1 || string(f.Payload) != relay.CloseClientDisconnected {
+		t.Fatalf("got frame %#v, want CLOSE stream 1 client-disconnected after zombie reclaim", f)
+	}
+
+	dataPayload := relay.DataPayload(1, []byte("after-reclaim"))
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 2, Payload: dataPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, healthy); f.Type != relay.FrameData || !bytes.Equal(f.Payload, dataPayload) {
+		t.Fatalf("healthy stream got frame %#v, want DATA after-reclaim", f)
+	}
+
+	var zombieErr error
+	for zombieErr == nil {
+		_, _, zombieErr = zombie.Read(ctx)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("zombie connection not closed by reclaim")
+	}
+	if out := logs.String(); !strings.Contains(out, "client tenant=tenant-a") || !strings.Contains(out, "stream=1") {
+		t.Fatalf("zombie reclaim not logged with peer/stream: %q", out)
 	}
 }
