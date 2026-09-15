@@ -426,19 +426,35 @@ func toolCallLabel(name, args string) string {
 func (b *aiBridge) Models() []aiview.ModelEntry {
 	aliased := map[string]bool{}
 	out := make([]aiview.ModelEntry, 0, len(b.store.Models)+len(b.store.Providers))
+	entry := func(p *ai.Provider) aiview.ModelEntry {
+		e := aiview.ModelEntry{}
+		if p != nil {
+			e.Type = p.Type
+			e.BaseURL = p.BaseURL
+			e.DefaultModel = p.DefaultModel
+			e.KeySet = p.APIKey != ""
+			e.ReadOnly = p.Source == ai.SourceKimi
+		}
+		return e
+	}
 	for _, m := range b.store.Models {
 		aliased[m.Provider] = true
-		typ := ""
-		if p := b.store.Get(m.Provider); p != nil {
-			typ = p.Type
-		}
-		out = append(out, aiview.ModelEntry{Label: m.Alias, Provider: m.Provider, Model: m.Alias, Type: typ})
+		e := entry(b.store.Get(m.Provider))
+		e.Label = m.Alias
+		e.Provider = m.Provider
+		e.Model = m.Alias
+		out = append(out, e)
 	}
 	for _, p := range b.store.Providers {
 		if aliased[p.Name] {
 			continue
 		}
-		out = append(out, aiview.ModelEntry{Label: p.Name, Provider: p.Name, Model: p.DefaultModel, Type: p.Type})
+		p := p
+		e := entry(&p)
+		e.Label = p.Name
+		e.Provider = p.Name
+		e.Model = p.DefaultModel
+		out = append(out, e)
 	}
 	return out
 }
@@ -476,6 +492,33 @@ func (b *aiBridge) Add(pv aiview.Provider) {
 		DefaultModel: strings.TrimSpace(pv.Model),
 	})
 	b.persistProviders()
+}
+
+func (b *aiBridge) Update(name string, pv aiview.Provider) error {
+	err := b.store.Update(name, ai.Provider{
+		Name:         strings.TrimSpace(pv.Name),
+		Type:         strings.ToLower(strings.TrimSpace(pv.Type)),
+		APIKey:       pv.APIKey,
+		BaseURL:      strings.TrimSpace(pv.BaseURL),
+		DefaultModel: strings.TrimSpace(pv.Model),
+	})
+	if err != nil {
+		return err
+	}
+	b.CancelRun()
+	b.persistProviders()
+	b.persistActive()
+	return nil
+}
+
+func (b *aiBridge) Delete(name string) error {
+	if err := b.store.Delete(name); err != nil {
+		return err
+	}
+	b.CancelRun()
+	b.persistProviders()
+	b.persistActive()
+	return nil
 }
 
 func (a App) ensureAI() (App, tea.Cmd) {

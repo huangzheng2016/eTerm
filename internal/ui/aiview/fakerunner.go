@@ -140,7 +140,15 @@ func demoEvents(prompt string) []AgentEvent {
 func (f *FakeRunner) Models() []ModelEntry {
 	out := make([]ModelEntry, 0, len(f.providers))
 	for _, p := range f.providers {
-		out = append(out, ModelEntry{Label: p.Name, Provider: p.Name, Model: p.Model, Type: p.Type})
+		out = append(out, ModelEntry{
+			Label:        p.Name,
+			Provider:     p.Name,
+			Model:        p.Model,
+			Type:         p.Type,
+			BaseURL:      p.BaseURL,
+			DefaultModel: p.Model,
+			KeySet:       p.APIKey != "",
+		})
 	}
 	return out
 }
@@ -164,6 +172,35 @@ func (f *FakeRunner) Add(p Provider) {
 		}
 	}
 	f.providers = append(f.providers, p)
+}
+
+func (f *FakeRunner) Update(name string, p Provider) error {
+	for i, existing := range f.providers {
+		if existing.Name == name {
+			if p.APIKey == "" {
+				p.APIKey = existing.APIKey
+			}
+			f.providers[i] = p
+			if f.active == name {
+				f.active = p.Name
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown provider: %s", name)
+}
+
+func (f *FakeRunner) Delete(name string) error {
+	for i, p := range f.providers {
+		if p.Name == name {
+			f.providers = append(f.providers[:i], f.providers[i+1:]...)
+			if f.active == name {
+				f.active = ""
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown provider: %s", name)
 }
 
 func (f *FakeRunner) SaveSession(id, title, forkOf string) {

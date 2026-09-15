@@ -102,6 +102,8 @@ type Model struct {
 	pCursor int
 	form    providerForm
 
+	delConfirm string
+
 	sessionID   string
 	saveSeq     int
 	sessionList []SessionEntry

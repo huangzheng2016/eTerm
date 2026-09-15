@@ -48,10 +48,14 @@ type Provider struct {
 }
 
 type ModelEntry struct {
-	Label    string
-	Provider string
-	Model    string
-	Type     string
+	Label        string
+	Provider     string
+	Model        string
+	Type         string
+	BaseURL      string
+	DefaultModel string
+	KeySet       bool
+	ReadOnly     bool
 }
 
 type ProviderStore interface {
@@ -59,6 +63,8 @@ type ProviderStore interface {
 	Active() string
 	Switch(provider, model string)
 	Add(p Provider)
+	Update(name string, p Provider) error
+	Delete(name string) error
 }
 
 type TaskActivity struct {

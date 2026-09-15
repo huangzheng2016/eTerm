@@ -13,8 +13,9 @@ import (
 var providerFormLabels = []string{"name", "type", "base_url", "api_key", "model"}
 
 type providerForm struct {
-	inputs []textinput.Model
-	focus  int
+	inputs  []textinput.Model
+	focus   int
+	editing string
 }
 
 func newProviderForm(width int) providerForm {
@@ -29,6 +30,17 @@ func newProviderForm(width int) providerForm {
 		f.inputs[i] = in
 	}
 	f.inputs[0].Focus()
+	return f
+}
+
+func newProviderEditForm(width int, e ModelEntry) providerForm {
+	f := newProviderForm(width)
+	f.editing = e.Provider
+	f.inputs[0].SetValue(e.Provider)
+	f.inputs[1].SetValue(e.Type)
+	f.inputs[2].SetValue(e.BaseURL)
+	f.inputs[3].Placeholder = "api_key (empty keeps current)"
+	f.inputs[4].SetValue(e.DefaultModel)
 	return f
 }
 
@@ -71,7 +83,11 @@ func (f *providerForm) provider() Provider {
 }
 
 func (f *providerForm) view() string {
-	rows := []string{ui.TitleStyle.Render("Add Provider"), ""}
+	title := "Add Provider"
+	if f.editing != "" {
+		title = "Edit Provider"
+	}
+	rows := []string{ui.TitleStyle.Render(title), ""}
 	for i, label := range providerFormLabels {
 		rows = append(rows, ui.DimStyle.Render(fmt.Sprintf("%-9s", label))+f.inputs[i].View())
 	}
@@ -100,15 +116,42 @@ func (m *Model) providersView() string {
 		if e.Provider != e.Label {
 			detail += " · " + e.Provider
 		}
+		if e.KeySet {
+			detail += " (set)"
+		}
+		if e.ReadOnly {
+			detail += " [kimi]"
+		}
 		rows = append(rows, fmt.Sprintf("%s%s %s%s",
 			cursor, style.Render(e.Label), ui.DimStyle.Render("["+detail+"]"), active))
 	}
-	rows = append(rows, "",
-		ui.DimStyle.Render("enter select | a add | esc back"))
+	rows = append(rows, "")
+	if m.delConfirm != "" {
+		rows = append(rows, ui.DimStyle.Render(fmt.Sprintf("delete %s? (y/n)", m.delConfirm)))
+	} else {
+		rows = append(rows, ui.DimStyle.Render("enter select | a add | e edit | d delete | esc back"))
+	}
 	return strings.Join(rows, "\n")
 }
 
 func (m *Model) updateProviders(msg tea.KeyPressMsg) tea.Cmd {
+	if m.delConfirm != "" {
+		switch msg.String() {
+		case "y", "enter":
+			_ = m.store.Delete(m.delConfirm)
+			m.delConfirm = ""
+			m.models = m.store.Models()
+			if m.pCursor >= len(m.models) {
+				m.pCursor = len(m.models) - 1
+			}
+			if m.pCursor < 0 {
+				m.pCursor = 0
+			}
+		case "n", "esc":
+			m.delConfirm = ""
+		}
+		return nil
+	}
 	switch msg.String() {
 	case "esc":
 		m.mode = modeChat
@@ -128,6 +171,21 @@ func (m *Model) updateProviders(msg tea.KeyPressMsg) tea.Cmd {
 	case "a":
 		m.mode = modeProviderForm
 		m.form = newProviderForm(m.contentWidth() - 12)
+	case "e":
+		if m.pCursor < len(m.models) {
+			e := m.models[m.pCursor]
+			if !e.ReadOnly {
+				m.mode = modeProviderForm
+				m.form = newProviderEditForm(m.contentWidth()-12, e)
+			}
+		}
+	case "d":
+		if m.pCursor < len(m.models) {
+			e := m.models[m.pCursor]
+			if !e.ReadOnly {
+				m.delConfirm = e.Provider
+			}
+		}
 	}
 	return nil
 }
@@ -141,7 +199,11 @@ func (m *Model) updateProviderForm(msg tea.KeyPressMsg) tea.Cmd {
 	if submitted {
 		p := m.form.provider()
 		if p.Name != "" {
-			m.store.Add(p)
+			if m.form.editing != "" {
+				_ = m.store.Update(m.form.editing, p)
+			} else {
+				m.store.Add(p)
+			}
 			m.models = m.store.Models()
 			m.mode = modeProviders
 		}
