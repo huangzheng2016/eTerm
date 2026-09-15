@@ -687,3 +687,110 @@ func TestDaemonWSZombieClientReclaimed(t *testing.T) {
 		t.Fatalf("zombie reclaim not logged with peer/stream: %q", out)
 	}
 }
+
+func TestClientWSDuplicateOpenTakesOver(t *testing.T) {
+	engine := testEngine(t)
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+
+	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon, "peer-a")
+	waitPeer(t, server.URL)
+
+	oldClient := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+	newClient := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	open := relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 7, Payload: openPayload})
+	if err := oldClient.Write(ctx, websocket.MessageBinary, open); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 7 {
+		t.Fatalf("got frame %#v, want OPEN stream 7", f)
+	}
+
+	if err := newClient.Write(ctx, websocket.MessageBinary, open); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 7 {
+		t.Fatalf("got frame %#v, want takeover OPEN stream 7 forwarded to daemon", f)
+	}
+	if f := readFrame(t, ctx, oldClient); f.Type != relay.FrameClose || f.StreamID != 7 || string(f.Payload) != relay.CloseSessionTakenOver {
+		t.Fatalf("old conn got frame %#v, want CLOSE stream 7 taken-over", f)
+	}
+
+	dataPayload := relay.DataPayload(1, []byte("after-takeover"))
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 7, Payload: dataPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, newClient); f.Type != relay.FrameData || !bytes.Equal(f.Payload, dataPayload) {
+		t.Fatalf("new conn got frame %#v, want DATA after-takeover", f)
+	}
+
+	oldClient.CloseNow()
+	time.Sleep(100 * time.Millisecond)
+	if err := newClient.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 7, Payload: relay.AckPayload(15)})); err != nil {
+		t.Fatal(err)
+	}
+	f := readFrame(t, ctx, daemon)
+	ack, err := relay.ParseAck(f.Payload)
+	if f.Type != relay.FrameAck || f.StreamID != 7 || err != nil || ack != 15 {
+		t.Fatalf("got frame %#v after old conn close, want ACK 15 stream 7 (taken-over stream must not be closed)", f)
+	}
+}
+
+func TestClientWSDuplicateOpenSameConnNoTakeoverNotice(t *testing.T) {
+	engine := testEngine(t)
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+
+	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon, "peer-a")
+	waitPeer(t, server.URL)
+
+	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
+	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	open := relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 7, Payload: openPayload})
+	for i := 0; i < 2; i++ {
+		if err := client.Write(ctx, websocket.MessageBinary, open); err != nil {
+			t.Fatal(err)
+		}
+		if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 7 {
+			t.Fatalf("open %d: got frame %#v, want OPEN stream 7", i, f)
+		}
+	}
+
+	dataPayload := relay.DataPayload(1, []byte("still-mine"))
+	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 7, Payload: dataPayload})); err != nil {
+		t.Fatal(err)
+	}
+	if f := readFrame(t, ctx, client); f.Type != relay.FrameData || !bytes.Equal(f.Payload, dataPayload) {
+		t.Fatalf("got frame %#v, want DATA still-mine (same-conn re-open must not self-close)", f)
+	}
+}
+
+func TestCloseSessionIfOwner(t *testing.T) {
+	h := NewRelayHub(nil)
+	owner := newLaneQueue()
+	other := newLaneQueue()
+	h.sessions[7] = relaySession{client: owner, daemon: newLaneQueue()}
+
+	h.closeSessionIfOwner(7, other)
+	if _, ok := h.session(7); !ok {
+		t.Fatal("session deleted by non-owner")
+	}
+	h.closeSessionIfOwner(7, owner)
+	if _, ok := h.session(7); ok {
+		t.Fatal("session not deleted by owner")
+	}
+}

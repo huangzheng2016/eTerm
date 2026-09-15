@@ -98,14 +98,22 @@ func NewRelayHub(peers *PeerRegistry) *RelayHub {
 	}
 }
 
-func (h *RelayHub) setSession(id uint32, s relaySession) error {
+func (h *RelayHub) setSession(id uint32, s relaySession) {
+	h.mu.Lock()
+	old, replaced := h.sessions[id]
+	h.sessions[id] = s
+	h.mu.Unlock()
+	if replaced && old.client != s.client {
+		old.client.sendCtl(relay.Frame{Type: relay.FrameClose, StreamID: id, Payload: []byte(relay.CloseSessionTakenOver)})
+	}
+}
+
+func (h *RelayHub) closeSessionIfOwner(id uint32, owner *laneQueue) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.sessions[id]; ok {
-		return fmt.Errorf("stream already exists")
+	if s, ok := h.sessions[id]; ok && s.client == owner {
+		delete(h.sessions, id)
 	}
-	h.sessions[id] = s
-	return nil
 }
 
 func (h *RelayHub) session(id uint32) (relaySession, bool) {
@@ -286,10 +294,7 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 				send.sendCtl(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("peer offline")})
 				continue
 			}
-			if err := h.setSession(f.StreamID, relaySession{client: send, daemon: peer.Send}); err != nil {
-				send.sendCtl(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(err.Error())})
-				continue
-			}
+			h.setSession(f.StreamID, relaySession{client: send, daemon: peer.Send})
 			if !peer.Send.send(ctx, f, false) {
 				if ctx.Err() != nil {
 					return
