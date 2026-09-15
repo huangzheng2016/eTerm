@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"log"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
@@ -179,5 +181,130 @@ func TestRecoverLogRecoversGoroutinePanic(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "test pump panic: boom") {
 		t.Fatalf("panic not logged: %q", buf.String())
+	}
+}
+
+type lockedLogBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedLogBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedLogBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *lockedLogBuf) count(sub string) int {
+	return strings.Count(b.String(), sub)
+}
+
+func stalledRelay(t *testing.T, after, interval time.Duration) *streamRelay {
+	t.Helper()
+	fake := newDaemonFakeSession()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.sidV.Store(42)
+	sr.stallAfter = after
+	sr.stallInterval = interval
+	sr.appendOutput(make([]byte, outputWindowBytes))
+	return sr
+}
+
+func captureStallLog(t *testing.T) *lockedLogBuf {
+	t.Helper()
+	out := &lockedLogBuf{}
+	old := log.Writer()
+	log.SetOutput(out)
+	t.Cleanup(func() { log.SetOutput(old) })
+	return out
+}
+
+func waitForStallLines(t *testing.T, out *lockedLogBuf, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if out.count("output stalled") >= want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("stall log lines = %d, want >= %d: %q", out.count("output stalled"), want, out.String())
+}
+
+func TestWaitCreditLogsStallWithStreamDetails(t *testing.T) {
+	out := captureStallLog(t)
+	sr := stalledRelay(t, 30*time.Millisecond, 30*time.Millisecond)
+	sr.markDetached()
+
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit() }()
+
+	waitForStallLines(t, out, 1)
+	logs := out.String()
+	if !strings.Contains(logs, "stream 42 output stalled") {
+		t.Fatalf("log missing stream id: %q", logs)
+	}
+	if !strings.Contains(logs, "ack=0 ringEnd=1048576") {
+		t.Fatalf("log missing ack/ringEnd: %q", logs)
+	}
+	if !strings.Contains(logs, "detachedSince=") {
+		t.Fatalf("log missing detachedSince: %q", logs)
+	}
+	if strings.Contains(logs, "detachedSince=0001-01-01") {
+		t.Fatalf("detachedSince not stamped: %q", logs)
+	}
+	sr.shutdown()
+	if got := <-done; got {
+		t.Fatal("waitCredit returned true after shutdown")
+	}
+}
+
+func TestWaitCreditStallLogFrequency(t *testing.T) {
+	out := captureStallLog(t)
+	sr := stalledRelay(t, 30*time.Millisecond, 50*time.Millisecond)
+
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit() }()
+
+	waitForStallLines(t, out, 1)
+	time.Sleep(220 * time.Millisecond)
+	got := out.count("output stalled")
+	if got < 3 || got > 8 {
+		t.Fatalf("stall log lines = %d after ~4 intervals, want 3..8", got)
+	}
+	sr.shutdown()
+	<-done
+}
+
+func TestWaitCreditNoStallLogWhenCreditReleased(t *testing.T) {
+	out := captureStallLog(t)
+	sr := stalledRelay(t, 80*time.Millisecond, 80*time.Millisecond)
+
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit() }()
+
+	time.Sleep(30 * time.Millisecond)
+	sr.mu.Lock()
+	sr.sent = outputWindowBytes
+	sr.mu.Unlock()
+	sr.setAck(outputWindowBytes)
+	select {
+	case got := <-done:
+		if !got {
+			t.Fatal("waitCredit returned false after ack")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waitCredit did not return after ack")
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := out.count("output stalled"); got != 0 {
+		t.Fatalf("stall log lines = %d, want 0: %q", got, out.String())
 	}
 }
