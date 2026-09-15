@@ -49,6 +49,59 @@ func (s *Store) Upsert(p Provider) {
 	s.Providers = append(s.Providers, p)
 }
 
+func (s *Store) Update(name string, p Provider) error {
+	existing := s.Get(name)
+	if existing == nil {
+		return fmt.Errorf("unknown provider: %s", name)
+	}
+	if existing.Source == SourceKimi {
+		return fmt.Errorf("provider %q is managed by kimi config", name)
+	}
+	if p.Name != name {
+		if s.Get(p.Name) != nil {
+			return fmt.Errorf("provider %q already exists", p.Name)
+		}
+		for i := range s.Models {
+			if s.Models[i].Provider == name {
+				s.Models[i].Provider = p.Name
+			}
+		}
+		if s.ActiveProvider == name {
+			s.ActiveProvider = p.Name
+		}
+	}
+	if p.APIKey == "" {
+		p.APIKey = existing.APIKey
+	}
+	*existing = p
+	return nil
+}
+
+func (s *Store) Delete(name string) error {
+	for i := range s.Providers {
+		if s.Providers[i].Name != name {
+			continue
+		}
+		if s.Providers[i].Source == SourceKimi {
+			return fmt.Errorf("provider %q is managed by kimi config", name)
+		}
+		s.Providers = append(s.Providers[:i], s.Providers[i+1:]...)
+		models := s.Models[:0]
+		for _, m := range s.Models {
+			if m.Provider != name {
+				models = append(models, m)
+			}
+		}
+		s.Models = models
+		if s.ActiveProvider == name {
+			s.ActiveProvider = ""
+			s.ActiveModel = ""
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown provider: %s", name)
+}
+
 func (s *Store) SetActive(provider, model string) error {
 	if s.Get(provider) == nil {
 		return fmt.Errorf("unknown provider: %s", provider)

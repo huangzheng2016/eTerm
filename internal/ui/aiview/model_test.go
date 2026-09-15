@@ -339,6 +339,120 @@ func TestProviderPickerSwitchAndAdd(t *testing.T) {
 	}
 }
 
+func TestProviderPickerEditDelete(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	fake.providers[0].APIKey = "sk-x"
+	m := New(fake, fake, fake)
+	m.SetSize(100, 32)
+
+	m.Update(keyMsg('p', tea.ModCtrl))
+	m.Update(keyMsg('e', 0))
+	if m.mode != modeProviderForm || m.form.editing != "openai" {
+		t.Fatalf("e did not open edit form, mode=%v editing=%q", m.mode, m.form.editing)
+	}
+	if m.form.inputs[0].Value() != "openai" || m.form.inputs[4].Value() != "gpt-4o" {
+		t.Fatalf("form not prefilled: %q %q", m.form.inputs[0].Value(), m.form.inputs[4].Value())
+	}
+	m.form.inputs[0].SetValue("openai2")
+	m.form.inputs[4].SetValue("gpt-5")
+	for i := 0; i < len(m.form.inputs)-1; i++ {
+		m.Update(keyMsg(tea.KeyTab, 0))
+	}
+	m.Update(keyMsg(tea.KeyEnter, 0))
+	if m.mode != modeProviders {
+		t.Fatal("edit submit did not return to list")
+	}
+	if fake.Models()[0].Label != "openai2" || fake.Models()[0].Model != "gpt-5" {
+		t.Fatalf("provider not updated: %+v", fake.Models()[0])
+	}
+	if fake.Active() != "openai2" {
+		t.Fatalf("active = %q, want openai2 after rename", fake.Active())
+	}
+
+	out := plain(m.View().Content)
+	if !strings.Contains(out, "(set)") {
+		t.Fatal("list missing key-set marker")
+	}
+
+	m.Update(keyMsg('d', 0))
+	out = plain(m.View().Content)
+	if !strings.Contains(out, "delete openai2?") {
+		t.Fatal("delete confirm not shown")
+	}
+	m.Update(keyMsg('n', 0))
+	if len(fake.Models()) != 2 {
+		t.Fatal("n should cancel delete")
+	}
+
+	m.Update(keyMsg('d', 0))
+	m.Update(keyMsg('y', 0))
+	if len(fake.Models()) != 1 || fake.Models()[0].Label != "anthropic" {
+		t.Fatalf("provider not deleted: %+v", fake.Models())
+	}
+	if m.delConfirm != "" {
+		t.Fatal("confirm state not cleared")
+	}
+	m.Update(keyMsg(tea.KeyEscape, 0))
+}
+
+func TestProviderPickerEditConflictKeepsForm(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	m := New(fake, fake, fake)
+	m.SetSize(100, 32)
+
+	m.Update(keyMsg('p', tea.ModCtrl))
+	m.Update(keyMsg('e', 0))
+	if m.form.editing != "openai" {
+		t.Fatal("edit form not open")
+	}
+	m.form.inputs[0].SetValue("anthropic")
+	for i := 0; i < len(m.form.inputs)-1; i++ {
+		m.Update(keyMsg(tea.KeyTab, 0))
+	}
+	m.Update(keyMsg(tea.KeyEnter, 0))
+	if m.mode != modeProviderForm {
+		t.Fatal("conflict submit closed the form")
+	}
+	if m.form.err == "" {
+		t.Fatal("conflict error not shown")
+	}
+	if !strings.Contains(plain(m.form.view()), "already exists") {
+		t.Fatal("error not rendered in form view")
+	}
+	if fake.Models()[0].Label != "openai" {
+		t.Fatalf("provider overwritten: %+v", fake.Models()[0])
+	}
+	m.Update(keyMsg(tea.KeyEscape, 0))
+	if m.mode != modeProviders {
+		t.Fatal("esc did not leave form")
+	}
+}
+
+func TestProviderPickerReadOnlyBlocksEditDelete(t *testing.T) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	m := New(fake, fake, fake)
+	m.SetSize(100, 32)
+
+	m.Update(keyMsg('p', tea.ModCtrl))
+	m.models[0].ReadOnly = true
+	m.Update(keyMsg('e', 0))
+	if m.mode != modeProviders {
+		t.Fatal("e opened edit form for read-only provider")
+	}
+	m.Update(keyMsg('d', 0))
+	if m.delConfirm != "" {
+		t.Fatal("d started delete for read-only provider")
+	}
+	out := plain(m.View().Content)
+	if !strings.Contains(out, "[kimi]") {
+		t.Fatal("list missing kimi source marker")
+	}
+	m.Update(keyMsg(tea.KeyEscape, 0))
+}
+
 func TestThrottleFlushScheduling(t *testing.T) {
 	m := newTestModel([]AgentEvent{
 		{Kind: EventTextDelta, Text: "chunk"},
