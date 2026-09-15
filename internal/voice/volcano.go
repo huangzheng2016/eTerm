@@ -11,12 +11,21 @@ import (
 )
 
 const (
-	defaultVolcanoURL     = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
-	ResourceIDSeedASR     = "volc.seedasr.sauc.duration"
-	ResourceIDBigASR      = "volc.bigasr.sauc.duration"
-	volcanoInitialTimeout = 5 * time.Second
-	volcanoFinalTimeout   = 8 * time.Second
+	defaultVolcanoURL           = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+	ResourceIDSeedASR           = "volc.seedasr.sauc.duration"
+	ResourceIDSeedASRConcurrent = "volc.seedasr.sauc.concurrent"
+	ResourceIDBigASR            = "volc.bigasr.sauc.duration"
+	ResourceIDBigASRConcurrent  = "volc.bigasr.sauc.concurrent"
+	volcanoInitialTimeout       = 5 * time.Second
+	volcanoFinalTimeout         = 8 * time.Second
 )
+
+var VolcanoResourceIDs = []string{
+	ResourceIDSeedASR,
+	ResourceIDSeedASRConcurrent,
+	ResourceIDBigASR,
+	ResourceIDBigASRConcurrent,
+}
 
 type VolcanoConfig struct {
 	APIKey      string

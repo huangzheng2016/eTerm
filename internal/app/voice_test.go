@@ -398,8 +398,7 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	cfg.CustomModelDir = "/tmp/custom-model"
 	cfg.Verified = true
 	cfg.setEngineParam(voiceEngineVolcano, "api_key", "api-key")
-	cfg.setEngineParam(voiceEngineVolcano, "app_key", "app-key")
-	cfg.setEngineParam(voiceEngineVolcano, "access_key", "access-key")
+	cfg.setEngineParam(voiceEngineVolcano, "resource_id", voice.ResourceIDBigASRConcurrent)
 	if err := persistVoiceSettings(database, mk, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -537,6 +536,57 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	}
 }
 
+func TestVoiceSettingsParamOptionsCycle(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.cfg.Engine = voiceEngineVolcano
+
+	m.cursor = findVoiceParamRow(m, "resource_id")
+	if m.cursor < 0 {
+		t.Fatal("resource_id row missing")
+	}
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.ResourceIDSeedASR {
+		t.Fatalf("default resource_id = %q", got)
+	}
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	msg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["resource_id"] != voice.VolcanoResourceIDs[1] {
+		t.Fatalf("right cycle msg = %#v", msg)
+	}
+	if got := loadVoiceSettings(database, mk).engineParams(voiceEngineVolcano)["resource_id"]; got != voice.VolcanoResourceIDs[1] {
+		t.Fatalf("persisted resource_id = %q", got)
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	msg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["resource_id"] != voice.ResourceIDSeedASR {
+		t.Fatalf("left cycle msg = %#v", msg)
+	}
+
+	m.cfg.setEngineParam(voiceEngineVolcano, "resource_id", "bogus")
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	msg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["resource_id"] != voice.VolcanoResourceIDs[0] {
+		t.Fatalf("right from unknown msg = %#v", msg)
+	}
+	m.cfg.setEngineParam(voiceEngineVolcano, "resource_id", "bogus")
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	msg, ok = cmd().(voiceSettingsChangedMsg)
+	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["resource_id"] != voice.VolcanoResourceIDs[3] {
+		t.Fatalf("left from unknown msg = %#v", msg)
+	}
+
+	if view := m.View(); !strings.Contains(view, voice.VolcanoResourceIDs[3]) {
+		t.Fatalf("current value not shown:\n%s", view)
+	}
+}
+
 func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
 
@@ -558,16 +608,13 @@ func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	for _, r := range m.rows() {
 		if r.kind == vrowParam {
 			n++
-			if !r.param.Secret {
-				t.Fatalf("volcano param %q not secret", r.param.Key)
-			}
 		}
 	}
-	if n != 3 {
+	if n != 2 {
 		t.Fatalf("volcano param rows = %d", n)
 	}
 	view := m.View()
-	for _, label := range []string{"Volcano API key", "Volcano App key", "Volcano Access key"} {
+	for _, label := range []string{"Volcano API key", "Volcano model", voice.ResourceIDSeedASR} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("missing %q:\n%s", label, view)
 		}
@@ -936,10 +983,8 @@ func TestVoiceSetupReady(t *testing.T) {
 		t.Fatal("volcano ready without keys")
 	}
 	vcfg.setEngineParam(voiceEngineVolcano, "api_key", "a")
-	vcfg.setEngineParam(voiceEngineVolcano, "app_key", "b")
-	vcfg.setEngineParam(voiceEngineVolcano, "access_key", "c")
 	if !voiceSetupReady(vcfg, root) {
-		t.Fatal("volcano not ready with keys")
+		t.Fatal("volcano not ready with api key")
 	}
 
 	ucfg := defaultVoiceSettings()

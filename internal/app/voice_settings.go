@@ -231,6 +231,30 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		m.testText = ""
 		m.testErr = ""
 		return m.persist(true)
+	case vrowParam:
+		opts := rows[m.cursor].param.Options
+		if len(opts) == 0 {
+			return nil
+		}
+		key := rows[m.cursor].param.Key
+		cur := m.cfg.engineParams(m.cfg.Engine)[key]
+		idx := -1
+		for i, o := range opts {
+			if o == cur {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			if dir > 0 {
+				idx = 0
+			} else {
+				idx = len(opts) - 1
+			}
+		} else {
+			idx = (idx + dir + len(opts)) % len(opts)
+		}
+		m.cfg.setEngineParam(m.cfg.Engine, key, opts[idx])
+		return m.persist(false)
 	}
 	return nil
 }

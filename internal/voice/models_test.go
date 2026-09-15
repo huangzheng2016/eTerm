@@ -117,30 +117,45 @@ func TestEngineRegistry(t *testing.T) {
 	if !ok {
 		t.Fatal("volcano engine not registered")
 	}
-	if len(volc.Params) != 3 {
+	if len(volc.Params) != 2 {
 		t.Fatalf("volcano params = %d", len(volc.Params))
 	}
-	for _, p := range volc.Params {
-		if !p.Secret || !p.Required {
-			t.Fatalf("volcano param %+v must be secret+required", p)
-		}
+	apiKey := volc.Params[0]
+	if apiKey.Key != "api_key" || !apiKey.Secret || !apiKey.Required {
+		t.Fatalf("api_key param %+v must be secret+required", apiKey)
 	}
-	if volc.Ready(map[string]string{"api_key": "a"}) {
-		t.Fatal("volcano ready with partial keys")
+	res := volc.Params[1]
+	if res.Key != "resource_id" || res.Secret || res.Required {
+		t.Fatalf("resource_id param %+v must be optional non-secret", res)
 	}
-	keys := map[string]string{"api_key": "a", "app_key": "b", "access_key": "c"}
-	if !volc.Ready(keys) {
-		t.Fatal("volcano not ready with keys")
+	if res.Default != ResourceIDSeedASR {
+		t.Fatalf("resource_id default = %q", res.Default)
 	}
-	if got := FirstMissingParam(volc, map[string]string{"api_key": "a"}); got != "Volcano App key" {
+	if len(res.Options) != 4 {
+		t.Fatalf("resource_id options = %v", res.Options)
+	}
+	if volc.Ready(map[string]string{}) {
+		t.Fatal("volcano ready without api key")
+	}
+	if !volc.Ready(map[string]string{"api_key": "a"}) {
+		t.Fatal("volcano not ready with api key only")
+	}
+	if got := FirstMissingParam(volc, map[string]string{}); got != "Volcano API key" {
 		t.Fatalf("first missing = %q", got)
 	}
-	veng, err := volc.New(keys, FeedDeps{})
+	veng, err := volc.New(map[string]string{"api_key": "a", "resource_id": ResourceIDBigASR}, FeedDeps{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := veng.(*VolcanoFeedEngine); !ok {
+	feed, ok := veng.(*VolcanoFeedEngine)
+	if !ok {
 		t.Fatalf("volcano New = %T", veng)
+	}
+	if feed.vcfg.APIKey != "a" || feed.vcfg.ResourceID != ResourceIDBigASR {
+		t.Fatalf("volcano cfg = %+v", feed.vcfg)
+	}
+	if !feed.vcfg.SmartFormat {
+		t.Fatal("SmartFormat not enabled by default")
 	}
 	veng.Close()
 

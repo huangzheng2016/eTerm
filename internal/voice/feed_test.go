@@ -105,6 +105,8 @@ func waitFeedEvent(t *testing.T, ch <-chan Event, match func(Event) bool) Event 
 func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	os.Setenv("GO_FAKE_CHUNK", "6400")
+	defer os.Unsetenv("GO_FAKE_CHUNK")
 
 	srv := newFeedServer(t)
 	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
@@ -118,7 +120,7 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 
 	assertCycle := func() {
 		t.Helper()
-		for i, want := range [][]byte{{1, 2, 3, 4}, {5, 6, 7, 8}} {
+		for i, want := range [][]byte{bytes.Repeat([]byte{1}, 6400), bytes.Repeat([]byte{2}, 6400)} {
 			select {
 			case got := <-srv.audio:
 				if !bytes.Equal(got, want) {
@@ -183,6 +185,8 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 func TestVolcanoFeedFirstChunkLands(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	os.Setenv("GO_FAKE_NO_AUDIO", "1")
+	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
 
 	srv := newFeedServer(t)
 	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
@@ -198,7 +202,7 @@ func TestVolcanoFeedFirstChunkLands(t *testing.T) {
 	}
 	defer eng.Close()
 
-	want := []byte{9, 9, 9, 9}
+	want := bytes.Repeat([]byte{9}, 6400)
 	eng.onAudio(want)
 	deadline := time.After(5 * time.Second)
 	for {
@@ -211,6 +215,87 @@ func TestVolcanoFeedFirstChunkLands(t *testing.T) {
 			t.Fatal("first chunk after Start was dropped")
 		}
 	}
+}
+
+func TestVolcanoFeedAggregatesPCMTo200ms(t *testing.T) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	os.Setenv("GO_FAKE_NO_AUDIO", "1")
+	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+
+	srv := newFeedServer(t)
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
+		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
+	})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	quarter := bytes.Repeat([]byte{0x11}, 1600)
+	for i := 0; i < 3; i++ {
+		eng.onAudio(quarter)
+	}
+	select {
+	case got := <-srv.audio:
+		t.Fatalf("frame sent before 200ms accumulated: %d bytes", len(got))
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	eng.onAudio(bytes.Repeat([]byte{0x22}, 1600))
+	want := append(bytes.Repeat([]byte{0x11}, 4800), bytes.Repeat([]byte{0x22}, 1600)...)
+	select {
+	case got := <-srv.audio:
+		if !bytes.Equal(got, want) {
+			t.Fatalf("aggregated frame = %d bytes, want %d", len(got), len(want))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("aggregated frame not sent")
+	}
+}
+
+func TestVolcanoFeedStopFlushesBufferedPCM(t *testing.T) {
+	os.Setenv("GO_FAKE_PROTOCOL", "2")
+	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	os.Setenv("GO_FAKE_NO_AUDIO", "1")
+	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+
+	srv := newFeedServer(t)
+	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
+	defer httpSrv.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+
+	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
+		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
+	})
+	if err := eng.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	want := bytes.Repeat([]byte{0x33}, 3200)
+	eng.onAudio(want)
+	if err := eng.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-srv.audio:
+		if !bytes.Equal(got, want) {
+			t.Fatalf("flushed frame = %d bytes, want %d", len(got), len(want))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("buffered audio not flushed on Stop")
+	}
+	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	if final.Text != "hello" {
+		t.Fatalf("final transcript = %q", final.Text)
+	}
+	eng.Close()
 }
 
 func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
@@ -252,6 +337,8 @@ func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
 func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
 	os.Setenv("GO_FAKE_PROTOCOL", "2")
 	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	os.Setenv("GO_FAKE_CHUNK", "6400")
+	defer os.Unsetenv("GO_FAKE_CHUNK")
 
 	srv := newFeedServer(t)
 	srv.finalDelay = 2 * time.Second

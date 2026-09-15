@@ -13,18 +13,17 @@ func init() {
 		Label: "Volcano Engine",
 		Params: []ParamSpec{
 			{Key: "api_key", Label: "Volcano API key", Secret: true, Required: true},
-			{Key: "app_key", Label: "Volcano App key", Secret: true, Required: true},
-			{Key: "access_key", Label: "Volcano Access key", Secret: true, Required: true},
+			{Key: "resource_id", Label: "Volcano model", Default: ResourceIDSeedASR, Options: VolcanoResourceIDs},
 		},
 		Ready: func(params map[string]string) bool {
-			return params["api_key"] != "" && params["app_key"] != "" && params["access_key"] != ""
+			return params["api_key"] != ""
 		},
 		New: func(params map[string]string, feed FeedDeps) (Engine, error) {
 			return NewVolcanoFeedEngine(VolcanoFeedConfig{
 				Volcano: VolcanoConfig{
-					APIKey:    params["api_key"],
-					AppKey:    params["app_key"],
-					AccessKey: params["access_key"],
+					APIKey:      params["api_key"],
+					ResourceID:  params["resource_id"],
+					SmartFormat: true,
 				},
 				Helper: LocalConfig{
 					VAD:                feed.VAD,
@@ -47,6 +46,7 @@ type VolcanoFeedEngine struct {
 	mu      sync.Mutex
 	helper  *LocalEngine
 	vol     *VolcanoEngine
+	buf     []byte
 	started bool
 	closed  bool
 	idleCh  chan struct{}
@@ -140,6 +140,8 @@ func (e *VolcanoFeedEngine) Stop() error {
 		}
 	}
 
+	e.flushAudio()
+
 	e.mu.Lock()
 	vol := e.vol
 	e.vol = nil
@@ -190,18 +192,41 @@ func (e *VolcanoFeedEngine) Close() error {
 	return nil
 }
 
+// volcanoPCMFlushBytes is 200ms of 16kHz 16bit mono PCM, the recommended
+// per-frame payload for the volcano streaming API.
+const volcanoPCMFlushBytes = 6400
+
 func (e *VolcanoFeedEngine) onAudio(pcm []byte) {
 	e.mu.Lock()
-	if e.closed {
+	if e.closed || e.vol == nil {
 		e.mu.Unlock()
 		return
 	}
-	vol := e.vol
-	e.mu.Unlock()
-	if vol == nil {
+	e.buf = append(e.buf, pcm...)
+	if len(e.buf) < volcanoPCMFlushBytes {
+		e.mu.Unlock()
 		return
 	}
-	_ = vol.WriteAudio(pcm)
+	chunk := e.buf
+	e.buf = nil
+	vol := e.vol
+	e.mu.Unlock()
+	_ = vol.WriteAudio(chunk)
+}
+
+func (e *VolcanoFeedEngine) flushAudio() {
+	e.mu.Lock()
+	if len(e.buf) == 0 {
+		e.mu.Unlock()
+		return
+	}
+	chunk := e.buf
+	e.buf = nil
+	vol := e.vol
+	e.mu.Unlock()
+	if vol != nil {
+		_ = vol.WriteAudio(chunk)
+	}
 }
 
 func (e *VolcanoFeedEngine) onUtteranceEnd() {

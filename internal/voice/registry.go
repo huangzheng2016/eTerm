@@ -12,6 +12,7 @@ type ParamSpec struct {
 	Secret   bool
 	Required bool
 	Default  string
+	Options  []string
 }
 
 type FeedDeps struct {
