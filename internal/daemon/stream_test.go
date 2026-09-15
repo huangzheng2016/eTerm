@@ -244,7 +244,7 @@ func TestWaitCreditLogsStallWithStreamDetails(t *testing.T) {
 	sr.markDetached()
 
 	done := make(chan bool, 1)
-	go func() { done <- sr.waitCredit() }()
+	go func() { done <- sr.waitCredit(nil) }()
 
 	waitForStallLines(t, out, 1)
 	logs := out.String()
@@ -271,7 +271,7 @@ func TestWaitCreditStallLogFrequency(t *testing.T) {
 	sr := stalledRelay(t, 30*time.Millisecond, 50*time.Millisecond)
 
 	done := make(chan bool, 1)
-	go func() { done <- sr.waitCredit() }()
+	go func() { done <- sr.waitCredit(nil) }()
 
 	waitForStallLines(t, out, 1)
 	time.Sleep(220 * time.Millisecond)
@@ -288,7 +288,7 @@ func TestWaitCreditNoStallLogWhenCreditReleased(t *testing.T) {
 	sr := stalledRelay(t, 80*time.Millisecond, 80*time.Millisecond)
 
 	done := make(chan bool, 1)
-	go func() { done <- sr.waitCredit() }()
+	go func() { done <- sr.waitCredit(nil) }()
 
 	time.Sleep(30 * time.Millisecond)
 	sr.mu.Lock()
@@ -306,5 +306,91 @@ func TestWaitCreditNoStallLogWhenCreditReleased(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	if got := out.count("output stalled"); got != 0 {
 		t.Fatalf("stall log lines = %d, want 0: %q", got, out.String())
+	}
+}
+
+func TestWaitCreditStallReapsZeroAckStream(t *testing.T) {
+	out := captureStallLog(t)
+	fake := newDaemonFakeSession()
+	mgr := newSessionManager()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.sidV.Store(42)
+	sr.stallReap = 50 * time.Millisecond
+	sr.appendOutput(make([]byte, outputWindowBytes))
+	mgr.add(42, sr)
+
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit(mgr) }()
+
+	select {
+	case got := <-done:
+		if got {
+			t.Fatal("waitCredit returned true for stalled stream")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitCredit did not reap stalled stream")
+	}
+	if mgr.get(42) != nil {
+		t.Fatal("stalled stream still registered")
+	}
+	if !fake.stdin.isClosed() {
+		t.Fatal("session not closed after stall reap")
+	}
+	logs := out.String()
+	for _, want := range []string{"stream 42", "stall reaped", "ack=0", "ringEnd=1048576", "stalled="} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("reap log missing %q: %q", want, logs)
+		}
+	}
+}
+
+func TestWaitCreditStallReapResetByAckProgress(t *testing.T) {
+	out := captureStallLog(t)
+	fake := newDaemonFakeSession()
+	mgr := newSessionManager()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.sidV.Store(7)
+	sr.stallReap = 150 * time.Millisecond
+	sr.appendOutput(make([]byte, outputWindowBytes))
+	sr.mu.Lock()
+	sr.sent = outputWindowBytes + 5*1024
+	sr.mu.Unlock()
+	mgr.add(7, sr)
+
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit(mgr) }()
+
+	for i := 1; i <= 5; i++ {
+		time.Sleep(40 * time.Millisecond)
+		sr.appendOutput(make([]byte, 1024))
+		sr.setAck(uint64(i * 1024))
+	}
+	select {
+	case <-done:
+		t.Fatal("waitCredit returned despite ack progress")
+	default:
+	}
+	if mgr.get(7) == nil {
+		t.Fatal("stream reaped despite ack progress")
+	}
+	if got := out.count("stall reaped"); got != 0 {
+		t.Fatalf("stall reaped logged for progressing stream: %q", out.String())
+	}
+	sr.shutdown()
+	if got := <-done; got {
+		t.Fatal("waitCredit returned true after shutdown")
+	}
+}
+
+func TestWaitCreditIdleStreamKeepsCredit(t *testing.T) {
+	fake := newDaemonFakeSession()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.stallReap = 20 * time.Millisecond
+	sr.appendOutput([]byte("small"))
+	if !sr.waitCredit(newSessionManager()) {
+		t.Fatal("waitCredit blocked idle stream")
 	}
 }

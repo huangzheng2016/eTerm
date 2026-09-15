@@ -207,6 +207,7 @@ type streamRelay struct {
 	stopOnce      sync.Once
 	stallAfter    time.Duration
 	stallInterval time.Duration
+	stallReap     time.Duration
 }
 
 func newStreamRelay(is *internalssh.InteractiveSession) *streamRelay {
@@ -218,6 +219,7 @@ func newStreamRelay(is *internalssh.InteractiveSession) *streamRelay {
 		stop:          make(chan struct{}),
 		stallAfter:    stallLogAfter,
 		stallInterval: stallLogInterval,
+		stallReap:     stallReapAfter,
 	}
 	go s.inputPump()
 	return s
@@ -341,29 +343,52 @@ func (s *streamRelay) drainIfGenChanged(gen uint64, sid uint32, sender *frameSen
 const (
 	stallLogAfter    = 60 * time.Second
 	stallLogInterval = 60 * time.Second
+	stallReapAfter   = 5 * time.Minute
 )
 
-func (s *streamRelay) waitCredit() bool {
+func (s *streamRelay) waitCredit(mgr *sessionManager) bool {
 	var nextLog time.Time
+	var stallStart time.Time
+	var stallAck uint64
 	for {
 		s.mu.Lock()
-		ok := s.ring.End()-s.ack < outputWindowBytes
+		ack, end := s.ack, s.ring.End()
+		ok := end-ack < outputWindowBytes
 		s.mu.Unlock()
 		if ok {
 			return true
 		}
 		now := time.Now()
+		if stallStart.IsZero() || ack != stallAck {
+			stallStart, stallAck = now, ack
+		}
+		var reapAt time.Time
+		if mgr != nil {
+			reapAt = stallStart.Add(s.stallReap)
+			if !now.Before(reapAt) {
+				if closeID, removed := mgr.removeStream(s); removed {
+					s.shutdown()
+					_ = s.is.Close()
+					log.Printf("eterm daemon stream %d stall reaped ack=%d ringEnd=%d stalled=%s", closeID, ack, end, now.Sub(stallStart))
+				}
+				return false
+			}
+		}
 		if nextLog.IsZero() {
 			nextLog = now.Add(s.stallAfter)
 		}
 		if !now.Before(nextLog) {
 			s.mu.Lock()
-			ack, end, detached := s.ack, s.ring.End(), s.detachedSince
+			detached := s.detachedSince
 			s.mu.Unlock()
 			log.Printf("eterm daemon stream %d output stalled ack=%d ringEnd=%d detachedSince=%v", s.sidV.Load(), ack, end, detached)
 			nextLog = now.Add(s.stallInterval)
 		}
-		timer := time.NewTimer(time.Until(nextLog))
+		wakeAt := nextLog
+		if !reapAt.IsZero() && reapAt.Before(wakeAt) {
+			wakeAt = reapAt
+		}
+		timer := time.NewTimer(time.Until(wakeAt))
 		select {
 		case <-s.wake:
 			timer.Stop()
@@ -375,11 +400,11 @@ func (s *streamRelay) waitCredit() bool {
 	}
 }
 
-func (s *streamRelay) readPump(readDone chan<- error) {
+func (s *streamRelay) readPump(readDone chan<- error, mgr *sessionManager) {
 	defer recoverLog(func() string { return fmt.Sprintf("stream %d read pump", s.sidV.Load()) })
 	buf := make([]byte, outputReadBufBytes)
 	for {
-		if !s.waitCredit() {
+		if !s.waitCredit(mgr) {
 			return
 		}
 		n, err := s.is.Stdout.Read(buf)
@@ -397,7 +422,7 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 	defer recoverLog(func() string { return fmt.Sprintf("stream %d pump", s.sidV.Load()) })
 	s.sidV.Store(streamID)
 	readDone := make(chan error, 1)
-	go s.readPump(readDone)
+	go s.readPump(readDone, mgr)
 	var endErr error
 	ended := false
 	for {
@@ -461,11 +486,12 @@ func (s *streamRelay) pump(ctx context.Context, streamID uint32, mgr *sessionMan
 }
 
 type sessionManager struct {
-	mu       sync.Mutex
-	streams  map[uint32]*streamRelay
-	named    map[string]*namedSession
-	attachMu sync.Mutex
-	senderV  atomic.Pointer[frameSender]
+	mu           sync.Mutex
+	streams      map[uint32]*streamRelay
+	named        map[string]*namedSession
+	pendingClose map[uint32]bool
+	attachMu     sync.Mutex
+	senderV      atomic.Pointer[frameSender]
 }
 
 const (
@@ -474,7 +500,7 @@ const (
 )
 
 func newSessionManager() *sessionManager {
-	return &sessionManager{streams: make(map[uint32]*streamRelay), named: make(map[string]*namedSession)}
+	return &sessionManager{streams: make(map[uint32]*streamRelay), named: make(map[string]*namedSession), pendingClose: make(map[uint32]bool)}
 }
 
 func (m *sessionManager) sender() *frameSender { return m.senderV.Load() }
@@ -486,10 +512,16 @@ func (m *sessionManager) clearSender(s *frameSender) {
 		return
 	}
 	m.mu.Lock()
+	clear(m.pendingClose)
+	n := 0
 	for _, sr := range m.streams {
 		sr.markDetached()
+		n++
 	}
 	m.mu.Unlock()
+	if n > 0 {
+		log.Printf("eterm daemon relay down, %d stream(s) marked detached", n)
+	}
 }
 
 func (m *sessionManager) get(streamID uint32) *streamRelay {
@@ -502,6 +534,23 @@ func (m *sessionManager) add(streamID uint32, s *streamRelay) {
 	m.mu.Lock()
 	m.streams[streamID] = s
 	m.mu.Unlock()
+}
+
+func (m *sessionManager) notePendingClose(streamID uint32) {
+	m.mu.Lock()
+	m.pendingClose[streamID] = true
+	m.mu.Unlock()
+}
+
+func (m *sessionManager) addUnlessClosed(streamID uint32, s *streamRelay) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pendingClose[streamID] {
+		delete(m.pendingClose, streamID)
+		return false
+	}
+	m.streams[streamID] = s
+	return true
 }
 
 func (m *sessionManager) remove(streamID uint32, expected *streamRelay) *streamRelay {
@@ -555,6 +604,7 @@ func (m *sessionManager) reapDetached(now time.Time) {
 	}
 	var expiredIDs []uint32
 	var expired []*streamRelay
+	var expiredSince []time.Time
 	for id, sr := range m.streams {
 		if persistent[id] {
 			continue
@@ -564,10 +614,12 @@ func (m *sessionManager) reapDetached(now time.Time) {
 			sr.detachedSince = now
 		}
 		stale := !sr.detachedSince.IsZero() && now.Sub(sr.detachedSince) >= detachedStreamTTL
+		since := sr.detachedSince
 		sr.mu.Unlock()
 		if stale {
 			expiredIDs = append(expiredIDs, id)
 			expired = append(expired, sr)
+			expiredSince = append(expiredSince, since)
 		}
 	}
 	m.mu.Unlock()
@@ -575,6 +627,7 @@ func (m *sessionManager) reapDetached(now time.Time) {
 		if m.remove(expiredIDs[i], sr) != nil {
 			sr.shutdown()
 			_ = sr.is.Close()
+			log.Printf("eterm daemon stream %d reaped detached after %s", expiredIDs[i], now.Sub(expiredSince[i]))
 		}
 	}
 }

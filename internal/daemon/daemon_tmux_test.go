@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -896,5 +897,121 @@ func TestSessionDoneErrPrefersProcessFailure(t *testing.T) {
 
 	if got := sessionDoneErr(readErr, done); !errors.Is(got, wantErr) {
 		t.Fatalf("session error = %v", got)
+	}
+}
+
+func TestHandleFrameCloseUnknownStreamLoggedAndRecorded(t *testing.T) {
+	out := captureStallLog(t)
+	mgr := newSessionManager()
+
+	handleFrame(nil, relay.Frame{Type: relay.FrameClose, StreamID: 5, Payload: []byte("gone")}, mgr, nil, context.Background())
+
+	logs := out.String()
+	if !strings.Contains(logs, "close stream=5") || !strings.Contains(logs, "dropped: no such stream") {
+		t.Fatalf("swallowed close not logged: %q", logs)
+	}
+	mgr.mu.Lock()
+	pending := mgr.pendingClose[5]
+	mgr.mu.Unlock()
+	if !pending {
+		t.Fatal("early close not recorded")
+	}
+}
+
+func TestHandleOpenAbortsWhenCloseArrivedFirst(t *testing.T) {
+	restoreTmuxStubs(t)
+	out := captureStallLog(t)
+	fake := newDaemonFakeSession()
+	tmuxNewSession = func(context.Context, string, int, int) (*internalssh.InteractiveSession, string, error) {
+		return fake.is, "tmux-race", nil
+	}
+	mgr := newSessionManager()
+	sender, sink := newTestSender()
+	mgr.setSender(sender)
+	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
+	mgr.notePendingClose(2)
+
+	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: payload}, mgr, sender, context.Background(), context.Background())
+
+	if mgr.get(2) != nil {
+		t.Fatal("stream registered after raced close")
+	}
+	if !fake.stdin.isClosed() {
+		t.Fatal("session not closed after raced close")
+	}
+	if !strings.Contains(out.String(), "stream=2 aborted") {
+		t.Fatalf("abort not logged: %q", out.String())
+	}
+	select {
+	case f := <-sink.frames:
+		t.Fatalf("frame sent for aborted stream: %+v", f)
+	default:
+	}
+	mgr.mu.Lock()
+	pending := mgr.pendingClose[2]
+	mgr.mu.Unlock()
+	if pending {
+		t.Fatal("pending close entry leaked")
+	}
+}
+
+func TestHandleOpenResumeUnavailableLogged(t *testing.T) {
+	out := captureStallLog(t)
+	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetLocal, ResumeFromSeq: 9})
+	sender, sink := newTestSender()
+
+	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 9, Payload: payload}, newSessionManager(), sender, context.Background(), context.Background())
+
+	f := waitDaemonFrame(t, sink, relay.FrameOpenErr)
+	if string(f.Payload) != resumeUnavailableErr {
+		t.Fatalf("open err payload = %q", f.Payload)
+	}
+	logs := out.String()
+	if !strings.Contains(logs, "stream=9 resume=9 rejected") {
+		t.Fatalf("resume rejection not logged: %q", logs)
+	}
+}
+
+func TestReapDetachedLogsReapedStream(t *testing.T) {
+	out := captureStallLog(t)
+	fake := newDaemonFakeSession()
+	mgr := newSessionManager()
+	sr := newStreamRelay(fake.is)
+	mgr.add(80, sr)
+	sr.mu.Lock()
+	sr.detachedSince = time.Now().Add(-detachedStreamTTL - time.Minute)
+	sr.mu.Unlock()
+
+	mgr.reapDetached(time.Now())
+
+	if mgr.get(80) != nil {
+		t.Fatal("expired detached stream kept")
+	}
+	logs := out.String()
+	if !strings.Contains(logs, "stream 80 reaped detached after") {
+		t.Fatalf("reap not logged: %q", logs)
+	}
+}
+
+func TestClearSenderLogsMarkedDetached(t *testing.T) {
+	out := captureStallLog(t)
+	fake := newDaemonFakeSession()
+	mgr := newSessionManager()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	mgr.add(33, sr)
+	sender := newFrameSender()
+	mgr.setSender(sender)
+
+	mgr.clearSender(sender)
+
+	if !strings.Contains(out.String(), "1 stream(s) marked detached") {
+		t.Fatalf("detach marking not logged: %q", out.String())
+	}
+	sr.mu.Lock()
+	detached := !sr.detachedSince.IsZero()
+	sr.mu.Unlock()
+	if !detached {
+		t.Fatal("stream not marked detached")
 	}
 }

@@ -313,19 +313,21 @@ func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *
 		}
 	case relay.FrameClose:
 		log.Printf("eterm daemon close stream=%d reason=%q", f.StreamID, string(f.Payload))
+		sr := mgr.get(f.StreamID)
+		if sr == nil {
+			mgr.notePendingClose(f.StreamID)
+			log.Printf("eterm daemon close stream=%d dropped: no such stream", f.StreamID)
+			return
+		}
 		if string(f.Payload) == relay.CloseClientDisconnected {
-			if sr := mgr.get(f.StreamID); sr != nil {
-				sr.markDetached()
-			}
+			sr.markDetached()
 			return
 		}
 		if mgr.isPersistent(f.StreamID) {
-			if sr := mgr.get(f.StreamID); sr != nil {
-				sr.markDetached()
-			}
+			sr.markDetached()
 			return
 		}
-		if sr := mgr.remove(f.StreamID, nil); sr != nil {
+		if mgr.remove(f.StreamID, sr) != nil {
 			sr.shutdown()
 			_ = sr.is.Close()
 		}
@@ -350,6 +352,7 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		return
 	}
 	if req.ResumeFromSeq > 0 {
+		log.Printf("eterm daemon open stream=%d resume=%d rejected: no such stream", f.StreamID, req.ResumeFromSeq)
 		_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte(resumeUnavailableErr)})
 		return
 	}
@@ -373,7 +376,12 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 	}
 	startStream := func(is *internalssh.InteractiveSession, okPayload []byte) {
 		sr := newStreamRelay(is)
-		mgr.add(f.StreamID, sr)
+		if !mgr.addUnlessClosed(f.StreamID, sr) {
+			sr.shutdown()
+			_ = is.Close()
+			log.Printf("eterm daemon open stream=%d aborted: closed before open completed", f.StreamID)
+			return
+		}
 		if err := sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: okPayload}); err != nil {
 			if mgr.remove(f.StreamID, sr) != nil {
 				sr.shutdown()
