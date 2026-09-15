@@ -295,10 +295,15 @@ type streamFeedEngine struct {
 	mu      sync.Mutex
 	helper  *LocalEngine
 	sess    streamSession
+	buf     []byte
 	started bool
 	closed  bool
 	idleCh  chan struct{}
 	pumped  bool
+
+	redialing   bool
+	redialAgain bool
+	gen         uint64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -351,6 +356,7 @@ func (e *streamFeedEngine) Start(ctx context.Context) error {
 	e.sess = sess
 	e.idleCh = make(chan struct{}, 1)
 	e.started = true
+	e.gen++
 	if err := e.helper.Start(ctx); err != nil {
 		e.started = false
 		e.sess = nil
@@ -446,38 +452,54 @@ func (e *streamFeedEngine) Close() error {
 
 func (e *streamFeedEngine) onAudio(pcm []byte) {
 	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
+	defer e.mu.Unlock()
+	if e.closed || !e.started {
 		return
 	}
-	sess := e.sess
-	e.mu.Unlock()
-	if sess == nil {
+	if e.sess == nil {
+		e.buf = append(e.buf, pcm...)
 		return
 	}
-	_ = sess.WriteAudio(pcm)
+	_ = e.sess.WriteAudio(pcm)
 }
 
+// onUtteranceEnd starts an asynchronous redial so the helper read loop is
+// never blocked by the dial. The old session is stopped while the new one is
+// dialed in parallel; audio arriving during the redial window stays buffered
+// and is replayed to the new session once it is ready.
 func (e *streamFeedEngine) onUtteranceEnd() {
 	e.mu.Lock()
 	if !e.started || e.closed {
 		e.mu.Unlock()
 		return
 	}
+	if e.redialing {
+		e.redialAgain = true
+		e.mu.Unlock()
+		return
+	}
+	e.redialing = true
 	old := e.sess
+	e.sess = nil
+	gen := e.gen
+	e.wg.Add(1)
 	e.mu.Unlock()
+	go e.redial(old, gen)
+}
 
-	type redial struct {
+func (e *streamFeedEngine) redial(old streamSession, gen uint64) {
+	defer e.wg.Done()
+	type result struct {
 		sess streamSession
 		err  error
 	}
-	dialed := make(chan redial, 1)
+	dialed := make(chan result, 1)
 	go func() {
 		sess := e.dial()
 		ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
 		err := sess.Start(ctx)
 		cancel()
-		dialed <- redial{sess, err}
+		dialed <- result{sess, err}
 	}()
 
 	if old != nil {
@@ -487,24 +509,44 @@ func (e *streamFeedEngine) onUtteranceEnd() {
 
 	res := <-dialed
 	e.mu.Lock()
-	if e.sess == old {
-		e.sess = nil
-	}
-	if !e.started || e.closed {
+	if !e.started || e.closed || gen != e.gen {
+		e.redialing = false
+		again := e.redialAgain
+		e.redialAgain = false
 		e.mu.Unlock()
 		res.sess.Close()
+		if again {
+			e.onUtteranceEnd()
+		}
 		return
 	}
 	if res.err != nil {
+		e.redialing = false
+		again := e.redialAgain
+		e.redialAgain = false
 		e.mu.Unlock()
 		e.emit(Event{Type: EventError, Msg: fmt.Sprintf("reconnect: %v", res.err)})
+		if again {
+			e.onUtteranceEnd()
+		}
 		return
 	}
 	e.sess = res.sess
+	replay := e.buf
+	e.buf = nil
+	again := e.redialAgain
+	e.redialAgain = false
+	e.redialing = false
 	e.wg.Add(1)
+	for off := 0; off < len(replay); off += pcmFlushBytes {
+		_ = res.sess.WriteAudio(replay[off:min(off+pcmFlushBytes, len(replay))])
+	}
 	e.mu.Unlock()
 
 	go e.pump(res.sess.Events())
+	if again {
+		e.onUtteranceEnd()
+	}
 }
 
 func (e *streamFeedEngine) emit(ev Event) {
