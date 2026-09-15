@@ -288,6 +288,7 @@ func (s *streamRelay) markDetached() {
 		s.detachedSince = time.Now()
 	}
 	s.mu.Unlock()
+	s.notify()
 }
 
 func (s *streamRelay) attachForOpen(fromSeq uint64, sender *frameSender, openOK relay.Frame) error {
@@ -353,7 +354,7 @@ func (s *streamRelay) waitCredit(mgr *sessionManager) bool {
 	for {
 		s.mu.Lock()
 		ack, end := s.ack, s.ring.End()
-		ok := end-ack < outputWindowBytes
+		ok := !s.detachedSince.IsZero() || end-ack < outputWindowBytes
 		s.mu.Unlock()
 		if ok {
 			return true

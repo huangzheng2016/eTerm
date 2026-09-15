@@ -241,7 +241,6 @@ func waitForStallLines(t *testing.T, out *lockedLogBuf, want int) {
 func TestWaitCreditLogsStallWithStreamDetails(t *testing.T) {
 	out := captureStallLog(t)
 	sr := stalledRelay(t, 30*time.Millisecond, 30*time.Millisecond)
-	sr.markDetached()
 
 	done := make(chan bool, 1)
 	go func() { done <- sr.waitCredit(nil) }()
@@ -254,11 +253,8 @@ func TestWaitCreditLogsStallWithStreamDetails(t *testing.T) {
 	if !strings.Contains(logs, "ack=0 ringEnd=1048576") {
 		t.Fatalf("log missing ack/ringEnd: %q", logs)
 	}
-	if !strings.Contains(logs, "detachedSince=") {
-		t.Fatalf("log missing detachedSince: %q", logs)
-	}
-	if strings.Contains(logs, "detachedSince=0001-01-01") {
-		t.Fatalf("detachedSince not stamped: %q", logs)
+	if !strings.Contains(logs, "detachedSince=0001-01-01") {
+		t.Fatalf("attached stream should log zero detachedSince: %q", logs)
 	}
 	sr.shutdown()
 	if got := <-done; got {
@@ -392,5 +388,96 @@ func TestWaitCreditIdleStreamKeepsCredit(t *testing.T) {
 	sr.appendOutput([]byte("small"))
 	if !sr.waitCredit(newSessionManager()) {
 		t.Fatal("waitCredit blocked idle stream")
+	}
+}
+
+func TestWaitCreditDetachedStreamKeepsCredit(t *testing.T) {
+	out := captureStallLog(t)
+	fake := newDaemonFakeSession()
+	mgr := newSessionManager()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.sidV.Store(8)
+	sr.stallReap = 60 * time.Millisecond
+	sr.appendOutput(make([]byte, outputWindowBytes))
+	mgr.add(8, sr)
+
+	sr.markDetached()
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit(mgr) }()
+	select {
+	case got := <-done:
+		if !got {
+			t.Fatal("waitCredit blocked detached stream")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waitCredit did not release detached stream")
+	}
+	if mgr.get(8) == nil {
+		t.Fatal("detached stream stall reaped")
+	}
+	if got := out.count("output stalled"); got != 0 {
+		t.Fatalf("detached stream stall logged: %q", out.String())
+	}
+	if got := out.count("stall reaped"); got != 0 {
+		t.Fatalf("detached stream stall reap logged: %q", out.String())
+	}
+}
+
+func TestWaitCreditWakesOnDetach(t *testing.T) {
+	fake := newDaemonFakeSession()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.appendOutput(make([]byte, outputWindowBytes))
+
+	done := make(chan bool, 1)
+	go func() { done <- sr.waitCredit(nil) }()
+	time.Sleep(30 * time.Millisecond)
+	sr.markDetached()
+	select {
+	case got := <-done:
+		if !got {
+			t.Fatal("waitCredit blocked after detach")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waitCredit did not wake on detach")
+	}
+}
+
+func TestReadPumpDrainsPtyWhileDetached(t *testing.T) {
+	fake := newDaemonFakeSession()
+	mgr := newSessionManager()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.sidV.Store(9)
+	mgr.add(9, sr)
+	sr.markDetached()
+
+	readDone := make(chan error, 1)
+	go sr.readPump(readDone, mgr)
+	const total = outputWindowBytes + 256*1024
+	go func() {
+		chunk := make([]byte, 64*1024)
+		for written := 0; written < total; written += len(chunk) {
+			if _, err := fake.stdout.Write(chunk); err != nil {
+				return
+			}
+		}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sr.mu.Lock()
+		end := sr.ring.End()
+		sr.mu.Unlock()
+		if end >= total {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("detached read pump stalled at ring end %d, want %d", end, total)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if mgr.get(9) == nil {
+		t.Fatal("detached stream reaped")
 	}
 }
