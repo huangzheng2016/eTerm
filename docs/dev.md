@@ -76,7 +76,7 @@ voicehelper 是独立的 CGO module（main module 保持纯 Go），构建与发
 
 app 检查与下载 helper 走 helper 系列：从 releases 列表取最新 `voicehelper/v*` 标签，按该标签构造下载地址。已安装旧系列（版本号为主版本 `vX.Y.Z`）的 helper 会被判定为可更新，引导迁移到新系列；`dev` / `0.1.0` 等未知版本处理不变。
 
-注意 GitHub 的 `v*` glob 会匹配 `voicehelper/...` 开头的标签，所以主发布工作流的触发条件写为 `v[0-9]*`。
+注意 GitHub 标签过滤的 `*` 不跨 `/`，plain `v*` 本就匹配不到 `voicehelper/v...`；主发布工作流的触发条件写为 `v[0-9]*` 是为了精确限定主系列、自文档化。
 
 ## 数据目录
 

@@ -63,11 +63,15 @@ On first `start` the helper downloads into the model dir (`-model-dir`, default
 
 ## Build / CI
 
-Release assets are built by `.github/workflows/voicehelper.yml`: on `v*`
-tags it runs the recipe below for darwin-amd64, darwin-arm64, linux-amd64,
-linux-arm64 and windows-amd64, and uploads `voicehelper-<os>-<arch>.tar.gz`
-(`.zip` on Windows) plus a `.sha256` sidecar to the GitHub
-release. `workflow_dispatch` runs the same build without publishing (assets
+Release assets are built by `.github/workflows/voicehelper.yml`, triggered by
+two tag series: on main `vX.Y.Z` tags it runs the recipe below for
+darwin-amd64, darwin-arm64, linux-amd64, linux-arm64 and windows-amd64, and
+uploads `voicehelper-<os>-<arch>.tar.gz` (`.zip` on Windows) plus a `.sha256`
+sidecar to the main GitHub release, keeping the `releases/latest` download
+path working for older eTerm builds; on `voicehelper/vX.Y.Z` tags the same
+assets are published to the helper's own release (not marked as the repo's
+latest release), and the binary embeds the helper tag as its version.
+`workflow_dispatch` runs the same build without publishing (assets
 land as workflow artifacts).
 
 The sherpa-onnx-go Go modules ship prebuilt shared libraries, so a plain
