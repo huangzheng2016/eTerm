@@ -3,7 +3,8 @@ name: voicehelper Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*'
+      - 'voicehelper/v*'
   workflow_dispatch:
 
 permissions:
@@ -39,6 +40,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: cmd/voicehelper/dist/voicehelper-darwin-arm64.tar.gz*
+          make_latest: ${{ !startsWith(github.ref_name, 'voicehelper/') }}
           fail_on_unmatched_files: true
 
   build-darwin-amd64:
@@ -70,6 +72,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: cmd/voicehelper/dist/voicehelper-darwin-amd64.tar.gz*
+          make_latest: ${{ !startsWith(github.ref_name, 'voicehelper/') }}
           fail_on_unmatched_files: true
 
   build-linux-amd64:
@@ -101,6 +104,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: cmd/voicehelper/dist/voicehelper-linux-amd64.tar.gz*
+          make_latest: ${{ !startsWith(github.ref_name, 'voicehelper/') }}
           fail_on_unmatched_files: true
 
   build-linux-arm64:
@@ -132,6 +136,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: cmd/voicehelper/dist/voicehelper-linux-arm64.tar.gz*
+          make_latest: ${{ !startsWith(github.ref_name, 'voicehelper/') }}
           fail_on_unmatched_files: true
 
   build-windows-amd64:
@@ -166,4 +171,5 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: cmd/voicehelper/dist/voicehelper-windows-amd64.zip*
+          make_latest: ${{ !startsWith(github.ref_name, 'voicehelper/') }}
           fail_on_unmatched_files: true
