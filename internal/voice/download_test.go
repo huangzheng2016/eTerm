@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -39,9 +38,79 @@ func TestHelperArchiveExt(t *testing.T) {
 			t.Fatalf("%s ext = %q", goos, got)
 		}
 	}
-	wantSuffix := "voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + helperArchiveExt(runtime.GOOS)
-	if !strings.HasSuffix(DefaultHelperURL, wantSuffix) {
-		t.Fatalf("DefaultHelperURL = %q, want suffix %q", DefaultHelperURL, wantSuffix)
+}
+
+func TestHelperDownloadURL(t *testing.T) {
+	got := helperDownloadURL("voicehelper/v1.2.3")
+	want := "https://github.com/huangzheng2016/eTerm/releases/download/voicehelper/v1.2.3/voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + helperArchiveExt(runtime.GOOS)
+	if got != want {
+		t.Fatalf("helperDownloadURL = %q, want %q", got, want)
+	}
+}
+
+func TestLatestHelperTag(t *testing.T) {
+	cases := []struct {
+		name string
+		tags []string
+		want string
+	}{
+		{"picks newest helper tag", []string{"v3.5.0", "voicehelper/v1.0.0", "voicehelper/v1.2.0"}, "voicehelper/v1.2.0"},
+		{"numeric compare", []string{"voicehelper/v1.10.0", "voicehelper/v1.9.0"}, "voicehelper/v1.10.0"},
+		{"main series only", []string{"v3.5.0", "v3.6.0"}, ""},
+		{"empty", nil, ""},
+	}
+	for _, tc := range cases {
+		if got := latestHelperTag(tc.tags); got != tc.want {
+			t.Fatalf("%s: latestHelperTag = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeHelperVersion(t *testing.T) {
+	if got := normalizeHelperVersion("voicehelper/v1.0.0"); got != "1.0.0" {
+		t.Fatalf("normalizeHelperVersion helper tag = %q", got)
+	}
+	if got := normalizeHelperVersion("v3.5.0"); got != "v3.5.0" {
+		t.Fatalf("normalizeHelperVersion main tag = %q", got)
+	}
+}
+
+func TestCompareVersion(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"voicehelper/v1.0.0", "voicehelper/v1.0.0", 0},
+		{"voicehelper/v1.1.0", "voicehelper/v1.0.0", 1},
+		{"voicehelper/v1.0.0", "voicehelper/v1.1.0", -1},
+		{"voicehelper/v1.10.0", "voicehelper/v1.9.0", 1},
+		{"v1.0.0", "voicehelper/v1.0.0", 0},
+	}
+	for _, tc := range cases {
+		if got := compareVersion(tc.a, tc.b); got != tc.want {
+			t.Fatalf("compareVersion(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestHelperUpdateAvailable(t *testing.T) {
+	cases := []struct {
+		name              string
+		installed, latest string
+		want              bool
+	}{
+		{"old main series migrates", "v3.5.0", "voicehelper/v1.0.0", true},
+		{"dev still updates", "dev", "voicehelper/v1.0.0", true},
+		{"0.1.0 still updates", "0.1.0", "voicehelper/v1.0.0", true},
+		{"same helper version", "voicehelper/v1.0.0", "voicehelper/v1.0.0", false},
+		{"older helper version", "voicehelper/v1.0.0", "voicehelper/v1.1.0", true},
+		{"no helper release, old series", "v3.5.0", "", false},
+		{"no helper release, new series", "voicehelper/v1.0.0", "", false},
+	}
+	for _, tc := range cases {
+		if got := helperUpdateAvailable(tc.installed, tc.latest); got != tc.want {
+			t.Fatalf("%s: helperUpdateAvailable(%q, %q) = %v, want %v", tc.name, tc.installed, tc.latest, got, tc.want)
+		}
 	}
 }
 

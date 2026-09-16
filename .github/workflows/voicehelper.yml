@@ -3,7 +3,8 @@ name: voicehelper Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]*'
+      - 'voicehelper/v*'
   workflow_dispatch:
 
 permissions:

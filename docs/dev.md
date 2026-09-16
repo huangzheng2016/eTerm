@@ -67,6 +67,17 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o etermsyncd-linux ./cmd/etermsy
 
 voicehelper 是独立的 CGO module（main module 保持纯 Go），构建与发布产物说明见 [cmd/voicehelper/README.md](../cmd/voicehelper/README.md)。
 
+## 发布
+
+两条标签线分开管理：
+
+- `vX.Y.Z`：eterm 本体主版本。触发 Build and Release（build.yml）发布主程序；同时 voicehelper Release（voicehelper.yml）也把 helper 产物上传到主 release，保持老版本 app 的 `releases/latest` 下载路径可用。
+- `voicehelper/vX.Y.Z`：语音助手独立版本，仅在 helper 代码变化时手动打。只触发 voicehelper.yml，产物发布到该标签自己的 release，helper 二进制内嵌版本即 helper 标签。首个基线标签为 `voicehelper/v1.0.0`。
+
+app 检查与下载 helper 走 helper 系列：从 releases 列表取最新 `voicehelper/v*` 标签，按该标签构造下载地址。已安装旧系列（版本号为主版本 `vX.Y.Z`）的 helper 会被判定为可更新，引导迁移到新系列；`dev` / `0.1.0` 等未知版本处理不变。
+
+注意 GitHub 的 `v*` glob 会匹配 `voicehelper/...` 开头的标签，所以主发布工作流的触发条件写为 `v[0-9]*`。
+
 ## 数据目录
 
 默认路径：`~/.config/eterm/eterm.db`（SQLite），可用 `-c path` 指定。
