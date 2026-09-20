@@ -59,11 +59,23 @@ func (w *probeStdin) waitContains(t *testing.T, s string) {
 	}
 }
 
-func TestTmuxTerminalProbesReply(t *testing.T) {
-	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
+func newTestModel(t *testing.T, sess *internalssh.InteractiveSession) *Model {
+	t.Helper()
+	m := New(sess, "test", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = m.Close() })
+	return m
+}
+
+func newProbeModel(t *testing.T) (*Model, *probeStdin) {
+	t.Helper()
+	stdin := newProbeStdin()
+	m := newTestModel(t, &internalssh.InteractiveSession{Stdin: stdin})
 	m.SetSize(40, 10)
+	return m, stdin
+}
+
+func TestTmuxTerminalProbesReply(t *testing.T) {
+	m, stdin := newProbeModel(t)
 
 	_, _ = m.Update(ChunkMsg{
 		StreamID: m.StreamID(),
@@ -79,10 +91,7 @@ func TestTmuxTerminalProbesReply(t *testing.T) {
 }
 
 func TestFocusBlurForwardedWhenMode1004Set(t *testing.T) {
-	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.SetSize(40, 10)
+	m, stdin := newProbeModel(t)
 
 	_, _ = m.Update(ChunkMsg{
 		StreamID: m.StreamID(),
@@ -96,10 +105,7 @@ func TestFocusBlurForwardedWhenMode1004Set(t *testing.T) {
 }
 
 func TestFocusBlurDroppedWithoutMode1004(t *testing.T) {
-	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.SetSize(40, 10)
+	m, stdin := newProbeModel(t)
 
 	_, _ = m.Update(tea.FocusMsg{})
 	_, _ = m.Update(tea.BlurMsg{})
@@ -111,8 +117,7 @@ func TestFocusBlurDroppedWithoutMode1004(t *testing.T) {
 
 func TestXTGETTCAPReplies(t *testing.T) {
 	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, &internalssh.InteractiveSession{Stdin: stdin})
 
 	_, _ = m.Update(ChunkMsg{
 		StreamID: m.StreamID(),

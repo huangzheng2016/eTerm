@@ -1,8 +1,6 @@
 package app
 
 import (
-	"bytes"
-	"sync"
 	"testing"
 	"time"
 
@@ -11,38 +9,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
-type focusProbeStdin struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (w *focusProbeStdin) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.Write(p)
-}
-
-func (w *focusProbeStdin) Close() error { return nil }
-
-func (w *focusProbeStdin) contains(s string) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return bytes.Contains(w.buf.Bytes(), []byte(s))
-}
-
-func waitForStdin(t *testing.T, w *focusProbeStdin, s string) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if w.contains(s) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("stdin missing %q", s)
-}
-
-func newFocusProbeView(t *testing.T, stdin *focusProbeStdin) *sshview.Model {
+func newFocusProbeView(t *testing.T, stdin *appTestStdin) *sshview.Model {
 	t.Helper()
 	m := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "t", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = m.Close() })
@@ -52,7 +19,7 @@ func newFocusProbeView(t *testing.T, stdin *focusProbeStdin) *sshview.Model {
 }
 
 func TestTabSwitchRefocusesSessions(t *testing.T) {
-	in1, in2 := &focusProbeStdin{}, &focusProbeStdin{}
+	in1, in2 := &appTestStdin{}, &appTestStdin{}
 	sv1 := newFocusProbeView(t, in1)
 	sv2 := newFocusProbeView(t, in2)
 
@@ -64,12 +31,12 @@ func TestTabSwitchRefocusesSessions(t *testing.T) {
 	}
 	a.refocusSessionOnTabSwitch(sv1)
 
-	waitForStdin(t, in1, "\x1b[O")
-	waitForStdin(t, in2, "\x1b[I")
+	in1.waitContains(t, "\x1b[O")
+	in2.waitContains(t, "\x1b[I")
 }
 
 func TestTabSwitchSkipsFocusWhileWindowBlurred(t *testing.T) {
-	in1, in2 := &focusProbeStdin{}, &focusProbeStdin{}
+	in1, in2 := &appTestStdin{}, &appTestStdin{}
 	sv1 := newFocusProbeView(t, in1)
 	sv2 := newFocusProbeView(t, in2)
 

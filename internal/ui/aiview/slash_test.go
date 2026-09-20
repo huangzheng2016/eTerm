@@ -1,6 +1,7 @@
 package aiview
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,13 +57,8 @@ func TestSlashModelOpensPicker(t *testing.T) {
 }
 
 func TestSlashNewStartsFreshSession(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
-	m.input.SetValue("hi")
-	m.send()
-	pumpEvents(t, m)
+	m, fake := newFakeModel()
+	sendAndPump(t, m, "hi")
 	m.saveNow()
 	if len(fake.sessions) != 1 {
 		t.Fatal("session not persisted")
@@ -85,16 +81,9 @@ func TestSlashNewStartsFreshSession(t *testing.T) {
 }
 
 func TestSlashUndoRewindsOneTurn(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
-	m.input.SetValue("first")
-	m.send()
-	pumpEvents(t, m)
-	m.input.SetValue("second")
-	m.send()
-	pumpEvents(t, m)
+	m, fake := newFakeModel()
+	sendAndPump(t, m, "first")
+	sendAndPump(t, m, "second")
 
 	sendSlash(t, m, "/undo")
 	if fake.undoCalls != 1 {
@@ -129,12 +118,9 @@ func TestSlashUndoRewindsOneTurn(t *testing.T) {
 }
 
 func TestSlashResumeRestoresSession(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.History = []byte(`[{"role":"user","content":"first question"},{"role":"assistant","content":"first answer"},{"role":"tool","content":"tool output"},{"role":"assistant","content":""},{"role":"user","content":"second question"},{"role":"assistant","content":"second answer"}]`)
 	fake.SaveSession("s1", "first question", "")
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 
 	sendSlash(t, m, "/resume")
 	if m.mode != modeSessions {
@@ -155,13 +141,8 @@ func TestSlashResumeRestoresSession(t *testing.T) {
 		kinds = append(kinds, b.kind)
 	}
 	want := []blockKind{blockSystem, blockUser, blockAssistant, blockUser, blockAssistant}
-	if len(kinds) != len(want) {
+	if !slices.Equal(kinds, want) {
 		t.Fatalf("got %v, want %v", kinds, want)
-	}
-	for i := range want {
-		if kinds[i] != want[i] {
-			t.Fatalf("got %v, want %v", kinds, want)
-		}
 	}
 	out := plain(m.View().Content)
 	for _, s := range []string{"restored session", "second answer"} {
@@ -186,13 +167,8 @@ func TestSlashResumeEmptyShowsError(t *testing.T) {
 }
 
 func TestSlashForkCopiesSession(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
-	m.input.SetValue("hi")
-	m.send()
-	pumpEvents(t, m)
+	m, fake := newFakeModel()
+	sendAndPump(t, m, "hi")
 	m.saveNow()
 	oldID := m.sessionID
 
@@ -218,10 +194,7 @@ func TestSlashForkEmptyShowsError(t *testing.T) {
 }
 
 func TestSlashForkFlushesPendingSave(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
+	m, fake := newFakeModel()
 	m.input.SetValue("hi")
 	m.send()
 	for {
@@ -250,12 +223,7 @@ func TestSlashForkFlushesPendingSave(t *testing.T) {
 }
 
 func TestSlashRejectionClearedOnFinish(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
+	m := newRunningModel()
 	m.input.SetValue("/new")
 	m.send()
 	if !strings.Contains(m.errMsg, "run in progress") {
@@ -271,12 +239,7 @@ func TestSlashRejectionClearedOnFinish(t *testing.T) {
 }
 
 func TestSlashBlockedWhileRunning(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
+	m := newRunningModel()
 	m.input.SetValue("/new")
 	m.send()
 	if m.status != statusRunning {
@@ -292,10 +255,7 @@ func TestSlashBlockedWhileRunning(t *testing.T) {
 }
 
 func TestAutosaveScheduledOnRunEnd(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
+	m, fake := newFakeModel()
 	m.input.SetValue("hi")
 	m.send()
 	if m.saveSeq != 0 {

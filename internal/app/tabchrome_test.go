@@ -17,6 +17,24 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/voice"
 )
 
+func appTestTabBarApp(t *testing.T) App {
+	t.Helper()
+	a := App{
+		tabs: []Tab{
+			{Type: HomeTab, Title: "one"},
+			{Type: SettingsTab, Title: "two"},
+			{Type: SyncTab, Title: "three"},
+			{Type: KeyTab, Title: "four"},
+		},
+		activeTab: 0,
+		width:     22,
+		height:    20,
+		toast:     components.NewToast(),
+	}
+	a.syncTabBar()
+	return a
+}
+
 func TestMainTabChromeShowsReconnectBadgeOnToastLine(t *testing.T) {
 	tab := sshview.New(nil, "[T]remote-work", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
@@ -53,18 +71,7 @@ func TestMainTabChromeShowsReconnectBadgeOnToastLine(t *testing.T) {
 }
 
 func TestBuildMainTabChromeUsesTabBarScrollState(t *testing.T) {
-	a := App{
-		tabs: []Tab{
-			{Type: HomeTab, Title: "one"},
-			{Type: SettingsTab, Title: "two"},
-			{Type: SyncTab, Title: "three"},
-			{Type: KeyTab, Title: "four"},
-		},
-		activeTab: 0,
-		width:     22,
-		toast:     components.NewToast(),
-	}
-	a.syncTabBar()
+	a := appTestTabBarApp(t)
 	a.tabBar = a.tabBar.ScrollRight()
 
 	view := a.buildMainTabChrome(22)
@@ -75,21 +82,9 @@ func TestBuildMainTabChromeUsesTabBarScrollState(t *testing.T) {
 }
 
 func TestTabBarWheelPagingAndScrolledClickUseRenderedState(t *testing.T) {
-	a := App{
-		viewState: MainView,
-		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
-		tabs: []Tab{
-			{Type: HomeTab, Title: "one"},
-			{Type: SettingsTab, Title: "two"},
-			{Type: SyncTab, Title: "three"},
-			{Type: KeyTab, Title: "four"},
-		},
-		activeTab: 0,
-		width:     22,
-		height:    20,
-		toast:     components.NewToast(),
-	}
-	a.syncTabBar()
+	a := appTestTabBarApp(t)
+	a.viewState = MainView
+	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
 
 	for range 2 {
 		next, _ := a.Update(tea.MouseWheelMsg(tea.Mouse{X: 4, Y: 0, Button: tea.MouseWheelDown}))
@@ -109,23 +104,11 @@ func TestTabBarWheelPagingAndScrolledClickUseRenderedState(t *testing.T) {
 
 func TestTabPageKeysScrollWithoutChangingActiveTab(t *testing.T) {
 	cfg := DefaultKeyBindingConfig()
-	a := App{
-		viewState: MainView,
-		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
-		tabs: []Tab{
-			{Type: HomeTab, Title: "one"},
-			{Type: SettingsTab, Title: "two"},
-			{Type: SyncTab, Title: "three"},
-			{Type: KeyTab, Title: "four"},
-		},
-		activeTab: 0,
-		width:     22,
-		height:    20,
-		toast:     components.NewToast(),
-		keyMap:    BuildKeyMap(cfg),
-		kbConfig:  cfg,
-	}
-	a.syncTabBar()
+	a := appTestTabBarApp(t)
+	a.viewState = MainView
+	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
+	a.keyMap = BuildKeyMap(cfg)
+	a.kbConfig = cfg
 
 	next, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModAlt | tea.ModShift}))
 	a = next.(App)
@@ -240,10 +223,7 @@ func TestVoiceHotkeySkippedInShortcutsTab(t *testing.T) {
 }
 
 func TestOpenShortcutsTabPreservesUnknownKeybindingFields(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/app.db")
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := appTestDB(t)
 	stored := `{"quit_app":["ctrl+shift+x"],"future_binding":["f9"]}`
 	if err := db.SetSetting(database, keybindingsSettingKey, stored); err != nil {
 		t.Fatal(err)

@@ -256,6 +256,18 @@ func TestTmuxRenameRequestsPrompt(t *testing.T) {
 	}
 }
 
+func TestPeerRenameKeyEmitsRequest(t *testing.T) {
+	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+	done, cmd := m.Update(keyText("n"))
+	if done || cmd == nil {
+		t.Fatal("rename request should keep menu open")
+	}
+	msg := cmd().(types.RemotePeerRenameRequestMsg)
+	if msg.Peer.ID != "p1" || msg.CurrentName != "peer" {
+		t.Fatalf("bad rename msg %+v", msg)
+	}
+}
+
 func TestTmuxKillRequestsConfirmationAndKeepsMenu(t *testing.T) {
 	m := New(types.RemotePeer{Name: "peer"}, nil)
 	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})

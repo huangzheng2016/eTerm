@@ -132,14 +132,15 @@ func sendKeysToPty(t *testing.T, keys string) string {
 }
 
 func TestSendKeysEscapeDecoding(t *testing.T) {
-	if got := sendKeysToPty(t, `\n`); got != "\n" {
-		t.Fatalf(`backslash+n wrote %q, want one LF byte`, got)
+	cases := []struct{ in, want string }{
+		{`\n`, "\n"},
+		{`\\n`, `\n`},
+		{"real\n", "real\n"},
 	}
-	if got := sendKeysToPty(t, `\\n`); got != `\n` {
-		t.Fatalf(`backslash-backslash-n wrote %q, want literal backslash+n`, got)
-	}
-	if got := sendKeysToPty(t, "real\n"); got != "real\n" {
-		t.Fatalf("raw newline wrote %q, want unchanged", got)
+	for _, c := range cases {
+		if got := sendKeysToPty(t, c.in); got != c.want {
+			t.Errorf("sendKeysToPty(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -162,13 +163,18 @@ func (a *cronFireAgent) Run(ctx context.Context, input string) <-chan ai.Event {
 	return a.fakeAgent.Run(ctx, input)
 }
 
-func TestAIOverlayBoundsFillFrame(t *testing.T) {
+func aiTestActiveBridge(t *testing.T) *aiBridge {
+	t.Helper()
 	store := &ai.Store{}
 	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
 	if err := store.SetActive("p", "m"); err != nil {
 		t.Fatal(err)
 	}
-	bridge := &aiBridge{store: store}
+	return &aiBridge{store: store}
+}
+
+func TestAIOverlayBoundsFillFrame(t *testing.T) {
+	bridge := aiTestActiveBridge(t)
 	av := aiview.New(bridge, bridge, bridge)
 	av.SetSize(100, 32)
 	a := App{aiView: av, width: 100, height: 32}
@@ -179,12 +185,7 @@ func TestAIOverlayBoundsFillFrame(t *testing.T) {
 }
 
 func TestAINotifyEmitsOSC9(t *testing.T) {
-	store := &ai.Store{}
-	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
-	if err := store.SetActive("p", "m"); err != nil {
-		t.Fatal(err)
-	}
-	bridge := &aiBridge{store: store}
+	bridge := aiTestActiveBridge(t)
 	a := App{aiView: aiview.New(bridge, bridge, bridge)}
 	req := aiToolRequest{op: aiToolNotify, arg: "task done", resp: make(chan aiToolResult, 1)}
 	_, cmd := a.handleAIToolRequest(req)
@@ -206,12 +207,7 @@ func TestAINotifyEmitsOSC9(t *testing.T) {
 }
 
 func TestAICronFireDelivery(t *testing.T) {
-	store := &ai.Store{}
-	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
-	if err := store.SetActive("p", "m"); err != nil {
-		t.Fatal(err)
-	}
-	bridge := &aiBridge{store: store}
+	bridge := aiTestActiveBridge(t)
 	agent := &cronFireAgent{}
 	bridge.agent = agent
 	bridge.agentKey = "p\x00m\x00false"

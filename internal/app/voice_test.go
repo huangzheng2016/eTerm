@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"gorm.io/gorm"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
@@ -115,6 +116,19 @@ func collectCmdMsgs(t *testing.T, cmd tea.Cmd, want func(tea.Msg) bool) []tea.Ms
 	}
 }
 
+func voiceTestStarted(m tea.Msg) bool { _, ok := m.(voiceStartedMsg); return ok }
+
+func voiceTestStopped(m tea.Msg) bool { _, ok := m.(voiceStoppedMsg); return ok }
+
+func voiceTestPump(t *testing.T, a App, cmd tea.Cmd, want func(tea.Msg) bool) App {
+	t.Helper()
+	for _, m := range collectCmdMsgs(t, cmd, want) {
+		upd, _ := a.Update(m)
+		a = upd.(App)
+	}
+	return a
+}
+
 func voiceTestApp(fe *fakeVoiceEngine) App {
 	return voiceTestAppMake(fe)
 }
@@ -133,6 +147,38 @@ func voiceTestAppMake(eng voice.Engine) App {
 	}
 }
 
+func voiceTestDB(t *testing.T) (*gorm.DB, *security.MasterKeyManager) {
+	t.Helper()
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	return database, mk
+}
+
+func voiceTestSettingsModel(t *testing.T, w, h int) (*voiceSettingsModel, *gorm.DB, *security.MasterKeyManager) {
+	t.Helper()
+	database, mk := voiceTestDB(t)
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(w, h)
+	return m, database, mk
+}
+
+func voiceTestSSHTerm() (*sshview.Model, *syncWriteCloser) {
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	return sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig())), sink
+}
+
+func voiceTestAIView() (*aiview.Model, *aiview.FakeRunner) {
+	fake := aiview.NewFakeRunner()
+	av := aiview.New(fake, fake, fake)
+	av.SetSize(80, 24)
+	return av, fake
+}
+
 func TestVoiceHotkeyToggleStartsAndStops(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
@@ -143,10 +189,7 @@ func TestVoiceHotkeyToggleStartsAndStops(t *testing.T) {
 	if !a.voiceRec {
 		t.Fatal("first press did not start recording")
 	}
-	msgs := collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	})
+	msgs := collectCmdMsgs(t, cmd, voiceTestStarted)
 	if !fe.started {
 		t.Fatal("engine not started")
 	}
@@ -179,11 +222,8 @@ func TestVoiceHotkeyToggleStartsAndStops(t *testing.T) {
 }
 
 func TestVoiceHotkeyWorksWithAIOverlayOpen(t *testing.T) {
-	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
-	a := voiceTestApp(fe)
-	fake := aiview.NewFakeRunner()
-	av := aiview.New(fake, fake, fake)
-	av.SetSize(80, 24)
+	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
+	av, _ := voiceTestAIView()
 	a.aiView = av
 	a.aiVisible = true
 
@@ -215,9 +255,7 @@ func TestVoiceStatusHintShowsRecording(t *testing.T) {
 }
 
 func TestVoicePartialNeverReachesTerminal(t *testing.T) {
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, sink := voiceTestSSHTerm()
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	a.voiceRec = true
@@ -276,36 +314,28 @@ func TestVoiceNoSpeechTimeoutPerPath(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
 	key := tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl})
-	pump := func(cmd tea.Cmd, want func(tea.Msg) bool) {
-		for _, m := range collectCmdMsgs(t, cmd, want) {
-			upd, _ := a.Update(m)
-			a = upd.(App)
-		}
-	}
-	started := func(m tea.Msg) bool { _, ok := m.(voiceStartedMsg); return ok }
-	stopped := func(m tea.Msg) bool { _, ok := m.(voiceStoppedMsg); return ok }
 
 	upd, cmd := a.Update(key)
 	a = upd.(App)
 	if fe.vad.NoSpeechTimeout != 0 {
 		t.Fatalf("dictation no-speech timeout = %v", fe.vad.NoSpeechTimeout)
 	}
-	pump(cmd, started)
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 
 	upd, cmd = a.Update(key)
 	a = upd.(App)
-	pump(cmd, stopped)
+	a = voiceTestPump(t, a, cmd, voiceTestStopped)
 
 	upd, cmd = a.Update(voiceTestRequestMsg{})
 	a = upd.(App)
 	if fe.vad.NoSpeechTimeout != voiceTestNoSpeechSecs {
 		t.Fatalf("test no-speech timeout = %v", fe.vad.NoSpeechTimeout)
 	}
-	pump(cmd, started)
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 
 	upd, cmd = a.Update(voiceFinalMsg("done"))
 	a = upd.(App)
-	pump(cmd, stopped)
+	a = voiceTestPump(t, a, cmd, voiceTestStopped)
 
 	upd, _ = a.Update(key)
 	a = upd.(App)
@@ -315,14 +345,10 @@ func TestVoiceNoSpeechTimeoutPerPath(t *testing.T) {
 }
 
 func TestVoiceDeliveryToAiviewInsertsText(t *testing.T) {
-	fake := aiview.NewFakeRunner()
+	av, fake := voiceTestAIView()
 	fake.Delay = 0
-	av := aiview.New(fake, fake, fake)
-	av.SetSize(80, 24)
 
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, sink := voiceTestSSHTerm()
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	a.aiView = av
@@ -342,10 +368,8 @@ func TestVoiceDeliveryToAiviewInsertsText(t *testing.T) {
 }
 
 func TestVoiceDeliveryToAiviewEnterSubmits(t *testing.T) {
-	fake := aiview.NewFakeRunner()
+	av, fake := voiceTestAIView()
 	fake.Delay = 0
-	av := aiview.New(fake, fake, fake)
-	av.SetSize(80, 24)
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	a.aiView = av
@@ -368,9 +392,7 @@ func TestVoiceDeliveryToTerminalPasteText(t *testing.T) {
 		{voice.SentenceEndEnter, "ls -la\n"},
 		{voice.SentenceEndSpace, "ls -la "},
 	} {
-		sink := &syncWriteCloser{}
-		is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-		sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+		sv, sink := voiceTestSSHTerm()
 
 		a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 		a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
@@ -390,12 +412,7 @@ func TestVoiceDeliveryToTerminalPasteText(t *testing.T) {
 }
 
 func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
+	database, mk := voiceTestDB(t)
 
 	if got := loadVoiceSettings(database, mk); !reflect.DeepEqual(got, defaultVoiceSettings()) {
 		t.Fatalf("defaults = %+v", got)
@@ -428,12 +445,7 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 }
 
 func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
+	database, mk := voiceTestDB(t)
 
 	data, err := json.Marshal(map[string]string{"api_key": "a", "app_key": "b", "access_key": "c"})
 	if err != nil {
@@ -478,14 +490,7 @@ func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
 }
 
 func TestVoiceSettingsTabStagedAdjustAndSave(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, database, mk := voiceTestSettingsModel(t, 80, 24)
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	for i, d := range enginePickerDescriptors() {
@@ -567,14 +572,7 @@ func TestVoiceSettingsTabStagedAdjustAndSave(t *testing.T) {
 }
 
 func TestVoiceSettingsParamOptionsCycle(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, database, mk := voiceTestSettingsModel(t, 80, 24)
 	m.cfg.Engine = voiceEngineVolcano
 
 	m.cursor = findVoiceParamRow(m, "resource_id")
@@ -810,12 +808,7 @@ func voiceTabLineIndex(m *voiceSettingsModel, row int) int {
 }
 
 func TestVoiceSettingsTabMouse(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
+	database, mk := voiceTestDB(t)
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	a.db = database
@@ -847,12 +840,7 @@ func TestVoiceSettingsTabMouse(t *testing.T) {
 
 func TestVoiceSettingsMouseWithNotice(t *testing.T) {
 	stubHelperInstalled(t, false)
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
+	database, mk := voiceTestDB(t)
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	a.db = database
@@ -881,9 +869,7 @@ func TestVoiceSettingsMouseWithNotice(t *testing.T) {
 }
 
 func TestVoiceDeliveryDroppedWhenLocked(t *testing.T) {
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, sink := voiceTestSSHTerm()
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
 	a.viewState = LoginView
@@ -952,10 +938,7 @@ func TestVoiceToggleReconcileStopAfterSlowStart(t *testing.T) {
 	}
 	startMsgs := make(chan []tea.Msg, 1)
 	go func(c tea.Cmd) {
-		startMsgs <- collectCmdMsgs(t, c, func(m tea.Msg) bool {
-			_, ok := m.(voiceStartedMsg)
-			return ok
-		})
+		startMsgs <- collectCmdMsgs(t, c, voiceTestStarted)
 	}(cmd)
 
 	upd, cmd = a.toggleVoice()
@@ -995,22 +978,13 @@ func TestVoiceToggleReconcileStartAfterSlowStop(t *testing.T) {
 
 	upd, cmd := a.toggleVoice()
 	a = upd
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd2, _ := a.Update(m)
-		a = upd2.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 
 	upd, cmd = a.toggleVoice()
 	a = upd
 	stopMsgs := make(chan []tea.Msg, 1)
 	go func(c tea.Cmd) {
-		stopMsgs <- collectCmdMsgs(t, c, func(m tea.Msg) bool {
-			_, ok := m.(voiceStoppedMsg)
-			return ok
-		})
+		stopMsgs <- collectCmdMsgs(t, c, voiceTestStopped)
 	}(cmd)
 
 	upd, cmd = a.toggleVoice()
@@ -1032,13 +1006,7 @@ func TestVoiceToggleReconcileStartAfterSlowStop(t *testing.T) {
 	if startCmd == nil {
 		t.Fatal("stale stop completion did not issue a start")
 	}
-	for _, m := range collectCmdMsgs(t, startCmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd2, _ := a.Update(m)
-		a = upd2.(App)
-	}
+	a = voiceTestPump(t, a, startCmd, voiceTestStarted)
 
 	starts, stops := ge.counts()
 	if starts != 2 || stops != 1 {
@@ -1166,14 +1134,7 @@ func TestVoiceHotkeyNoticeNamesMissingKeys(t *testing.T) {
 }
 
 func TestVoiceSettingsModelRows(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, database, mk := voiceTestSettingsModel(t, 80, 24)
 	m.modelsRoot = t.TempDir()
 	m.helperInstalledFn = func() bool { return false }
 	m.refreshInstallState()
@@ -1245,14 +1206,7 @@ func TestVoiceSettingsModelRows(t *testing.T) {
 
 func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	stubHelperInstalled(t, true)
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(120, 24)
+	m, database, mk := voiceTestSettingsModel(t, 120, 24)
 	m.modelsRoot = t.TempDir()
 	m.helperInstalledFn = func() bool { return true }
 	m.refreshInstallState()
@@ -1336,14 +1290,7 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 }
 
 func TestVoiceSettingsPrecisionToggle(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, database, mk := voiceTestSettingsModel(t, 80, 24)
 	m.cfg.Verified = true
 
 	m.cursor = findVoiceRow(m, vrowPrecision)
@@ -1431,10 +1378,7 @@ func TestVoiceSettingsEnginePickerOrder(t *testing.T) {
 }
 
 func TestVoiceSettingsLegacyModelIDMigration(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
+	database, _ := voiceTestDB(t)
 	if err := db.SetSetting(database, voiceModelSettingKey, "sensevoice-int8"); err != nil {
 		t.Fatal(err)
 	}
@@ -1452,14 +1396,7 @@ func TestVoiceSettingsLegacyModelIDMigration(t *testing.T) {
 }
 
 func TestVoiceSettingsEngineSwitchStagedUntilSave(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, database, mk := voiceTestSettingsModel(t, 80, 24)
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	for i, d := range enginePickerDescriptors() {
@@ -1484,14 +1421,7 @@ func TestVoiceSettingsEngineSwitchStagedUntilSave(t *testing.T) {
 var errTest = errors.New("boom")
 
 func TestVoiceSettingsHelperUpdate(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, _, _ := voiceTestSettingsModel(t, 80, 24)
 	m.helperInstalledFn = func() bool { return true }
 	ver := "v3.0.0"
 	m.helperVersionFn = func() string { return ver }
@@ -1645,12 +1575,7 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	a := voiceTestApp(fe)
 	a.width = 80
 	a.height = 40
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
+	database, mk := voiceTestDB(t)
 	a.db = database
 	a.masterKey = mk
 
@@ -1665,13 +1590,7 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	if !a.voiceTab().testing {
 		t.Fatal("tab not in testing state")
 	}
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 	if !fe.started {
 		t.Fatal("engine not started")
 	}
@@ -1695,9 +1614,7 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 		t.Fatalf("partial = %q", a.voiceTab().testText)
 	}
 
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, sink := voiceTestSSHTerm()
 	a.tabs = append(a.tabs, Tab{Type: SSHTab, Title: "prod", Model: sv})
 
 	upd, cmd = a.Update(voiceFinalMsg("hello test"))
@@ -1711,13 +1628,7 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	if !strings.Contains(a.voiceTab().View().Content, "hello test") {
 		t.Fatal("transcript not shown in tab")
 	}
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStoppedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStopped)
 	if !fe.stopped {
 		t.Fatal("engine not stopped after test")
 	}
@@ -1737,17 +1648,9 @@ func TestVoiceTestTimeoutSwallowsFinal(t *testing.T) {
 	a = upd.(App)
 	upd, cmd := a.Update(voiceTestRequestMsg{})
 	a = upd.(App)
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, sink := voiceTestSSHTerm()
 	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
 
 	upd, cmd = a.Update(voiceTestTimeoutMsg{seq: a.voiceTestSeq})
@@ -1831,13 +1734,7 @@ func TestVoiceSettingsCloseStopsTest(t *testing.T) {
 	a = upd.(App)
 	upd, cmd := a.Update(voiceTestRequestMsg{})
 	a = upd.(App)
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 
 	upd, cmd = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	a = upd.(App)
@@ -1846,13 +1743,7 @@ func TestVoiceSettingsCloseStopsTest(t *testing.T) {
 	}
 	upd, cmd = a.Update(cmd())
 	a = upd.(App)
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStoppedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStopped)
 	if a.voiceTab() != nil {
 		t.Fatal("esc did not close the voice tab")
 	}
@@ -1872,13 +1763,7 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 	a = upd.(App)
 	upd, cmd := a.Update(voiceTestRequestMsg{})
 	a = upd.(App)
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 
 	upd, cmd = a.Update(voiceTestTimeoutMsg{seq: a.voiceTestSeq})
 	a = upd.(App)
@@ -1890,9 +1775,7 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 		t.Fatal("cancel did not arm the final swallow")
 	}
 
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, sink := voiceTestSSHTerm()
 	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
 
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventState, State: voice.StateIdle}})
@@ -1942,14 +1825,7 @@ func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 }
 
 func TestVoiceContextSettingTogglePersists(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 24)
+	m, database, mk := voiceTestSettingsModel(t, 80, 24)
 	if got := loadVoiceSettings(database, mk); got.Context {
 		t.Fatal("context default on")
 	}
@@ -2047,9 +1923,7 @@ func TestVoiceContextStringFromAIOverlay(t *testing.T) {
 }
 
 func TestVoiceContextStringFromTerminalTab(t *testing.T) {
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, _ := voiceTestSSHTerm()
 	feedSSHChunk(sv, "┌──────────┐\r\n│ degraded │\r\n└──────────┘\r\nkubectl   get   pods\r\nkubectl get pods\r\n$ ")
 
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
@@ -2074,22 +1948,14 @@ func TestVoiceToggleSetsEngineContextProvider(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
 	a.voiceCfg.Context = true
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, _ := voiceTestSSHTerm()
 	feedSSHChunk(sv, "kubectl get pods\r\n")
 	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
 	a.activeTab = 0
 
 	upd, cmd := a.toggleVoice()
 	a = upd
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd2, _ := a.Update(m)
-		a = upd2.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 	if fe.contextFn == nil {
 		t.Fatal("engine got no context provider")
 	}
@@ -2106,33 +1972,19 @@ func TestVoiceToggleSetsEngineContextProvider(t *testing.T) {
 
 	upd, cmd = a.toggleVoice()
 	a = upd
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStoppedMsg)
-		return ok
-	}) {
-		upd2, _ := a.Update(m)
-		a = upd2.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStopped)
 
 	a.voiceCfg.Context = false
 	upd, cmd = a.toggleVoice()
 	a = upd
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd2, _ := a.Update(m)
-		a = upd2.(App)
-	}
+	a = voiceTestPump(t, a, cmd, voiceTestStarted)
 	if got := fe.contextFn(); got != "" {
 		t.Fatalf("provider not cleared with the switch off: %q", got)
 	}
 }
 
 func TestVoiceContextTerminalTailUsesNewestContent(t *testing.T) {
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	sv, _ := voiceTestSSHTerm()
 
 	var b strings.Builder
 	b.WriteString("OLDMARKER earliest scrollback content\r\n")
@@ -2158,14 +2010,7 @@ func TestVoiceContextTerminalTailUsesNewestContent(t *testing.T) {
 }
 
 func TestVoiceSettingsExtraRows(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.UnlockNoPassword()
-	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
-	m.SetSize(80, 30)
+	m, database, mk := voiceTestSettingsModel(t, 80, 30)
 
 	if findVoiceRow(m, vrowContext) >= 0 || findVoiceRow(m, vrowDDC) >= 0 {
 		t.Fatal("local engine shows the volcano feature rows")
@@ -2283,10 +2128,7 @@ func TestVoiceHotkeySkippedInVoiceTab(t *testing.T) {
 }
 
 func TestVoiceSettingsDDCPersistenceRoundTrip(t *testing.T) {
-	database, err := db.InitDB(t.TempDir() + "/voice.db")
-	if err != nil {
-		t.Fatal(err)
-	}
+	database, _ := voiceTestDB(t)
 	if got := loadVoiceSettings(database, nil); !got.DDC {
 		t.Fatal("DDC default off on an empty database")
 	}

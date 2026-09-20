@@ -3,9 +3,9 @@ package voice
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,30 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 )
-
-func TestDeepgramDescriptor(t *testing.T) {
-	d, ok := EngineDescriptorByID("deepgram")
-	if !ok {
-		t.Fatal("deepgram engine not registered")
-	}
-	if d.Ready(map[string]string{}) {
-		t.Fatal("ready without key")
-	}
-	if !d.Ready(map[string]string{"api_key": "k"}) {
-		t.Fatal("not ready with key")
-	}
-	if got := FirstMissingParam(d, map[string]string{}); got != "Deepgram API key" {
-		t.Fatalf("first missing = %q", got)
-	}
-	eng, err := d.New(map[string]string{"api_key": "k"}, FeedDeps{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := eng.(*streamFeedEngine); !ok {
-		t.Fatalf("deepgram New = %T", eng)
-	}
-	eng.Close()
-}
 
 type deepgramServer struct {
 	t           *testing.T
@@ -135,16 +111,9 @@ func TestDeepgramEngineLifecycle(t *testing.T) {
 	if err := eng.WriteAudio([]byte{1, 2, 3}); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case got := <-srv.audio:
-		if string(got) != string([]byte{1, 2, 3}) {
-			t.Fatalf("audio = %v", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive audio frame")
-	}
+	expectAudio(t, srv.audio, []byte{1, 2, 3}, "server did not receive audio frame")
 
-	partial := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventPartial })
+	partial := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventPartial })
 	if partial.Text != "hel" {
 		t.Fatalf("partial: %q", partial.Text)
 	}
@@ -152,12 +121,8 @@ func TestDeepgramEngineLifecycle(t *testing.T) {
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-srv.closeStream:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive CloseStream")
-	}
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	waitSignal(t, srv.closeStream, "server did not receive CloseStream")
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello world" {
 		t.Fatalf("final: %q", final.Text)
 	}
@@ -165,32 +130,12 @@ func TestDeepgramEngineLifecycle(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
-}
-
-func TestDeepgramEngineRequiresKey(t *testing.T) {
-	eng := NewDeepgramEngine(DeepgramConfig{})
-	if err := eng.Start(context.Background()); err == nil {
-		t.Fatal("expected auth error")
-	}
-	eng.Close()
+	waitEventsClosed(t, eng.Events())
 }
 
 func TestDeepgramFeedRedialWindowAudioReplayed(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_PROTOCOL", "2")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newDeepgramServer(t)
 	srv.secondDelay = time.Second
@@ -208,14 +153,7 @@ func TestDeepgramFeedRedialWindowAudioReplayed(t *testing.T) {
 	chunkA := []byte{1, 2, 3, 4}
 	chunkB := []byte{5, 6, 7, 8}
 	eng.onAudio(chunkA)
-	select {
-	case got := <-srv.audio:
-		if !bytes.Equal(got, chunkA) {
-			t.Fatalf("conn1 audio = %v, want %v", got, chunkA)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("conn1 did not receive audio")
-	}
+	expectAudio(t, srv.audio, chunkA, "conn1 audio")
 
 	start := time.Now()
 	eng.onUtteranceEnd()
@@ -231,29 +169,14 @@ func TestDeepgramFeedRedialWindowAudioReplayed(t *testing.T) {
 		t.Fatal("audio during redial window was not buffered")
 	}
 
-	select {
-	case <-srv.closeStream:
-	case <-time.After(5 * time.Second):
-		t.Fatal("old session did not receive CloseStream")
-	}
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	waitSignal(t, srv.closeStream, "old session did not receive CloseStream")
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello world" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session")
-	}
-	select {
-	case got := <-srv.audio2:
-		if !bytes.Equal(got, chunkB) {
-			t.Fatalf("conn2 replayed audio = %v, want %v", got, chunkB)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("window audio was not replayed to the new session")
-	}
+	waitSignal(t, srv.conn2, "no redialed session")
+	expectAudio(t, srv.audio2, chunkB, "window audio not replayed to the new session")
 
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
@@ -261,8 +184,7 @@ func TestDeepgramFeedRedialWindowAudioReplayed(t *testing.T) {
 }
 
 func TestDeepgramFeedRoutesPassthrough(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	t.Setenv("GO_FAKE_PROTOCOL", "2")
 
 	srv := newDeepgramServer(t)
 	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
@@ -277,30 +199,15 @@ func TestDeepgramFeedRoutesPassthrough(t *testing.T) {
 	}
 
 	for i, want := range [][]byte{{1, 2, 3, 4}, {5, 6, 7, 8}} {
-		select {
-		case got := <-srv.audio:
-			if string(got) != string(want) {
-				t.Fatalf("audio %d = %v, want %v", i, got, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("server did not receive audio frame %d", i)
-		}
+		expectAudio(t, srv.audio, want, fmt.Sprintf("audio frame %d", i))
 	}
-	select {
-	case <-srv.closeStream:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive CloseStream")
-	}
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	waitSignal(t, srv.closeStream, "server did not receive CloseStream")
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello world" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session after utterance_end")
-	}
+	waitSignal(t, srv.conn2, "no redialed session after utterance_end")
 
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
@@ -308,15 +215,5 @@ func TestDeepgramFeedRoutesPassthrough(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
+	waitEventsClosed(t, eng.Events())
 }

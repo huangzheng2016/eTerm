@@ -44,19 +44,6 @@ func (m *steerToolModel) Stream(ctx context.Context, input []*schema.Message, op
 	}), nil
 }
 
-func newSteerAgent(t *testing.T, m model.ChatModel, queue *steerQueue) *Agent {
-	t.Helper()
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(context.Background(), m, tools, "test instruction", 4, 100000, queue)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &Agent{agent: adkAgent, queue: queue}
-}
-
 type runResult struct {
 	steers  []string
 	sawDone bool
@@ -86,7 +73,7 @@ func TestSteerInjectedAtStepBoundary(t *testing.T) {
 	ctx := context.Background()
 	m := &steerToolModel{release: make(chan struct{}), entered: make(chan struct{})}
 	queue := &steerQueue{}
-	a := newSteerAgent(t, m, queue)
+	a := newTestAgent(t, m, queue)
 
 	done := drainRun(a, ctx, "list tabs")
 	<-m.entered
@@ -158,7 +145,7 @@ func TestSteerQueuedAtTurnEndChainsNewTurn(t *testing.T) {
 	ctx := context.Background()
 	m := &chainedModel{release: make(chan struct{}), entered: make(chan struct{})}
 	queue := &steerQueue{}
-	a := newSteerAgent(t, m, queue)
+	a := newTestAgent(t, m, queue)
 
 	done := drainRun(a, ctx, "first question")
 	<-m.entered
@@ -200,7 +187,7 @@ func TestSteerCancelClearsQueue(t *testing.T) {
 	m := &gatedModel{release: make(chan struct{}), entered: make(chan struct{})}
 	defer close(m.release)
 	queue := &steerQueue{}
-	a := newSteerAgent(t, m, queue)
+	a := newTestAgent(t, m, queue)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := drainRun(a, ctx, "question")
@@ -219,7 +206,7 @@ func TestSteerInjectionNeverSplitsToolPairs(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		m := &steerToolModel{release: make(chan struct{}), entered: make(chan struct{})}
 		queue := &steerQueue{}
-		a := newSteerAgent(t, m, queue)
+		a := newTestAgent(t, m, queue)
 
 		done := drainRun(a, ctx, "list tabs")
 		<-m.entered

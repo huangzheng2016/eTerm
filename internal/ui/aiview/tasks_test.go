@@ -8,8 +8,7 @@ import (
 )
 
 func newTasksTestModel() (*Model, *FakeRunner) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.TaskList = []TaskEntry{
 		{ID: "task-1", Task: "watch the build", Status: "running", StartedSecAgo: 12, Tail: []TaskActivity{
 			{Kind: "status", Text: "running"},
@@ -20,8 +19,6 @@ func newTasksTestModel() (*Model, *FakeRunner) {
 			{Kind: "status", Text: "done"},
 		}},
 	}
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 	return m, fake
 }
 
@@ -51,12 +48,7 @@ func TestSlashTasksEmpty(t *testing.T) {
 }
 
 func TestSlashTasksAllowedWhileRunning(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
+	m := newRunningModel()
 	sendSlash(t, m, "/tasks")
 	if m.mode != modeTasks {
 		t.Fatal("/tasks must open while a run is in progress")

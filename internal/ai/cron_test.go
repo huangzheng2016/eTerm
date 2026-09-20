@@ -7,8 +7,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/cloudwego/eino/components/tool"
 )
 
 type cronTestStore struct {
@@ -324,14 +322,7 @@ func TestBuildToolsWiresCron(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byName := map[string]tool.BaseTool{}
-	for _, bt := range tools {
-		info, err := bt.Info(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		byName[info.Name] = bt
-	}
+	byName := toolsByName(t, tools)
 	for _, name := range []string{"cron_create", "cron_list", "cron_delete"} {
 		if byName[name] == nil {
 			t.Fatalf("%s missing from BuildTools", name)
@@ -341,29 +332,25 @@ func TestBuildToolsWiresCron(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, bt := range plain {
-		info, _ := bt.Info(context.Background())
-		if strings.HasPrefix(info.Name, "cron_") {
-			t.Fatalf("%s present without a scheduler", info.Name)
+	for name := range toolsByName(t, plain) {
+		if strings.HasPrefix(name, "cron_") {
+			t.Fatalf("%s present without a scheduler", name)
 		}
 	}
 
 	ctx := context.Background()
-	type invokable interface {
-		InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error)
-	}
-	create := byName["cron_create"].(invokable)
+	create := invokable(t, tools, "cron_create")
 	out, err := create.InvokableRun(ctx, `{"prompt":"check the build","interval_minutes":5}`)
 	if err != nil || !strings.Contains(out, `"kind":"interval"`) {
 		t.Fatalf("cron_create: %q %v", out, err)
 	}
-	list := byName["cron_list"].(invokable)
+	list := invokable(t, tools, "cron_list")
 	out, err = list.InvokableRun(ctx, `{}`)
 	if err != nil || !strings.Contains(out, "check the build") {
 		t.Fatalf("cron_list: %q %v", out, err)
 	}
 	job := s.List()[0]
-	del := byName["cron_delete"].(invokable)
+	del := invokable(t, tools, "cron_delete")
 	out, err = del.InvokableRun(ctx, `{"id":"`+job.ID+`"}`)
 	if err != nil || !strings.Contains(out, `"deleted":true`) {
 		t.Fatalf("cron_delete: %q %v", out, err)

@@ -27,14 +27,62 @@ type daemonFrameSink struct {
 
 func testTmuxRuntime(t *testing.T) *runtimeConfig {
 	t.Helper()
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "eterm.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testDaemonDB(t)
 	if err := db.SetSetting(database, tmux.SettingConfigFile, filepath.Join(t.TempDir(), "tmux.conf")); err != nil {
 		t.Fatal(err)
 	}
 	return &runtimeConfig{db: database, hasTmux: true}
+}
+
+func stubTmuxNewFake(t *testing.T, name string) *daemonFakeSession {
+	t.Helper()
+	fake := newDaemonFakeSession()
+	tmuxNewSession = func(context.Context, string, int, int) (*internalssh.InteractiveSession, string, error) {
+		return fake.is, name, nil
+	}
+	return fake
+}
+
+func callOpen(t *testing.T, sid uint32, req relay.OpenRequest, mgr *sessionManager, sender *frameSender) {
+	t.Helper()
+	payload, _ := json.Marshal(req)
+	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: sid, Payload: payload}, mgr, sender, context.Background(), context.Background())
+}
+
+func wantOpenErr(t *testing.T, out *daemonFrameSink, want string) {
+	t.Helper()
+	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
+	if string(f.Payload) != want {
+		t.Fatalf("open err payload = %q, want %q", f.Payload, want)
+	}
+}
+
+func startTestPump(t *testing.T, is *internalssh.InteractiveSession, sid uint32) (*streamRelay, *sessionManager, *daemonFrameSink) {
+	t.Helper()
+	sender, out := newTestSender()
+	mgr := newSessionManager()
+	mgr.setSender(sender)
+	sr := newStreamRelay(is)
+	mgr.add(sid, sr)
+	go sr.pump(context.Background(), sid, mgr)
+	return sr, mgr, out
+}
+
+func waitRingEnd(t *testing.T, sr *streamRelay, want uint64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sr.mu.Lock()
+		end := sr.ring.End()
+		sr.mu.Unlock()
+		if end >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ring end = %d, want %d", end, want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func newDaemonSink() *daemonFrameSink {
@@ -201,10 +249,9 @@ func TestHandleOpenTmuxList(t *testing.T) {
 	tmuxListSessions = func(context.Context, string) ([]types.TmuxSession, error) {
 		return []types.TmuxSession{{Name: "work", CreatedUnix: 7, Attached: true}}, nil
 	}
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxList})
 	sender, out := newTestSender()
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 1, Payload: payload}, newSessionManager(), sender, context.Background(), context.Background())
+	callOpen(t, 1, relay.OpenRequest{Target: relay.TargetTmuxList}, newSessionManager(), sender)
 
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	var got []relay.TmuxSessionInfo
@@ -224,12 +271,11 @@ func TestHandleOpenTmuxNewStartsStream(t *testing.T) {
 		gotRows, gotCols = rows, cols
 		return fake.is, "tmux-abc123", nil
 	}
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew, Rows: 11, Cols: 90})
 	sender, out := newTestSender()
 	mgr := newSessionManager()
 	mgr.setSender(sender)
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 2, relay.OpenRequest{Target: relay.TargetTmuxNew, Rows: 11, Cols: 90}, mgr, sender)
 
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	if string(f.Payload) != "tmux-abc123" {
@@ -251,16 +297,12 @@ func TestHandleOpenTmuxNewStartsStream(t *testing.T) {
 
 func TestHandleOpenTmuxNewCleansUpWhenOpenOKWriteFails(t *testing.T) {
 	restoreTmuxStubs(t)
-	fake := newDaemonFakeSession()
-	tmuxNewSession = func(context.Context, string, int, int) (*internalssh.InteractiveSession, string, error) {
-		return fake.is, "tmux-abc123", nil
-	}
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
+	fake := stubTmuxNewFake(t, "tmux-abc123")
 	mgr := newSessionManager()
 	sender := newFrameSender()
 	close(sender.done)
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 12, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 12, relay.OpenRequest{Target: relay.TargetTmuxNew}, mgr, sender)
 
 	if mgr.get(12) != nil {
 		t.Fatal("session registered after OpenOK write failed")
@@ -272,26 +314,19 @@ func TestHandleOpenTmuxNewCleansUpWhenOpenOKWriteFails(t *testing.T) {
 
 func TestHandleOpenTmuxNewReturnsOpenErrWhenSessionExitsImmediately(t *testing.T) {
 	restoreTmuxStubs(t)
-	fake := newDaemonFakeSession()
+	fake := stubTmuxNewFake(t, "tmux-abc123")
 	fake.done <- errors.New("tmux attach-session: exit status 1")
 	killed := ""
-	tmuxNewSession = func(context.Context, string, int, int) (*internalssh.InteractiveSession, string, error) {
-		return fake.is, "tmux-abc123", nil
-	}
 	tmuxKillSession = func(_ context.Context, _ string, name string) error {
 		killed = name
 		return nil
 	}
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
 	sender, out := newTestSender()
 	mgr := newSessionManager()
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 15, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 15, relay.OpenRequest{Target: relay.TargetTmuxNew}, mgr, sender)
 
-	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
-	if string(f.Payload) != "tmux attach-session: exit status 1" {
-		t.Fatalf("open err payload = %q", f.Payload)
-	}
+	wantOpenErr(t, out, "tmux attach-session: exit status 1")
 	if mgr.get(15) != nil {
 		t.Fatal("session registered after immediate exit")
 	}
@@ -306,10 +341,9 @@ func TestHandleOpenTmuxNewReturnsOpenErrWhenSessionExitsImmediately(t *testing.T
 func TestHandleOpenControlSendsCloseAfterOpenOK(t *testing.T) {
 	restoreTmuxStubs(t)
 	tmuxKillSession = func(context.Context, string, string) error { return nil }
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxKill, SessionID: "work"})
 	sender, out := newTestSender()
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 13, Payload: payload}, newSessionManager(), sender, context.Background(), context.Background())
+	callOpen(t, 13, relay.OpenRequest{Target: relay.TargetTmuxKill, SessionID: "work"}, newSessionManager(), sender)
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	closeFrame := waitDaemonFrame(t, out, relay.FrameClose)
@@ -320,14 +354,8 @@ func TestHandleOpenControlSendsCloseAfterOpenOK(t *testing.T) {
 
 func TestPumpSendsClosePayloadOnSessionError(t *testing.T) {
 	fake := newDaemonFakeSession()
-	sender, out := newTestSender()
-	mgr := newSessionManager()
-	mgr.setSender(sender)
-	sr := newStreamRelay(fake.is)
-	mgr.add(14, sr)
+	_, _, out := startTestPump(t, fake.is, 14)
 	wantErr := errors.New("tmux attach-session: exit status 1")
-
-	go sr.pump(context.Background(), 14, mgr)
 	fake.done <- wantErr
 
 	closeFrame := waitDaemonFrame(t, out, relay.FrameClose)
@@ -346,13 +374,7 @@ func TestPumpDeliversAllOutput(t *testing.T) {
 		Stdout: &daemonOneByteReader{data: []byte("abc")},
 		Done:   done,
 	}
-	sender, out := newTestSender()
-	mgr := newSessionManager()
-	mgr.setSender(sender)
-	sr := newStreamRelay(is)
-	mgr.add(16, sr)
-
-	go sr.pump(context.Background(), 16, mgr)
+	_, _, out := startTestPump(t, is, 16)
 
 	_, data := waitDataBytes(t, out, 3)
 	if string(data) != "abc" {
@@ -367,13 +389,7 @@ func TestPumpCapsOutputFrameSize(t *testing.T) {
 		Stdout: bytes.NewReader(bytes.Repeat([]byte("x"), 40*1024)),
 		Done:   done,
 	}
-	sender, out := newTestSender()
-	mgr := newSessionManager()
-	mgr.setSender(sender)
-	sr := newStreamRelay(is)
-	mgr.add(17, sr)
-
-	go sr.pump(context.Background(), 17, mgr)
+	_, _, out := startTestPump(t, is, 17)
 
 	var total int
 	var wantSeq uint64
@@ -403,13 +419,7 @@ func TestPumpAppliesWindowBackpressure(t *testing.T) {
 		Stdout: bytes.NewReader(bytes.Repeat([]byte("x"), 2*outputWindowBytes)),
 		Done:   done,
 	}
-	sender, out := newTestSender()
-	mgr := newSessionManager()
-	mgr.setSender(sender)
-	sr := newStreamRelay(is)
-	mgr.add(50, sr)
-
-	go sr.pump(context.Background(), 50, mgr)
+	sr, _, out := startTestPump(t, is, 50)
 
 	_, data := waitDataBytes(t, out, outputWindowBytes)
 	if len(data) != outputWindowBytes {
@@ -444,24 +454,11 @@ func TestHandleOpenResumesFromRetainedOffset(t *testing.T) {
 
 	mgr.clearSender(sender)
 	go func() { _, _ = fake.stdout.Write([]byte("world")) }()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		sr.mu.Lock()
-		end := sr.ring.End()
-		sr.mu.Unlock()
-		if end == 11 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("ring end = %d, want 11", end)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitRingEnd(t, sr, 11)
 
 	sender2, out2 := newTestSender()
 	mgr.setSender(sender2)
-	payload, _ := json.Marshal(relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 3})
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 60, Payload: payload}, mgr, sender2, context.Background(), context.Background())
+	callOpen(t, 60, relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 3}, mgr, sender2)
 
 	waitDaemonFrame(t, out2, relay.FrameOpenOK)
 	seq, data := waitDataBytes(t, out2, 8)
@@ -473,14 +470,10 @@ func TestHandleOpenResumesFromRetainedOffset(t *testing.T) {
 
 func TestHandleOpenResumeUnknownStreamFails(t *testing.T) {
 	sender, out := newTestSender()
-	payload, _ := json.Marshal(relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 10})
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 61, Payload: payload}, newSessionManager(), sender, context.Background(), context.Background())
+	callOpen(t, 61, relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 10}, newSessionManager(), sender)
 
-	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
-	if string(f.Payload) != resumeUnavailableErr {
-		t.Fatalf("open err payload = %q", f.Payload)
-	}
+	wantOpenErr(t, out, resumeUnavailableErr)
 }
 
 func TestHandleOpenResumeBeyondBufferFails(t *testing.T) {
@@ -489,14 +482,10 @@ func TestHandleOpenResumeBeyondBufferFails(t *testing.T) {
 	sr := newStreamRelay(fake.is)
 	mgr.add(62, sr)
 	sender, out := newTestSender()
-	payload, _ := json.Marshal(relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 100})
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 62, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 62, relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 100}, mgr, sender)
 
-	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
-	if string(f.Payload) != resumeUnavailableErr {
-		t.Fatalf("open err payload = %q", f.Payload)
-	}
+	wantOpenErr(t, out, resumeUnavailableErr)
 	_ = fake.stdout.Close()
 }
 
@@ -521,10 +510,9 @@ func TestHandleOpenTmuxErrorTargetsReturnOpenErr(t *testing.T) {
 		{Target: relay.TargetTmuxRename, SessionID: "work", Name: "ops"},
 	}
 	for i, req := range tests {
-		payload, _ := json.Marshal(req)
 		sender, out := newTestSender()
 
-		handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: uint32(i + 20), Payload: payload}, newSessionManager(), sender, context.Background(), context.Background())
+		callOpen(t, uint32(i+20), req, newSessionManager(), sender)
 
 		f := waitDaemonFrame(t, out, relay.FrameOpenErr)
 		if string(f.Payload) != wantErr.Error() {
@@ -602,10 +590,7 @@ func TestHandleFrameDispatchesOpenWithoutBlocking(t *testing.T) {
 
 func TestHandleFrameTmuxOpenKeepsStreamAfterRequestReturns(t *testing.T) {
 	restoreTmuxStubs(t)
-	fake := newDaemonFakeSession()
-	tmuxNewSession = func(context.Context, string, int, int) (*internalssh.InteractiveSession, string, error) {
-		return fake.is, "tmux-abc123", nil
-	}
+	fake := stubTmuxNewFake(t, "tmux-abc123")
 	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
 	sender, out := newTestSender()
 	mgr := newSessionManager()
@@ -644,13 +629,13 @@ func TestHandleOpenTmuxAttachKeepsExistingStream(t *testing.T) {
 		}
 		return second.is, nil
 	}
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxAttach, SessionID: "work"})
+	req := relay.OpenRequest{Target: relay.TargetTmuxAttach, SessionID: "work"}
 	sender, out := newTestSender()
 	mgr := newSessionManager()
 	mgr.setSender(sender)
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 3, Payload: payload}, mgr, sender, context.Background(), context.Background())
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 4, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 3, req, mgr, sender)
+	callOpen(t, 4, req, mgr, sender)
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
@@ -675,11 +660,9 @@ func TestHandleOpenTmuxKillAndRename(t *testing.T) {
 	}
 	sender, out := newTestSender()
 	mgr := newSessionManager()
-	killPayload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxKill, SessionID: "work"})
-	renamePayload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: "work", Name: "ops"})
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 5, Payload: killPayload}, mgr, sender, context.Background(), context.Background())
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 6, Payload: renamePayload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 5, relay.OpenRequest{Target: relay.TargetTmuxKill, SessionID: "work"}, mgr, sender)
+	callOpen(t, 6, relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: "work", Name: "ops"}, mgr, sender)
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
@@ -693,13 +676,7 @@ func TestHandleOpenTmuxKillAndRename(t *testing.T) {
 
 func TestPumpRemovesEndedStream(t *testing.T) {
 	fake := newDaemonFakeSession()
-	sender, out := newTestSender()
-	mgr := newSessionManager()
-	mgr.setSender(sender)
-	sr := newStreamRelay(fake.is)
-	mgr.add(7, sr)
-
-	go sr.pump(context.Background(), 7, mgr)
+	_, mgr, out := startTestPump(t, fake.is, 7)
 
 	_ = fake.stdout.Close()
 	_ = waitDaemonFrame(t, out, relay.FrameClose)
@@ -782,19 +759,7 @@ func TestPumpKeepsEndedStreamForResume(t *testing.T) {
 
 	go sr.pump(context.Background(), 70, mgr)
 	go func() { _, _ = fake.stdout.Write([]byte("tail")) }()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		sr.mu.Lock()
-		end := sr.ring.End()
-		sr.mu.Unlock()
-		if end == 4 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("ring end = %d, want 4", end)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitRingEnd(t, sr, 4)
 	_ = fake.stdout.Close()
 
 	time.Sleep(50 * time.Millisecond)
@@ -804,15 +769,14 @@ func TestPumpKeepsEndedStreamForResume(t *testing.T) {
 
 	sender, out := newTestSender()
 	mgr.setSender(sender)
-	payload, _ := json.Marshal(relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 0})
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 70, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 70, relay.OpenRequest{PeerID: "p", Target: relay.TargetLocal, ResumeFromSeq: 0}, mgr, sender)
 
 	waitDaemonFrame(t, out, relay.FrameOpenOK)
 	if _, data := waitDataBytes(t, out, 4); string(data) != "tail" {
 		t.Fatalf("replay = %q, want tail", data)
 	}
 	_ = waitDaemonFrame(t, out, relay.FrameClose)
-	deadline = time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for mgr.get(70) != nil {
 		if time.Now().After(deadline) {
 			t.Fatal("stream not removed after final flush")
@@ -873,19 +837,19 @@ func TestHandleFrameClientDisconnectedKeepsSession(t *testing.T) {
 	}
 }
 
-func TestClosePayloadIgnoresWrappedEIO(t *testing.T) {
-	err := &os.PathError{Op: "read", Path: "/dev/ptmx", Err: syscall.EIO}
-
-	if got := closePayload(err); len(got) != 0 {
-		t.Fatalf("close payload = %q", got)
+func TestClosePayload(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"ignores wrapped EIO", &os.PathError{Op: "read", Path: "/dev/ptmx", Err: syscall.EIO}, ""},
+		{"includes non-EIO error", errors.New("read failed"), "read failed"},
 	}
-}
-
-func TestClosePayloadIncludesNonEIOError(t *testing.T) {
-	err := errors.New("read failed")
-
-	if got := string(closePayload(err)); got != err.Error() {
-		t.Fatalf("close payload = %q", got)
+	for _, tt := range tests {
+		if got := string(closePayload(tt.err)); got != tt.want {
+			t.Fatalf("%s: close payload = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }
 
@@ -921,17 +885,13 @@ func TestHandleFrameCloseUnknownStreamLoggedAndRecorded(t *testing.T) {
 func TestHandleOpenAbortsWhenCloseArrivedFirst(t *testing.T) {
 	restoreTmuxStubs(t)
 	out := captureStallLog(t)
-	fake := newDaemonFakeSession()
-	tmuxNewSession = func(context.Context, string, int, int) (*internalssh.InteractiveSession, string, error) {
-		return fake.is, "tmux-race", nil
-	}
+	fake := stubTmuxNewFake(t, "tmux-race")
 	mgr := newSessionManager()
 	sender, sink := newTestSender()
 	mgr.setSender(sender)
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxNew})
 	mgr.notePendingClose(2)
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: payload}, mgr, sender, context.Background(), context.Background())
+	callOpen(t, 2, relay.OpenRequest{Target: relay.TargetTmuxNew}, mgr, sender)
 
 	if mgr.get(2) != nil {
 		t.Fatal("stream registered after raced close")
@@ -957,15 +917,11 @@ func TestHandleOpenAbortsWhenCloseArrivedFirst(t *testing.T) {
 
 func TestHandleOpenResumeUnavailableLogged(t *testing.T) {
 	out := captureStallLog(t)
-	payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetLocal, ResumeFromSeq: 9})
 	sender, sink := newTestSender()
 
-	handleOpen(testTmuxRuntime(t), relay.Frame{Type: relay.FrameOpen, StreamID: 9, Payload: payload}, newSessionManager(), sender, context.Background(), context.Background())
+	callOpen(t, 9, relay.OpenRequest{Target: relay.TargetLocal, ResumeFromSeq: 9}, newSessionManager(), sender)
 
-	f := waitDaemonFrame(t, sink, relay.FrameOpenErr)
-	if string(f.Payload) != resumeUnavailableErr {
-		t.Fatalf("open err payload = %q", f.Payload)
-	}
+	wantOpenErr(t, sink, resumeUnavailableErr)
 	logs := out.String()
 	if !strings.Contains(logs, "stream=9 resume=9 rejected") {
 		t.Fatalf("resume rejection not logged: %q", logs)

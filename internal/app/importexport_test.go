@@ -10,146 +10,95 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/sshconfig"
 )
 
-func TestHostFromParsedImportsGSSAPIAuthentication(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "import.db"))
-	if err != nil {
-		t.Fatal(err)
+func TestHostFromParsedAuthMethod(t *testing.T) {
+	tests := []struct {
+		name   string
+		parsed sshconfig.ParsedHost
+		check  func(t *testing.T, host db.Host, keyID uint)
+	}{
+		{
+			name: "gssapi authentication",
+			parsed: sshconfig.ParsedHost{
+				Alias: "kerberos", Hostname: "kerberos.example.com", Port: 22, Username: "alice",
+				IdentFile: "/tmp/id_test", GSSAPIAuthentication: true,
+			},
+			check: func(t *testing.T, host db.Host, keyID uint) {
+				if host.AuthMethod != "gssapi" {
+					t.Fatalf("got auth %q", host.AuthMethod)
+				}
+				if host.GSSAPISource != "ccache" {
+					t.Fatalf("got source %q", host.GSSAPISource)
+				}
+				if host.KeyID != nil {
+					t.Fatalf("expected key to be cleared, got %v", *host.KeyID)
+				}
+			},
+		},
+		{
+			name: "prefers gssapi when listed first",
+			parsed: sshconfig.ParsedHost{
+				Alias: "kerberos", Hostname: "kerberos.example.com", Port: 22, Username: "alice",
+				IdentFile: "/tmp/id_test", PreferredAuthentications: []string{"gssapi-with-mic", "publickey"},
+			},
+			check: func(t *testing.T, host db.Host, keyID uint) {
+				if host.AuthMethod != "gssapi" {
+					t.Fatalf("got auth %q", host.AuthMethod)
+				}
+			},
+		},
+		{
+			name: "prefers publickey when listed first",
+			parsed: sshconfig.ParsedHost{
+				Alias: "kerberos", Hostname: "kerberos.example.com", Port: 22, Username: "alice",
+				IdentFile: "/tmp/id_test", PreferredAuthentications: []string{"publickey", "gssapi-with-mic"},
+			},
+			check: func(t *testing.T, host db.Host, keyID uint) {
+				if host.AuthMethod != "key" {
+					t.Fatalf("got auth %q", host.AuthMethod)
+				}
+				if host.KeyID == nil || *host.KeyID != keyID {
+					t.Fatalf("got key id %#v want %d", host.KeyID, keyID)
+				}
+			},
+		},
+		{
+			name: "identity file without gssapi",
+			parsed: sshconfig.ParsedHost{
+				Alias: "plain", Hostname: "plain.example.com", Port: 22, Username: "alice",
+				IdentFile: "/tmp/id_test",
+			},
+			check: func(t *testing.T, host db.Host, keyID uint) {
+				if host.AuthMethod != "key" {
+					t.Fatalf("got auth %q", host.AuthMethod)
+				}
+				if host.KeyID == nil || *host.KeyID != keyID {
+					t.Fatalf("got key id %#v want %d", host.KeyID, keyID)
+				}
+			},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database := appTestDB(t)
+			key := db.SSHKey{
+				SyncID:      "key-test",
+				Name:        "id_test",
+				Type:        "ed25519",
+				Fingerprint: "fp-test",
+				PrivatePath: "/tmp/id_test",
+			}
+			if err := database.Create(&key).Error; err != nil {
+				t.Fatal(err)
+			}
 
-	key := db.SSHKey{
-		SyncID:      "key-gssapi",
-		Name:        "id_gssapi",
-		Type:        "ed25519",
-		Fingerprint: "fp-gssapi",
-		PrivatePath: "/tmp/id_gssapi",
-	}
-	if err := database.Create(&key).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	host := hostFromParsed(database, sshconfig.ParsedHost{
-		Alias:                "kerberos",
-		Hostname:             "kerberos.example.com",
-		Port:                 22,
-		Username:             "alice",
-		IdentFile:            "/tmp/id_gssapi",
-		GSSAPIAuthentication: true,
-	})
-
-	if host.AuthMethod != "gssapi" {
-		t.Fatalf("got auth %q", host.AuthMethod)
-	}
-	if host.GSSAPISource != "ccache" {
-		t.Fatalf("got source %q", host.GSSAPISource)
-	}
-	if host.KeyID != nil {
-		t.Fatalf("expected key to be cleared, got %v", *host.KeyID)
-	}
-}
-
-func TestHostFromParsedPrefersGSSAPIWhenListedFirst(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "prefer-gssapi.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	key := db.SSHKey{
-		SyncID:      "key-prefer-gssapi",
-		Name:        "id_prefer_gssapi",
-		Type:        "ed25519",
-		Fingerprint: "fp-prefer-gssapi",
-		PrivatePath: "/tmp/id_prefer_gssapi",
-	}
-	if err := database.Create(&key).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	host := hostFromParsed(database, sshconfig.ParsedHost{
-		Alias:                    "kerberos",
-		Hostname:                 "kerberos.example.com",
-		Port:                     22,
-		Username:                 "alice",
-		IdentFile:                "/tmp/id_prefer_gssapi",
-		PreferredAuthentications: []string{"gssapi-with-mic", "publickey"},
-	})
-
-	if host.AuthMethod != "gssapi" {
-		t.Fatalf("got auth %q", host.AuthMethod)
-	}
-}
-
-func TestHostFromParsedPrefersPublicKeyWhenListedFirst(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "prefer-key.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	key := db.SSHKey{
-		SyncID:      "key-prefer-publickey",
-		Name:        "id_prefer_publickey",
-		Type:        "ed25519",
-		Fingerprint: "fp-prefer-publickey",
-		PrivatePath: "/tmp/id_prefer_publickey",
-	}
-	if err := database.Create(&key).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	host := hostFromParsed(database, sshconfig.ParsedHost{
-		Alias:                    "kerberos",
-		Hostname:                 "kerberos.example.com",
-		Port:                     22,
-		Username:                 "alice",
-		IdentFile:                "/tmp/id_prefer_publickey",
-		PreferredAuthentications: []string{"publickey", "gssapi-with-mic"},
-	})
-
-	if host.AuthMethod != "key" {
-		t.Fatalf("got auth %q", host.AuthMethod)
-	}
-	if host.KeyID == nil || *host.KeyID != key.ID {
-		t.Fatalf("got key id %#v want %d", host.KeyID, key.ID)
-	}
-}
-
-func TestHostFromParsedUsesIdentityFileWithoutGSSAPI(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "identity.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	key := db.SSHKey{
-		SyncID:      "key-identity",
-		Name:        "id_identity",
-		Type:        "ed25519",
-		Fingerprint: "fp-identity",
-		PrivatePath: "/tmp/id_identity",
-	}
-	if err := database.Create(&key).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	host := hostFromParsed(database, sshconfig.ParsedHost{
-		Alias:     "plain",
-		Hostname:  "plain.example.com",
-		Port:      22,
-		Username:  "alice",
-		IdentFile: "/tmp/id_identity",
-	})
-
-	if host.AuthMethod != "key" {
-		t.Fatalf("got auth %q", host.AuthMethod)
-	}
-	if host.KeyID == nil || *host.KeyID != key.ID {
-		t.Fatalf("got key id %#v want %d", host.KeyID, key.ID)
+			host := hostFromParsed(database, tt.parsed)
+			tt.check(t, host, key.ID)
+		})
 	}
 }
 
 func TestBuildSSHConfigImportPreviewCountsAddedChangedSkipped(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "preview.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := appTestDB(t)
 
 	same := db.Host{Alias: "same", Hostname: "same.example.com", Port: 22, Username: "root", AuthMethod: "agent"}
 	changed := db.Host{Alias: "changed", Hostname: "old.example.com", Port: 22, Username: "root", AuthMethod: "agent"}
@@ -189,10 +138,7 @@ Host prod
 	if err := os.WriteFile(filepath.Join(sshDir, "config"), config, 0600); err != nil {
 		t.Fatal(err)
 	}
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "import-identity.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := appTestDB(t)
 
 	msg := importSSHConfig(database, "skip")
 	if msg.Err != nil {
@@ -227,10 +173,7 @@ func TestImportSSHConfigImportsStandaloneSSHKeyWithoutConfig(t *testing.T) {
 	}
 	keyPath := filepath.Join(sshDir, "id_ed25519")
 	writeTestPrivateKey(t, keyPath)
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "import-key-only.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := appTestDB(t)
 
 	msg := importSSHConfig(database, "skip")
 	if msg.Err != nil {

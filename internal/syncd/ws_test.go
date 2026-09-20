@@ -43,43 +43,72 @@ func captureSyncdLog(t *testing.T) *lockedLogBuf {
 	return b
 }
 
-func TestWebSocketRelayData(t *testing.T) {
+func wsBase(server *httptest.Server) string {
+	return "ws" + strings.TrimPrefix(server.URL, "http")
+}
+
+func relayServer(t *testing.T) (*httptest.Server, *Engine, context.Context) {
+	t.Helper()
 	engine := testEngine(t)
-	handler := NewHTTPHandler(engine, "")
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
+	server := httptest.NewServer(NewHTTPHandler(engine, ""))
+	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
+	t.Cleanup(cancel)
+	return server, engine, ctx
+}
 
-	daemon, _, err := websocket.Dial(ctx, base+"/api/v1/ws/daemon", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	daemon.SetReadLimit(relay.MaxWebSocketMessageBytes)
-	defer daemon.CloseNow()
-	client, _, err := websocket.Dial(ctx, base+"/api/v1/ws/client", &websocket.DialOptions{
-		HTTPHeader: http.Header{"X-ETerm-Tenant": []string{"tenant-a"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	client.SetReadLimit(relay.MaxWebSocketMessageBytes)
-	defer client.CloseNow()
-
-	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: relay.ProtocolVersion})
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
-		t.Fatal(err)
-	}
+func relaySetup(t *testing.T) (*httptest.Server, *Engine, *websocket.Conn, context.Context) {
+	t.Helper()
+	server, engine, ctx := relayServer(t)
+	daemon := relayDial(t, ctx, wsBase(server), "/api/v1/ws/daemon", nil)
+	daemonHello(t, ctx, daemon, "peer-a")
 	waitPeer(t, server.URL)
+	return server, engine, daemon, ctx
+}
 
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 99, Payload: openPayload})); err != nil {
+func relayDial(t *testing.T, ctx context.Context, base, path string, header http.Header) *websocket.Conn {
+	t.Helper()
+	c, _, err := websocket.Dial(ctx, base+path, &websocket.DialOptions{HTTPHeader: header})
+	if err != nil {
 		t.Fatal(err)
 	}
+	c.SetReadLimit(relay.MaxWebSocketMessageBytes)
+	t.Cleanup(func() { c.CloseNow() })
+	return c
+}
 
-	_, data, err := daemon.Read(ctx)
+func daemonHello(t *testing.T, ctx context.Context, daemon *websocket.Conn, peerID string) {
+	t.Helper()
+	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: peerID, Name: "host", Version: relay.ProtocolVersion})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameHello, Payload: hello})
+}
+
+func waitPeer(t *testing.T, baseURL string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: time.Second}
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest("GET", baseURL+"/api/v1/peers", nil)
+		req.Header.Set("X-ETerm-Tenant", "tenant-a")
+		resp, err := client.Do(req)
+		if err == nil {
+			var body struct {
+				Peers []PeerInfo `json:"peers"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&body)
+			resp.Body.Close()
+			if len(body.Peers) == 1 && body.Peers[0].ID == "peer-a" {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("peer did not register")
+}
+
+func readFrame(t *testing.T, ctx context.Context, c *websocket.Conn) relay.Frame {
+	t.Helper()
+	_, data, err := c.Read(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,105 +116,126 @@ func TestWebSocketRelayData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.Type != relay.FrameOpen || f.StreamID != 99 {
-		t.Fatalf("got frame %#v, want OPEN stream 99", f)
-	}
+	return f
+}
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: 99})); err != nil {
+func writeFrame(t *testing.T, ctx context.Context, c *websocket.Conn, f relay.Frame) {
+	t.Helper()
+	if err := c.Write(ctx, websocket.MessageBinary, relay.Encode(f)); err != nil {
 		t.Fatal(err)
 	}
-	_, data, err = client.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func expectFrame(t *testing.T, ctx context.Context, c *websocket.Conn, typ relay.FrameType, streamID uint32) relay.Frame {
+	t.Helper()
+	f := readFrame(t, ctx, c)
+	if f.Type != typ || f.StreamID != streamID {
+		t.Fatalf("got frame %#v, want type %#x stream %d", f, byte(typ), streamID)
 	}
-	f, err = relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
+	return f
+}
+
+func expectAck(t *testing.T, ctx context.Context, c *websocket.Conn, want uint64) relay.Frame {
+	t.Helper()
+	f := readFrame(t, ctx, c)
+	ack, err := relay.ParseAck(f.Payload)
+	if f.Type != relay.FrameAck || err != nil || ack != want {
+		t.Fatalf("got frame %#v, want ACK %d", f, want)
 	}
-	if f.Type != relay.FrameOpenOK || f.StreamID != 99 {
-		t.Fatalf("got frame %#v, want OPEN_OK stream 99", f)
+	return f
+}
+
+func openLocal(t *testing.T, ctx context.Context, c *websocket.Conn, streamID uint32) {
+	t.Helper()
+	payload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
+	writeFrame(t, ctx, c, relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload})
+}
+
+func setLaneSendTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := laneSendBlockTimeout
+	laneSendBlockTimeout = d
+	t.Cleanup(func() { laneSendBlockTimeout = old })
+}
+
+func blockedSend(t *testing.T, q *laneQueue, ctx context.Context, bulk bool) chan bool {
+	t.Helper()
+	done := make(chan bool, 1)
+	go func() { done <- q.send(ctx, relay.Frame{Type: relay.FrameData, StreamID: 2}, bulk) }()
+	select {
+	case ok := <-done:
+		t.Fatalf("send returned %v with a full queue", ok)
+	case <-time.After(20 * time.Millisecond):
 	}
+	return done
+}
+
+func sendResult(t *testing.T, done chan bool, want bool, trigger string) {
+	t.Helper()
+	select {
+	case ok := <-done:
+		if ok != want {
+			t.Fatalf("send returned %v after %s, want %v", ok, trigger, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("send did not return after %s", trigger)
+	}
+}
+
+func tenantHeader() http.Header {
+	return http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+}
+
+func TestWebSocketRelayData(t *testing.T) {
+	server, _, daemon, ctx := relaySetup(t)
+	client := relayDial(t, ctx, wsBase(server), "/api/v1/ws/client", tenantHeader())
+
+	openLocal(t, ctx, client, 99)
+	expectFrame(t, ctx, daemon, relay.FrameOpen, 99)
+
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: 99})
+	expectFrame(t, ctx, client, relay.FrameOpenOK, 99)
 
 	ansiPayload := relay.DataPayload(0, []byte("\x1b[48;2;47;52;58m  \x1b[0m\x1b]10;?\x1b\\"))
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: ansiPayload})); err != nil {
-		t.Fatal(err)
-	}
-	_, data, err = client.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err = relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, ansiPayload) {
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: ansiPayload})
+	if f := readFrame(t, ctx, client); f.Type != relay.FrameData || !bytes.Equal(f.Payload, ansiPayload) {
 		t.Fatalf("got frame %#v, want DATA %q", f, ansiPayload)
 	}
 
 	largePayload := relay.DataPayload(100, bytes.Repeat([]byte("x"), 40*1024))
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: largePayload})); err != nil {
-		t.Fatal(err)
-	}
-	_, data, err = client.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err = relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, largePayload) {
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: largePayload})
+	if f := readFrame(t, ctx, client); f.Type != relay.FrameData || !bytes.Equal(f.Payload, largePayload) {
 		t.Fatalf("got frame type=%#v len=%d, want DATA len=%d", f.Type, len(f.Payload), len(largePayload))
 	}
 
-	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(41 * 1024)})); err != nil {
-		t.Fatal(err)
-	}
-	_, data, err = daemon.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err = relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ack, err := relay.ParseAck(f.Payload)
-	if f.Type != relay.FrameAck || err != nil || ack != 41*1024 {
-		t.Fatalf("got frame %#v, want ACK %d", f, 41*1024)
-	}
+	writeFrame(t, ctx, client, relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(41 * 1024)})
+	expectAck(t, ctx, daemon, 41*1024)
 }
 
-func TestDaemonHelloVersionMismatchRejected(t *testing.T) {
-	engine := testEngine(t)
-	handler := NewHTTPHandler(engine, "")
-	server := httptest.NewServer(handler)
-	defer server.Close()
+func TestHelloVersionMismatchRejected(t *testing.T) {
+	server, _, ctx := relayServer(t)
+	base := wsBase(server)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-
-	daemon, _, err := websocket.Dial(ctx, base+"/api/v1/ws/daemon", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	daemon.SetReadLimit(relay.MaxWebSocketMessageBytes)
-	defer daemon.CloseNow()
-
-	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Version: 1})
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
-		t.Fatal(err)
-	}
-	_, data, err := daemon.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Type != relay.FrameHelloErr || !strings.Contains(string(f.Payload), "protocol version") {
-		t.Fatalf("got frame %#v, want HELLO_ERR", f)
+	for _, tc := range []struct {
+		name     string
+		path     string
+		header   http.Header
+		role     string
+		versions []int
+	}{
+		{"daemon", "/api/v1/ws/daemon", nil, "daemon", []int{1}},
+		{"client", "/api/v1/ws/client", tenantHeader(), "client", []int{0, 1}},
+	} {
+		for _, version := range tc.versions {
+			conn := relayDial(t, ctx, base, tc.path, tc.header)
+			hello, _ := json.Marshal(relay.HelloPayload{Role: tc.role, Tenant: "tenant-a", PeerID: "peer-a", Version: version})
+			writeFrame(t, ctx, conn, relay.Frame{Type: relay.FrameHello, Payload: hello})
+			f := readFrame(t, ctx, conn)
+			if f.Type != relay.FrameHelloErr || !strings.Contains(string(f.Payload), "protocol version") {
+				t.Fatalf("%s version %d: got frame %#v, want HELLO_ERR", tc.name, version, f)
+			}
+			conn.CloseNow()
+		}
 	}
 }
 
@@ -193,27 +243,9 @@ func TestLaneQueueSendBlocksUntilSpace(t *testing.T) {
 	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1)}
 	q.ctrl <- relay.Frame{Type: relay.FrameData, StreamID: 1}
 
-	ctx := context.Background()
-	done := make(chan bool, 1)
-	go func() {
-		done <- q.send(ctx, relay.Frame{Type: relay.FrameData, StreamID: 2}, false)
-	}()
-
-	select {
-	case ok := <-done:
-		t.Fatalf("send returned %v before queue space was available", ok)
-	case <-time.After(20 * time.Millisecond):
-	}
-
+	done := blockedSend(t, q, context.Background(), false)
 	<-q.ctrl
-	select {
-	case ok := <-done:
-		if !ok {
-			t.Fatal("send returned false after queue space was available")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("send did not unblock after queue space was available")
-	}
+	sendResult(t, done, true, "queue space became available")
 
 	got := <-q.ctrl
 	if got.StreamID != 2 {
@@ -226,24 +258,18 @@ func TestLaneQueueSendReturnsFalseOnContextCancel(t *testing.T) {
 	q.bulk <- relay.Frame{Type: relay.FrameData, StreamID: 1}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan bool, 1)
-	go func() {
-		done <- q.send(ctx, relay.Frame{Type: relay.FrameData, StreamID: 2}, true)
-	}()
-	select {
-	case ok := <-done:
-		t.Fatalf("send returned %v with full bulk queue", ok)
-	case <-time.After(20 * time.Millisecond):
-	}
+	done := blockedSend(t, q, ctx, true)
 	cancel()
-	select {
-	case ok := <-done:
-		if ok {
-			t.Fatal("send returned true after context cancel")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("send did not return after context cancel")
-	}
+	sendResult(t, done, false, "context cancel")
+}
+
+func TestLaneQueueSendUnblocksWhenOwnerCloses(t *testing.T) {
+	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
+	q.bulk <- relay.Frame{Type: relay.FrameData, StreamID: 1}
+
+	done := blockedSend(t, q, context.Background(), true)
+	q.close()
+	sendResult(t, done, false, "owner closed")
 }
 
 func TestCloseDaemonSessionsMarksCloseAsAbnormal(t *testing.T) {
@@ -288,213 +314,44 @@ func TestCloseClientSessionsKeepsDaemonSide(t *testing.T) {
 	}
 }
 
-func TestLaneQueueSendUnblocksWhenOwnerCloses(t *testing.T) {
-	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
-	q.bulk <- relay.Frame{Type: relay.FrameData, StreamID: 1}
-
-	done := make(chan bool, 1)
-	go func() {
-		done <- q.send(context.Background(), relay.Frame{Type: relay.FrameData, StreamID: 2}, true)
-	}()
-	select {
-	case ok := <-done:
-		t.Fatalf("send returned %v with full bulk queue", ok)
-	case <-time.After(20 * time.Millisecond):
-	}
-	q.close()
-	select {
-	case ok := <-done:
-		if ok {
-			t.Fatal("send returned true after owner closed")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("send did not return after owner closed")
-	}
-}
-
-func waitPeer(t *testing.T, baseURL string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	client := &http.Client{Timeout: time.Second}
-	for time.Now().Before(deadline) {
-		req, _ := http.NewRequest("GET", baseURL+"/api/v1/peers", nil)
-		req.Header.Set("X-ETerm-Tenant", "tenant-a")
-		resp, err := client.Do(req)
-		if err == nil {
-			var body struct {
-				Peers []PeerInfo `json:"peers"`
-			}
-			_ = json.NewDecoder(resp.Body).Decode(&body)
-			resp.Body.Close()
-			if len(body.Peers) == 1 && body.Peers[0].ID == "peer-a" {
-				return
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("peer did not register")
-}
-
-func TestClientHelloVersionMismatchRejected(t *testing.T) {
-	engine := testEngine(t)
-	handler := NewHTTPHandler(engine, "")
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-
-	for _, version := range []int{0, 1} {
-		client, _, err := websocket.Dial(ctx, base+"/api/v1/ws/client", &websocket.DialOptions{
-			HTTPHeader: http.Header{"X-ETerm-Tenant": []string{"tenant-a"}},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		client.SetReadLimit(relay.MaxWebSocketMessageBytes)
-
-		hello, _ := json.Marshal(relay.HelloPayload{Role: "client", Tenant: "tenant-a", Version: version})
-		if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
-			t.Fatal(err)
-		}
-		_, data, err := client.Read(ctx)
-		if err != nil {
-			t.Fatalf("version %d: %v", version, err)
-		}
-		f, err := relay.Decode(data)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if f.Type != relay.FrameHelloErr || !strings.Contains(string(f.Payload), "protocol version") {
-			t.Fatalf("version %d: got frame %#v, want HELLO_ERR", version, f)
-		}
-		client.CloseNow()
-	}
-}
-
-func readFrame(t *testing.T, ctx context.Context, c *websocket.Conn) relay.Frame {
-	t.Helper()
-	_, data, err := c.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
-
-func relayDial(t *testing.T, ctx context.Context, base, path string, header http.Header) *websocket.Conn {
-	t.Helper()
-	c, _, err := websocket.Dial(ctx, base+path, &websocket.DialOptions{HTTPHeader: header})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.SetReadLimit(relay.MaxWebSocketMessageBytes)
-	t.Cleanup(func() { c.CloseNow() })
-	return c
-}
-
-func daemonHello(t *testing.T, ctx context.Context, daemon *websocket.Conn, peerID string) {
-	t.Helper()
-	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: peerID, Name: "host", Version: relay.ProtocolVersion})
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestClientWSForeignStreamFrameDropped(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, daemon, ctx := relaySetup(t)
+	base := wsBase(server)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+	client1 := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
+	client2 := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
 
-	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
-	daemonHello(t, ctx, daemon, "peer-a")
-	waitPeer(t, server.URL)
+	openLocal(t, ctx, client1, 99)
+	expectFrame(t, ctx, daemon, relay.FrameOpen, 99)
 
-	client1 := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-	client2 := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	if err := client1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 99, Payload: openPayload})); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 99 {
-		t.Fatalf("got frame %#v, want OPEN stream 99", f)
-	}
-
-	if err := client2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(111)})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, client2, relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(111)})
 	time.Sleep(50 * time.Millisecond)
-	if err := client1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(222)})); err != nil {
-		t.Fatal(err)
-	}
-	f := readFrame(t, ctx, daemon)
-	ack, err := relay.ParseAck(f.Payload)
-	if f.Type != relay.FrameAck || err != nil || ack != 222 {
-		t.Fatalf("got frame %#v, want owner ACK 222 (injected 111 must be dropped)", f)
-	}
+	writeFrame(t, ctx, client1, relay.Frame{Type: relay.FrameAck, StreamID: 99, Payload: relay.AckPayload(222)})
+	expectAck(t, ctx, daemon, 222)
 }
 
 func TestDaemonWSForeignStreamFrameDropped(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, daemon1, ctx := relaySetup(t)
+	base := wsBase(server)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
-
-	daemon1 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
-	daemonHello(t, ctx, daemon1, "peer-a")
-	waitPeer(t, server.URL)
 	daemon2 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
 	daemonHello(t, ctx, daemon2, "peer-b")
 
-	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 99, Payload: openPayload})); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon1); f.Type != relay.FrameOpen || f.StreamID != 99 {
-		t.Fatalf("got frame %#v, want OPEN stream 99", f)
-	}
+	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
+	openLocal(t, ctx, client, 99)
+	expectFrame(t, ctx, daemon1, relay.FrameOpen, 99)
 
-	if err := daemon2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("injected"))})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, daemon2, relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("injected"))})
 	time.Sleep(50 * time.Millisecond)
-	if err := daemon1.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("legit"))})); err != nil {
-		t.Fatal(err)
-	}
-	f := readFrame(t, ctx, client)
-	if f.Type != relay.FrameData || !bytes.Equal(f.Payload, relay.DataPayload(0, []byte("legit"))) {
+	writeFrame(t, ctx, daemon1, relay.Frame{Type: relay.FrameData, StreamID: 99, Payload: relay.DataPayload(0, []byte("legit"))})
+	if f := readFrame(t, ctx, client); f.Type != relay.FrameData || !bytes.Equal(f.Payload, relay.DataPayload(0, []byte("legit"))) {
 		t.Fatalf("got frame %#v, want owner DATA legit (injected must be dropped)", f)
 	}
 }
 
 func TestDaemonWSDuplicatePeerReplaced(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
-
-	daemon1 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
-	daemonHello(t, ctx, daemon1, "peer-a")
-	waitPeer(t, server.URL)
+	server, _, daemon1, ctx := relaySetup(t)
+	base := wsBase(server)
 
 	daemon2 := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
 	daemonHello(t, ctx, daemon2, "peer-a")
@@ -503,20 +360,11 @@ func TestDaemonWSDuplicatePeerReplaced(t *testing.T) {
 		t.Fatal("replaced daemon connection still readable")
 	}
 
-	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	if err := client.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 42, Payload: openPayload})); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon2); f.Type != relay.FrameOpen || f.StreamID != 42 {
-		t.Fatalf("got frame %#v, want OPEN stream 42 on replacement connection", f)
-	}
-	if err := daemon2.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: 42})); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, client); f.Type != relay.FrameOpenOK || f.StreamID != 42 {
-		t.Fatalf("got frame %#v, want OPEN_OK stream 42", f)
-	}
+	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
+	openLocal(t, ctx, client, 42)
+	expectFrame(t, ctx, daemon2, relay.FrameOpen, 42)
+	writeFrame(t, ctx, daemon2, relay.Frame{Type: relay.FrameOpenOK, StreamID: 42})
+	expectFrame(t, ctx, client, relay.FrameOpenOK, 42)
 }
 
 func TestWriteWSPanicRecovered(t *testing.T) {
@@ -533,7 +381,7 @@ func TestWriteWSPanicRecovered(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	c, _, err := websocket.Dial(ctx, wsBase(server), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,9 +401,7 @@ func TestWriteWSPanicRecovered(t *testing.T) {
 }
 
 func TestLaneQueueSendTimeoutClosesConn(t *testing.T) {
-	old := laneSendBlockTimeout
-	laneSendBlockTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { laneSendBlockTimeout = old })
+	setLaneSendTimeout(t, 50*time.Millisecond)
 	logs := captureSyncdLog(t)
 
 	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
@@ -583,9 +429,7 @@ func TestLaneQueueSendTimeoutClosesConn(t *testing.T) {
 }
 
 func TestLaneQueueSendTimeoutSparesSlowClient(t *testing.T) {
-	old := laneSendBlockTimeout
-	laneSendBlockTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { laneSendBlockTimeout = old })
+	setLaneSendTimeout(t, 200*time.Millisecond)
 	logs := captureSyncdLog(t)
 
 	q := &laneQueue{ctrl: make(chan relay.Frame, 1), bulk: make(chan relay.Frame, 1), done: make(chan struct{})}
@@ -614,40 +458,19 @@ func TestLaneQueueSendTimeoutSparesSlowClient(t *testing.T) {
 }
 
 func TestDaemonWSZombieClientReclaimed(t *testing.T) {
-	old := laneSendBlockTimeout
-	laneSendBlockTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { laneSendBlockTimeout = old })
+	setLaneSendTimeout(t, 200*time.Millisecond)
 	logs := captureSyncdLog(t)
 
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, daemon, ctx := relaySetup(t)
+	base := wsBase(server)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+	zombie := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
+	healthy := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
 
-	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
-	daemonHello(t, ctx, daemon, "peer-a")
-	waitPeer(t, server.URL)
-
-	zombie := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-	healthy := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	if err := zombie.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 1, Payload: openPayload})); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 1 {
-		t.Fatalf("got frame %#v, want OPEN stream 1", f)
-	}
-	if err := healthy.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 2, Payload: openPayload})); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 2 {
-		t.Fatalf("got frame %#v, want OPEN stream 2", f)
-	}
+	openLocal(t, ctx, zombie, 1)
+	expectFrame(t, ctx, daemon, relay.FrameOpen, 1)
+	openLocal(t, ctx, healthy, 2)
+	expectFrame(t, ctx, daemon, relay.FrameOpen, 2)
 
 	var stopFlood atomic.Bool
 	floodDone := make(chan struct{})
@@ -669,9 +492,7 @@ func TestDaemonWSZombieClientReclaimed(t *testing.T) {
 	}
 
 	dataPayload := relay.DataPayload(1, []byte("after-reclaim"))
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 2, Payload: dataPayload})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: 2, Payload: dataPayload})
 	if f := readFrame(t, ctx, healthy); f.Type != relay.FrameData || !bytes.Equal(f.Payload, dataPayload) {
 		t.Fatalf("healthy stream got frame %#v, want DATA after-reclaim", f)
 	}
@@ -689,91 +510,45 @@ func TestDaemonWSZombieClientReclaimed(t *testing.T) {
 }
 
 func TestClientWSDuplicateOpenTakesOver(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, daemon, ctx := relaySetup(t)
+	base := wsBase(server)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
+	oldClient := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
+	newClient := relayDial(t, ctx, base, "/api/v1/ws/client", tenantHeader())
 
-	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
-	daemonHello(t, ctx, daemon, "peer-a")
-	waitPeer(t, server.URL)
-
-	oldClient := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-	newClient := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	open := relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 7, Payload: openPayload})
-	if err := oldClient.Write(ctx, websocket.MessageBinary, open); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 7 {
-		t.Fatalf("got frame %#v, want OPEN stream 7", f)
-	}
-
-	if err := newClient.Write(ctx, websocket.MessageBinary, open); err != nil {
-		t.Fatal(err)
-	}
-	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 7 {
-		t.Fatalf("got frame %#v, want takeover OPEN stream 7 forwarded to daemon", f)
-	}
+	openLocal(t, ctx, oldClient, 7)
+	expectFrame(t, ctx, daemon, relay.FrameOpen, 7)
+	openLocal(t, ctx, newClient, 7)
+	expectFrame(t, ctx, daemon, relay.FrameOpen, 7)
 	if f := readFrame(t, ctx, oldClient); f.Type != relay.FrameClose || f.StreamID != 7 || string(f.Payload) != relay.CloseSessionTakenOver {
 		t.Fatalf("old conn got frame %#v, want CLOSE stream 7 taken-over", f)
 	}
 
 	dataPayload := relay.DataPayload(1, []byte("after-takeover"))
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 7, Payload: dataPayload})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: 7, Payload: dataPayload})
 	if f := readFrame(t, ctx, newClient); f.Type != relay.FrameData || !bytes.Equal(f.Payload, dataPayload) {
 		t.Fatalf("new conn got frame %#v, want DATA after-takeover", f)
 	}
 
 	oldClient.CloseNow()
 	time.Sleep(100 * time.Millisecond)
-	if err := newClient.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameAck, StreamID: 7, Payload: relay.AckPayload(15)})); err != nil {
-		t.Fatal(err)
-	}
-	f := readFrame(t, ctx, daemon)
-	ack, err := relay.ParseAck(f.Payload)
-	if f.Type != relay.FrameAck || f.StreamID != 7 || err != nil || ack != 15 {
+	writeFrame(t, ctx, newClient, relay.Frame{Type: relay.FrameAck, StreamID: 7, Payload: relay.AckPayload(15)})
+	if f := expectAck(t, ctx, daemon, 15); f.StreamID != 7 {
 		t.Fatalf("got frame %#v after old conn close, want ACK 15 stream 7 (taken-over stream must not be closed)", f)
 	}
 }
 
 func TestClientWSDuplicateOpenSameConnNoTakeoverNotice(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, daemon, ctx := relaySetup(t)
+	client := relayDial(t, ctx, wsBase(server), "/api/v1/ws/client", tenantHeader())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	tenant := http.Header{"X-ETerm-Tenant": []string{"tenant-a"}}
-
-	daemon := relayDial(t, ctx, base, "/api/v1/ws/daemon", nil)
-	daemonHello(t, ctx, daemon, "peer-a")
-	waitPeer(t, server.URL)
-
-	client := relayDial(t, ctx, base, "/api/v1/ws/client", tenant)
-	openPayload, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-a", Target: "local"})
-	open := relay.Encode(relay.Frame{Type: relay.FrameOpen, StreamID: 7, Payload: openPayload})
 	for i := 0; i < 2; i++ {
-		if err := client.Write(ctx, websocket.MessageBinary, open); err != nil {
-			t.Fatal(err)
-		}
-		if f := readFrame(t, ctx, daemon); f.Type != relay.FrameOpen || f.StreamID != 7 {
-			t.Fatalf("open %d: got frame %#v, want OPEN stream 7", i, f)
-		}
+		openLocal(t, ctx, client, 7)
+		expectFrame(t, ctx, daemon, relay.FrameOpen, 7)
 	}
 
 	dataPayload := relay.DataPayload(1, []byte("still-mine"))
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: 7, Payload: dataPayload})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: 7, Payload: dataPayload})
 	if f := readFrame(t, ctx, client); f.Type != relay.FrameData || !bytes.Equal(f.Payload, dataPayload) {
 		t.Fatalf("got frame %#v, want DATA still-mine (same-conn re-open must not self-close)", f)
 	}

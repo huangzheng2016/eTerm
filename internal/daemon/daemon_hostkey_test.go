@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"net"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,10 +72,7 @@ func serveTestSSHConn(conn net.Conn, cfg *ssh.ServerConfig) {
 
 func testHostRuntime(t *testing.T, port int) *runtimeConfig {
 	t.Helper()
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := testDaemonDB(t)
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.Setup([]byte("pw"))
 	secKey := mk.GetKey()

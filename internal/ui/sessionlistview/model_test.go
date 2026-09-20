@@ -25,6 +25,33 @@ func sessionTestDB(t *testing.T) *gorm.DB {
 	return database
 }
 
+func openTranscriptDetail(t *testing.T) (*Model, *gorm.DB, db.ConnectionHistory) {
+	t.Helper()
+	database := sessionTestDB(t)
+	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
+	if err := database.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	m := New(database)
+	loaded := m.reload()().(loadedMsg)
+	m.rows, m.loaded = loaded.rows, true
+	if len(m.rows) != 1 || m.rows[0].Transcript != "" {
+		t.Fatalf("list rows = %+v", m.rows)
+	}
+	m.SetSize(80, 20)
+	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m = updated.(*Model)
+	if cmd == nil || m.detail {
+		t.Fatalf("enter cmd=%v detail=%v", cmd, m.detail)
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(*Model)
+	if !m.detail {
+		t.Fatal("detail not open")
+	}
+	return m, database, row
+}
+
 func TestGlobalSessionSearchMatchesMetadataOnly(t *testing.T) {
 	database := sessionTestDB(t)
 	now := time.Now()
@@ -134,27 +161,9 @@ func TestSessionSearchDebounce(t *testing.T) {
 }
 
 func TestEnterLoadsTranscriptDetailByID(t *testing.T) {
-	database := sessionTestDB(t)
-	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
-	if err := database.Create(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	m := New(database)
-	loaded := m.reload()().(loadedMsg)
-	m.rows, m.loaded = loaded.rows, true
-	if len(m.rows) != 1 || m.rows[0].Transcript != "" {
-		t.Fatalf("list rows = %+v", m.rows)
-	}
-	m.SetSize(80, 20)
-	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = updated.(*Model)
-	if cmd == nil || m.detail {
-		t.Fatalf("enter cmd=%v detail=%v", cmd, m.detail)
-	}
-	updated, _ = m.Update(cmd())
-	m = updated.(*Model)
-	if !m.detail || m.selectedTranscript() != "line one\nline two" {
-		t.Fatalf("detail=%v transcript=%q", m.detail, m.selectedTranscript())
+	m, _, _ := openTranscriptDetail(t)
+	if m.selectedTranscript() != "line one\nline two" {
+		t.Fatalf("transcript=%q", m.selectedTranscript())
 	}
 	if !m.rows[0].HasTranscript {
 		t.Fatal("detail load did not refresh HasTranscript")
@@ -162,27 +171,12 @@ func TestEnterLoadsTranscriptDetailByID(t *testing.T) {
 }
 
 func TestReloadKeepsOpenDetailContent(t *testing.T) {
-	database := sessionTestDB(t)
-	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
-	if err := database.Create(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	m := New(database)
-	loaded := m.reload()().(loadedMsg)
-	m.rows, m.loaded = loaded.rows, true
-	m.SetSize(80, 20)
-	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = updated.(*Model)
-	updated, _ = m.Update(cmd())
-	m = updated.(*Model)
-	if !m.detail {
-		t.Fatal("detail not open")
-	}
+	m, database, _ := openTranscriptDetail(t)
 	newer := db.ConnectionHistory{Label: "newer", ConnectedAt: time.Now().Add(time.Minute), Transcript: "x"}
 	if err := database.Create(&newer).Error; err != nil {
 		t.Fatal(err)
 	}
-	updated, _ = m.Update(m.reload()())
+	updated, _ := m.Update(m.reload()())
 	m = updated.(*Model)
 	if !m.detail || m.selectedTranscript() != "line one\nline two" {
 		t.Fatalf("detail lost after reload: detail=%v transcript=%q", m.detail, m.selectedTranscript())
@@ -193,26 +187,11 @@ func TestReloadKeepsOpenDetailContent(t *testing.T) {
 }
 
 func TestReloadClosesDetailWhenRowGone(t *testing.T) {
-	database := sessionTestDB(t)
-	row := db.ConnectionHistory{Label: "remote-shell", ConnectedAt: time.Now(), Transcript: "line one\nline two"}
-	if err := database.Create(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	m := New(database)
-	loaded := m.reload()().(loadedMsg)
-	m.rows, m.loaded = loaded.rows, true
-	m.SetSize(80, 20)
-	updated, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	m = updated.(*Model)
-	updated, _ = m.Update(cmd())
-	m = updated.(*Model)
-	if !m.detail {
-		t.Fatal("detail not open")
-	}
+	m, database, row := openTranscriptDetail(t)
 	if err := database.Delete(&row).Error; err != nil {
 		t.Fatal(err)
 	}
-	updated, _ = m.Update(m.reload()())
+	updated, _ := m.Update(m.reload()())
 	m = updated.(*Model)
 	if m.detail {
 		t.Fatal("detail stayed open for a deleted row")

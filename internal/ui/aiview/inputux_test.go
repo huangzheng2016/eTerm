@@ -20,9 +20,7 @@ func TestCopyLastReply(t *testing.T) {
 		t.Fatalf("missing error, got %q", m.errMsg)
 	}
 
-	m.input.SetValue("hi")
-	m.send()
-	pumpEvents(t, m)
+	sendAndPump(t, m, "hi")
 	if cmd := m.copyLastReply(); cmd == nil {
 		t.Fatal("/copy returned no cmd")
 	}
@@ -33,12 +31,8 @@ func TestCopyLastReply(t *testing.T) {
 
 func TestInputHistoryRecall(t *testing.T) {
 	m := newTestModel([]AgentEvent{{Kind: EventDone}})
-	m.input.SetValue("first")
-	m.send()
-	pumpEvents(t, m)
-	m.input.SetValue("second")
-	m.send()
-	pumpEvents(t, m)
+	sendAndPump(t, m, "first")
+	sendAndPump(t, m, "second")
 
 	m.chatKey(keyMsg(tea.KeyUp, 0))
 	if got := m.input.Value(); got != "second" {
@@ -103,11 +97,8 @@ func TestInputHistorySuppressesSlashMenu(t *testing.T) {
 }
 
 func TestQueueRecall(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.Events = []AgentEvent{{Kind: EventTextDelta, Text: "slow"}, {Kind: EventDone}}
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 
 	m.input.SetValue("start")
 	m.send()
@@ -160,11 +151,8 @@ func TestCtrlGReturnsExecCmd(t *testing.T) {
 }
 
 func TestSessionsFilter(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.History = []byte("turn")
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 	fake.SaveSession("s1", "Fix login bug", "")
 	fake.SaveSession("s2", "Write tests", "")
 
@@ -228,9 +216,7 @@ func TestExportSession(t *testing.T) {
 		{Kind: EventTextDelta, Text: "export me"},
 		{Kind: EventDone},
 	})
-	m.input.SetValue("hi")
-	m.send()
-	pumpEvents(t, m)
+	sendAndPump(t, m, "hi")
 
 	if cmd := m.exportSession(); cmd == nil {
 		t.Fatal("/export returned no cmd")
@@ -291,11 +277,8 @@ func TestExportMarkdown(t *testing.T) {
 }
 
 func TestCompact(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.CompactResult = CompactStats{MessagesBefore: 10, MessagesAfter: 5, TokensBefore: 100, TokensAfter: 40}
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 
 	cmd := m.compactSession()
 	if cmd == nil {
@@ -322,11 +305,8 @@ func TestCompact(t *testing.T) {
 }
 
 func TestCompactError(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.CompactErr = errors.New("model down")
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 	m.Update(m.compactSession()())
 	if !strings.Contains(m.errMsg, "model down") {
 		t.Fatalf("missing compact error, got %q", m.errMsg)
@@ -334,12 +314,7 @@ func TestCompactError(t *testing.T) {
 }
 
 func TestCompactBlockedWhileRunning(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
+	m := newRunningModel()
 	sendSlash(t, m, "/compact")
 	if !strings.Contains(m.errMsg, "run in progress") {
 		t.Fatalf("/compact must be refused mid-run, got %q", m.errMsg)

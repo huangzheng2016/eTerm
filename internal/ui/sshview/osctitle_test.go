@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func titleMsgsForChunk(t *testing.T, m *Model, data string) []TitleMsg {
@@ -41,8 +40,7 @@ func TestOSCTitleEmitsTitleMsg(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := New(nil, "test", 0, viewkeys.SSHKeys{})
-			t.Cleanup(func() { _ = m.Close() })
+			m := newTestModel(t, nil)
 
 			got := titleMsgsForChunk(t, m, tc.seq)
 			if len(got) != 1 || got[0].Title != tc.want || got[0].StreamID != m.StreamID() {
@@ -53,8 +51,7 @@ func TestOSCTitleEmitsTitleMsg(t *testing.T) {
 }
 
 func TestOSCTitleZeroFiresOnce(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 
 	if got := titleMsgsForChunk(t, m, "\x1b]0;both\a"); len(got) != 1 {
 		t.Fatalf("OSC 0 -> %d title msgs, want 1", len(got))
@@ -62,8 +59,7 @@ func TestOSCTitleZeroFiresOnce(t *testing.T) {
 }
 
 func TestOSCTitleEmptyIgnored(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 
 	if got := titleMsgsForChunk(t, m, "\x1b]2;\a"); len(got) != 0 {
 		t.Fatalf("empty title -> %#v", got)
@@ -71,8 +67,7 @@ func TestOSCTitleEmptyIgnored(t *testing.T) {
 }
 
 func TestPushOSCTitleSanitizesAndDedups(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 
 	m.pushOSCTitle("a\x07b\x1b[1mc\u009cd")
 	m.pushOSCTitle("ab[1mcd")

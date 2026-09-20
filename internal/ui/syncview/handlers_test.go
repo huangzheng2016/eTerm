@@ -1,7 +1,6 @@
 package syncview
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,10 +11,7 @@ import (
 )
 
 func TestSaveReportsDatabaseError(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := newSyncDB(t)
 	sqlDB, err := database.DB()
 	if err != nil {
 		t.Fatal(err)
@@ -33,14 +29,8 @@ func TestSaveReportsDatabaseError(t *testing.T) {
 }
 
 func TestSaveReportsMissingMasterKeyForSecrets(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := New(database, security.NewMasterKeyManager(nil, nil, time.Minute))
-	m.enableIdx = 1
-	m.modeIdx = 0
-	m.inputs[inServerURL].SetValue("https://sync.example.com")
+	m := New(newSyncDB(t), security.NewMasterKeyManager(nil, nil, time.Minute))
+	enableHTTPSync(m)
 	m.pendPass = "secret"
 	m.passDirty = true
 
@@ -52,16 +42,11 @@ func TestSaveReportsMissingMasterKeyForSecrets(t *testing.T) {
 }
 
 func TestCtrlYSavesThenStartsSync(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := newSyncDB(t)
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.Setup([]byte("pw"))
 	m := New(database, mk)
-	m.enableIdx = 1
-	m.modeIdx = 0
-	m.inputs[inServerURL].SetValue("https://sync.example.com")
+	enableHTTPSync(m)
 	m.pendPass = "secret"
 	m.passDirty = true
 

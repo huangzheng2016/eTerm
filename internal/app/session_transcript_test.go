@@ -13,14 +13,20 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestCreateLocalSessionHistoryStoresSourceWithoutHost(t *testing.T) {
+func appTestMemoryDB(t *testing.T, models ...any) *gorm.DB {
+	t.Helper()
 	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
+	if err := database.AutoMigrate(models...); err != nil {
 		t.Fatal(err)
 	}
+	return database
+}
+
+func TestCreateLocalSessionHistoryStoresSourceWithoutHost(t *testing.T) {
+	database := appTestMemoryDB(t, &db.Host{}, &db.ConnectionHistory{})
 	id := createLocalSessionHistory(database, "daemon-prod", "remote-tmux")
 	if id == 0 {
 		t.Fatal("history ID is zero")
@@ -35,13 +41,7 @@ func TestCreateLocalSessionHistoryStoresSourceWithoutHost(t *testing.T) {
 }
 
 func TestReplayAlwaysSavesSearchableTranscript(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.Host{}, &db.AppSetting{}, &db.ConnectionHistory{}); err != nil {
-		t.Fatal(err)
-	}
+	database := appTestMemoryDB(t, &db.Host{}, &db.AppSetting{}, &db.ConnectionHistory{})
 	if err := db.SetSetting(database, saveSessionTranscriptKey, "false"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,13 +67,7 @@ func TestReplayAlwaysSavesSearchableTranscript(t *testing.T) {
 }
 
 func TestFinalizeSSHSessionPrunesOldHistory(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.Host{}, &db.AppSetting{}, &db.ConnectionHistory{}); err != nil {
-		t.Fatal(err)
-	}
+	database := appTestMemoryDB(t, &db.Host{}, &db.AppSetting{}, &db.ConnectionHistory{})
 	stale := db.ConnectionHistory{Label: "stale", ConnectedAt: time.Now().AddDate(0, 0, -120)}
 	if err := database.Create(&stale).Error; err != nil {
 		t.Fatal(err)

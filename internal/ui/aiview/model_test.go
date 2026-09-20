@@ -1,6 +1,7 @@
 package aiview
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,6 +39,37 @@ func pumpEvents(t *testing.T, m *Model) {
 			return
 		}
 	}
+}
+
+func newFakeModel() (*Model, *FakeRunner) {
+	fake := NewFakeRunner()
+	fake.Delay = 0
+	m := New(fake, fake, fake)
+	m.SetSize(100, 32)
+	return m, fake
+}
+
+func newRunningModel() *Model {
+	m := newTestModel([]AgentEvent{
+		{Kind: EventTextDelta, Text: "slow"},
+		{Kind: EventDone},
+	})
+	m.input.SetValue("hi")
+	m.send()
+	return m
+}
+
+func sendAndPump(t *testing.T, m *Model, text string) {
+	t.Helper()
+	m.input.SetValue(text)
+	m.send()
+	pumpEvents(t, m)
+}
+
+func queuedSnapshot(fake *FakeRunner) []string {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return append([]string(nil), fake.Queued...)
 }
 
 func TestRenderSmokeEmpty(t *testing.T) {
@@ -93,13 +125,8 @@ func TestSendStreamsAndFinalizes(t *testing.T) {
 		kinds = append(kinds, b.kind)
 	}
 	want := []blockKind{blockUser, blockThinking, blockAssistant, blockTool, blockAssistant}
-	if len(kinds) != len(want) {
+	if !slices.Equal(kinds, want) {
 		t.Fatalf("got %v, want %v", kinds, want)
-	}
-	for i := range want {
-		if kinds[i] != want[i] {
-			t.Fatalf("got %v, want %v", kinds, want)
-		}
 	}
 
 	out := plain(m.View().Content)
@@ -148,9 +175,7 @@ func TestErrorState(t *testing.T) {
 	m := newTestModel([]AgentEvent{
 		{Kind: EventError, Text: "provider unreachable"},
 	})
-	m.input.SetValue("hi")
-	m.send()
-	pumpEvents(t, m)
+	sendAndPump(t, m, "hi")
 	if m.status != statusError {
 		t.Fatal("status not error")
 	}
@@ -205,12 +230,7 @@ func TestContextUsageInBottomRow(t *testing.T) {
 }
 
 func TestRunningIndicatorAboveInput(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
+	m := newRunningModel()
 
 	content, _ := m.chatView()
 	lines := strings.Split(plain(content), "\n")
@@ -262,12 +282,7 @@ func TestScrollKeys(t *testing.T) {
 }
 
 func TestSendQueuedWhileRunning(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("first")
-	m.send()
+	m := newRunningModel()
 	m.input.SetValue("second")
 	if cmd := m.send(); cmd != nil {
 		t.Fatal("send while running must queue, not start a run")
@@ -288,10 +303,7 @@ func TestSendQueuedWhileRunning(t *testing.T) {
 }
 
 func TestProviderPickerSwitchAndAdd(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
+	m, fake := newFakeModel()
 
 	m.Update(keyMsg('p', tea.ModCtrl))
 	if m.mode != modeProviders {
@@ -340,11 +352,8 @@ func TestProviderPickerSwitchAndAdd(t *testing.T) {
 }
 
 func TestProviderPickerEditDelete(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
+	m, fake := newFakeModel()
 	fake.providers[0].APIKey = "sk-x"
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
 
 	m.Update(keyMsg('p', tea.ModCtrl))
 	m.Update(keyMsg('e', 0))
@@ -397,10 +406,7 @@ func TestProviderPickerEditDelete(t *testing.T) {
 }
 
 func TestProviderPickerEditConflictKeepsForm(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
+	m, fake := newFakeModel()
 
 	m.Update(keyMsg('p', tea.ModCtrl))
 	m.Update(keyMsg('e', 0))
@@ -431,10 +437,7 @@ func TestProviderPickerEditConflictKeepsForm(t *testing.T) {
 }
 
 func TestProviderPickerReadOnlyBlocksEditDelete(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
+	m, _ := newFakeModel()
 
 	m.Update(keyMsg('p', tea.ModCtrl))
 	m.models[0].ReadOnly = true
@@ -475,12 +478,7 @@ func TestThrottleFlushScheduling(t *testing.T) {
 }
 
 func TestEscKeepsRunInBackground(t *testing.T) {
-	m := newTestModel([]AgentEvent{
-		{Kind: EventTextDelta, Text: "slow"},
-		{Kind: EventDone},
-	})
-	m.input.SetValue("hi")
-	m.send()
+	m := newRunningModel()
 	if m.status != statusRunning {
 		t.Fatal("status not running")
 	}
@@ -614,9 +612,7 @@ func TestInjectUserMessageRunningQueuesKeepsDraft(t *testing.T) {
 	if m.input.Value() != "draft" {
 		t.Fatalf("draft clobbered: %q", m.input.Value())
 	}
-	fake.mu.Lock()
-	queued := append([]string(nil), fake.Queued...)
-	fake.mu.Unlock()
+	queued := queuedSnapshot(fake)
 	if len(queued) != 1 || queued[0] != "wake" {
 		t.Fatalf("runner queue: %v", queued)
 	}

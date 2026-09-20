@@ -83,16 +83,23 @@ func TestViewNeverExceedsFrame(t *testing.T) {
 	}
 }
 
-func TestViewLongModelNameStaysInFrame(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	fake.Add(Provider{Name: strings.Repeat("very-long-provider-name-", 4), Type: "openai"})
-	fake.Switch(strings.Repeat("very-long-provider-name-", 4), "x")
-	m := New(fake, fake, fake)
-	m.SetSize(80, 24)
-	fillConversation(m)
-	if n := viewRows(m.View().Content); n != 24 {
-		t.Fatalf("long model name: view height = %d, want 24", n)
+func TestModelNameStaysInFrame(t *testing.T) {
+	cases := []struct {
+		name string
+		w, h int
+	}{
+		{strings.Repeat("very-long-provider-name-", 4), 80, 24},
+		{strings.Repeat("モデル名", 12), 100, 32},
+	}
+	for _, tc := range cases {
+		m, fake := newFakeModel()
+		fake.Add(Provider{Name: tc.name, Type: "openai"})
+		fake.Switch(tc.name, "x")
+		m.SetSize(tc.w, tc.h)
+		fillConversation(m)
+		if n := viewRows(m.View().Content); n != tc.h {
+			t.Errorf("model name %q: view height = %d, want %d", tc.name, n, tc.h)
+		}
 	}
 }
 
@@ -108,19 +115,5 @@ func TestMultiLineErrorStaysOneRow(t *testing.T) {
 	}
 	if !strings.Contains(plain(out), "error: provider unreachable: upstream said no please retry") {
 		t.Fatal("error line not collapsed to one row")
-	}
-}
-
-func TestCJKModelNameStaysInFrame(t *testing.T) {
-	fake := NewFakeRunner()
-	fake.Delay = 0
-	name := strings.Repeat("モデル名", 12)
-	fake.Add(Provider{Name: name, Type: "openai"})
-	fake.Switch(name, "x")
-	m := New(fake, fake, fake)
-	m.SetSize(100, 32)
-	fillConversation(m)
-	if n := viewRows(m.View().Content); n != 32 {
-		t.Fatalf("CJK model name: view height = %d, want 32", n)
 	}
 }

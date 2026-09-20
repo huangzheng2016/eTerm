@@ -5,10 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/ai"
-	"github.com/huangzheng2016/eTerm/internal/db"
-	"gorm.io/gorm"
 )
 
 type fakeAgent struct {
@@ -45,12 +42,7 @@ func (f *fakeAgent) CancelTask(id string) bool {
 }
 
 func TestBridgeCancelRun(t *testing.T) {
-	store := &ai.Store{}
-	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
-	if err := store.SetActive("p", "m"); err != nil {
-		t.Fatal(err)
-	}
-	bridge := &aiBridge{store: store}
+	bridge := aiTestActiveBridge(t)
 	bridge.agent = &fakeAgent{}
 	bridge.agentKey = "p\x00m\x00false"
 
@@ -72,12 +64,7 @@ func TestBridgeCancelRun(t *testing.T) {
 }
 
 func TestBridgeEnqueueRoutesToAgent(t *testing.T) {
-	store := &ai.Store{}
-	store.Upsert(ai.Provider{Name: "p", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m"})
-	if err := store.SetActive("p", "m"); err != nil {
-		t.Fatal(err)
-	}
-	bridge := &aiBridge{store: store}
+	bridge := aiTestActiveBridge(t)
 	agent := &fakeAgent{}
 	bridge.agent = agent
 	bridge.agentKey = "p\x00m\x00false"
@@ -143,13 +130,7 @@ func TestAgentForClosesReplacedAgent(t *testing.T) {
 }
 
 func TestSwitchCancelsInFlightRun(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.AppSetting{}); err != nil {
-		t.Fatal(err)
-	}
+	database := aiTestDB(t)
 	store := &ai.Store{}
 	store.Upsert(ai.Provider{Name: "p1", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m1"})
 	store.Upsert(ai.Provider{Name: "p2", Type: ai.ProviderOpenAI, APIKey: "k", DefaultModel: "m2"})

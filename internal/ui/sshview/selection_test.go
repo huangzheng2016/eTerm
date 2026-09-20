@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/vt"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func mkEmu(w, h int, s string) *vt.Emulator {
@@ -24,35 +23,29 @@ func selModel(e *vt.Emulator, scroll int, anchor, caret selPoint) *Model {
 	return &Model{emu: e, scrollOffset: scroll, sel: selection{active: true, anchor: anchor, caret: caret}}
 }
 
-func TestSelectedTextSingleLine(t *testing.T) {
-	e := mkEmu(40, 24, "hello world\r\n")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{0, 4})
-	if got := m.selectedText(); got != "hello" {
-		t.Fatalf("got %q want %q", got, "hello")
+func TestSelectedText(t *testing.T) {
+	cases := []struct {
+		name          string
+		w, h          int
+		input         string
+		anchor, caret selPoint
+		want          string
+	}{
+		{"single line", 40, 24, "hello world\r\n", selPoint{0, 0}, selPoint{0, 4}, "hello"},
+		{"multi line", 40, 24, "line1\r\nline2\r\n", selPoint{0, 0}, selPoint{1, 4}, "line1\nline2"},
+		{"joins soft wrapped lines", 4, 4, "abcdefgh", selPoint{0, 0}, selPoint{1, 3}, "abcdefgh"},
+		{"keeps hard newline after full line", 4, 4, "abcd\r\nefgh", selPoint{0, 0}, selPoint{1, 3}, "abcd\nefgh"},
+		{"joins soft wrap on alt screen", 4, 4, "\x1b[?1049habcdefgh", selPoint{0, 0}, selPoint{1, 3}, "abcdefgh"},
+		{"trims trailing spaces", 40, 24, "ab\r\n", selPoint{0, 0}, selPoint{0, 39}, "ab"},
+		{"cjk", 40, 24, "中文x\r\n", selPoint{0, 0}, selPoint{0, 4}, "中文x"},
 	}
-}
-
-func TestSelectedTextMultiLine(t *testing.T) {
-	e := mkEmu(40, 24, "line1\r\nline2\r\n")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 4})
-	if got := m.selectedText(); got != "line1\nline2" {
-		t.Fatalf("got %q want %q", got, "line1\nline2")
-	}
-}
-
-func TestSelectedTextJoinsSoftWrappedLines(t *testing.T) {
-	e := mkEmu(4, 4, "abcdefgh")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 3})
-	if got := m.selectedText(); got != "abcdefgh" {
-		t.Fatalf("got %q want %q", got, "abcdefgh")
-	}
-}
-
-func TestSelectedTextKeepsHardNewlineAfterFullLine(t *testing.T) {
-	e := mkEmu(4, 4, "abcd\r\nefgh")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 3})
-	if got := m.selectedText(); got != "abcd\nefgh" {
-		t.Fatalf("got %q want %q", got, "abcd\nefgh")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := selModel(mkEmu(tc.w, tc.h, tc.input), 0, tc.anchor, tc.caret)
+			if got := m.selectedText(); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -64,30 +57,6 @@ func TestSelectedTextJoinsSoftWrapAcrossScrollback(t *testing.T) {
 	m := selModel(e, 0, selPoint{0, 0}, selPoint{2, 3})
 	if got := m.selectedText(); got != "abcdefghijkl" {
 		t.Fatalf("got %q want %q", got, "abcdefghijkl")
-	}
-}
-
-func TestSelectedTextJoinsSoftWrapOnAltScreen(t *testing.T) {
-	e := mkEmu(4, 4, "\x1b[?1049habcdefgh")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{1, 3})
-	if got := m.selectedText(); got != "abcdefgh" {
-		t.Fatalf("got %q want %q", got, "abcdefgh")
-	}
-}
-
-func TestSelectedTextTrimsTrailingSpaces(t *testing.T) {
-	e := mkEmu(40, 24, "ab\r\n")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{0, 39})
-	if got := m.selectedText(); got != "ab" {
-		t.Fatalf("got %q want %q", got, "ab")
-	}
-}
-
-func TestSelectedTextCJK(t *testing.T) {
-	e := mkEmu(40, 24, "中文x\r\n")
-	m := selModel(e, 0, selPoint{0, 0}, selPoint{0, 4})
-	if got := m.selectedText(); got != "中文x" {
-		t.Fatalf("got %q want %q", got, "中文x")
 	}
 }
 
@@ -199,8 +168,7 @@ func TestScrollbackRenderDoesNotSpaceCJK(t *testing.T) {
 }
 
 func TestHiddenCursorDoesNotRenderManualCursor(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 
 	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("abc\x1b[?25l")})
 
@@ -213,8 +181,7 @@ func TestHiddenCursorDoesNotRenderManualCursor(t *testing.T) {
 }
 
 func TestShowCursorRestoresManualCursor(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 
 	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("abc\x1b[?25l\x1b[?25h")})
 
@@ -227,8 +194,7 @@ func TestShowCursorRestoresManualCursor(t *testing.T) {
 }
 
 func TestAltScreenRenderKeepsClearedCells(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 	m.SetSize(20, 4)
 
 	_, _ = m.Update(ChunkMsg{
@@ -313,8 +279,7 @@ func TestPlainTranscriptDoesNotSpaceCJK(t *testing.T) {
 }
 
 func TestCursorKeyModeControlsArrowEncoding(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 
 	m.emu.WriteString("\x1b[?1h")
 	if got := string(m.encodeKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))); got != "\x1bOA" {
@@ -360,10 +325,14 @@ func (w *captureWriteCloser) waitString(t *testing.T, want string) {
 	}
 }
 
-func TestAltScreenMouseModeForwardsWheelSequence(t *testing.T) {
+func newCaptureModel(t *testing.T) (*Model, *captureWriteCloser) {
+	t.Helper()
 	stdin := &captureWriteCloser{}
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	return newTestModel(t, &internalssh.InteractiveSession{Stdin: stdin}), stdin
+}
+
+func TestAltScreenMouseModeForwardsWheelSequence(t *testing.T) {
+	m, stdin := newCaptureModel(t)
 
 	m.emu.WriteString("\x1b[?1049h\x1b[?1000h\x1b[?1006h")
 	m.Update(wheel(tea.MouseWheelDown))
@@ -382,9 +351,7 @@ func TestAltScreenMouseModeForwardsWheelSequence(t *testing.T) {
 }
 
 func TestPasteMsgWritesRawTextWhenBracketedPasteDisabled(t *testing.T) {
-	stdin := &captureWriteCloser{}
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m, stdin := newCaptureModel(t)
 
 	m.Update(tea.PasteMsg{Content: "hello"})
 
@@ -392,9 +359,7 @@ func TestPasteMsgWritesRawTextWhenBracketedPasteDisabled(t *testing.T) {
 }
 
 func TestPasteMsgWritesBracketedPasteWhenEnabled(t *testing.T) {
-	stdin := &captureWriteCloser{}
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m, stdin := newCaptureModel(t)
 
 	m.emu.WriteString("\x1b[?2004h")
 	if !m.bracketedPaste {
@@ -408,9 +373,7 @@ func TestPasteMsgWritesBracketedPasteWhenEnabled(t *testing.T) {
 }
 
 func TestPasteMsgStopsBracketingAfterModeReset(t *testing.T) {
-	stdin := &captureWriteCloser{}
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m, stdin := newCaptureModel(t)
 
 	m.emu.WriteString("\x1b[?2004h")
 	m.emu.WriteString("\x1b[?2004l")

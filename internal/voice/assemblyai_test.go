@@ -2,9 +2,9 @@ package voice
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,30 +12,6 @@ import (
 
 	"github.com/coder/websocket"
 )
-
-func TestAssemblyAIDescriptor(t *testing.T) {
-	d, ok := EngineDescriptorByID("assemblyai")
-	if !ok {
-		t.Fatal("assemblyai engine not registered")
-	}
-	if d.Ready(map[string]string{}) {
-		t.Fatal("ready without key")
-	}
-	if !d.Ready(map[string]string{"api_key": "k"}) {
-		t.Fatal("not ready with key")
-	}
-	if got := FirstMissingParam(d, map[string]string{}); got != "AssemblyAI API key" {
-		t.Fatalf("first missing = %q", got)
-	}
-	eng, err := d.New(map[string]string{"api_key": "k"}, FeedDeps{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := eng.(*streamFeedEngine); !ok {
-		t.Fatalf("assemblyai New = %T", eng)
-	}
-	eng.Close()
-}
 
 type assemblyAIServer struct {
 	t         *testing.T
@@ -115,16 +91,9 @@ func TestAssemblyAIEngineLifecycle(t *testing.T) {
 	if err := eng.WriteAudio([]byte{1, 2, 3}); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case got := <-srv.audio:
-		if string(got) != string([]byte{1, 2, 3}) {
-			t.Fatalf("audio = %v", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive audio frame")
-	}
+	expectAudio(t, srv.audio, []byte{1, 2, 3}, "server did not receive audio frame")
 
-	partial := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventPartial })
+	partial := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventPartial })
 	if partial.Text != "hel" {
 		t.Fatalf("partial: %q", partial.Text)
 	}
@@ -132,12 +101,8 @@ func TestAssemblyAIEngineLifecycle(t *testing.T) {
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-srv.terminate:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive terminate_session")
-	}
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	waitSignal(t, srv.terminate, "server did not receive terminate_session")
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello world" {
 		t.Fatalf("final: %q", final.Text)
 	}
@@ -145,30 +110,11 @@ func TestAssemblyAIEngineLifecycle(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
-}
-
-func TestAssemblyAIEngineRequiresKey(t *testing.T) {
-	eng := NewAssemblyAIEngine(AssemblyAIConfig{})
-	if err := eng.Start(context.Background()); err == nil {
-		t.Fatal("expected auth error")
-	}
-	eng.Close()
+	waitEventsClosed(t, eng.Events())
 }
 
 func TestAssemblyAIFeedRoutesPassthrough(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	t.Setenv("GO_FAKE_PROTOCOL", "2")
 
 	srv := newAssemblyAIServer(t)
 	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
@@ -183,30 +129,15 @@ func TestAssemblyAIFeedRoutesPassthrough(t *testing.T) {
 	}
 
 	for i, want := range [][]byte{{1, 2, 3, 4}, {5, 6, 7, 8}} {
-		select {
-		case got := <-srv.audio:
-			if string(got) != string(want) {
-				t.Fatalf("audio %d = %v, want %v", i, got, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("server did not receive audio frame %d", i)
-		}
+		expectAudio(t, srv.audio, want, fmt.Sprintf("audio frame %d", i))
 	}
-	select {
-	case <-srv.terminate:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server did not receive terminate_session")
-	}
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	waitSignal(t, srv.terminate, "server did not receive terminate_session")
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello world" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session after utterance_end")
-	}
+	waitSignal(t, srv.conn2, "no redialed session after utterance_end")
 
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
@@ -214,15 +145,5 @@ func TestAssemblyAIFeedRoutesPassthrough(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
+	waitEventsClosed(t, eng.Events())
 }

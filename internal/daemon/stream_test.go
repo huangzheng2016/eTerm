@@ -217,6 +217,18 @@ func stalledRelay(t *testing.T, after, interval time.Duration) *streamRelay {
 	return sr
 }
 
+func stalledReapRelay(t *testing.T, mgr *sessionManager, sid uint32, reap time.Duration) (*streamRelay, *daemonFakeSession) {
+	t.Helper()
+	fake := newDaemonFakeSession()
+	sr := newStreamRelay(fake.is)
+	t.Cleanup(sr.shutdown)
+	sr.sidV.Store(sid)
+	sr.stallReap = reap
+	sr.appendOutput(make([]byte, outputWindowBytes))
+	mgr.add(sid, sr)
+	return sr, fake
+}
+
 func captureStallLog(t *testing.T) *lockedLogBuf {
 	t.Helper()
 	out := &lockedLogBuf{}
@@ -307,14 +319,8 @@ func TestWaitCreditNoStallLogWhenCreditReleased(t *testing.T) {
 
 func TestWaitCreditStallReapsZeroAckStream(t *testing.T) {
 	out := captureStallLog(t)
-	fake := newDaemonFakeSession()
 	mgr := newSessionManager()
-	sr := newStreamRelay(fake.is)
-	t.Cleanup(sr.shutdown)
-	sr.sidV.Store(42)
-	sr.stallReap = 50 * time.Millisecond
-	sr.appendOutput(make([]byte, outputWindowBytes))
-	mgr.add(42, sr)
+	sr, fake := stalledReapRelay(t, mgr, 42, 50*time.Millisecond)
 
 	done := make(chan bool, 1)
 	go func() { done <- sr.waitCredit(mgr) }()
@@ -343,17 +349,11 @@ func TestWaitCreditStallReapsZeroAckStream(t *testing.T) {
 
 func TestWaitCreditStallReapResetByAckProgress(t *testing.T) {
 	out := captureStallLog(t)
-	fake := newDaemonFakeSession()
 	mgr := newSessionManager()
-	sr := newStreamRelay(fake.is)
-	t.Cleanup(sr.shutdown)
-	sr.sidV.Store(7)
-	sr.stallReap = 150 * time.Millisecond
-	sr.appendOutput(make([]byte, outputWindowBytes))
+	sr, _ := stalledReapRelay(t, mgr, 7, 150*time.Millisecond)
 	sr.mu.Lock()
 	sr.sent = outputWindowBytes + 5*1024
 	sr.mu.Unlock()
-	mgr.add(7, sr)
 
 	done := make(chan bool, 1)
 	go func() { done <- sr.waitCredit(mgr) }()
@@ -393,14 +393,8 @@ func TestWaitCreditIdleStreamKeepsCredit(t *testing.T) {
 
 func TestWaitCreditDetachedStreamKeepsCredit(t *testing.T) {
 	out := captureStallLog(t)
-	fake := newDaemonFakeSession()
 	mgr := newSessionManager()
-	sr := newStreamRelay(fake.is)
-	t.Cleanup(sr.shutdown)
-	sr.sidV.Store(8)
-	sr.stallReap = 60 * time.Millisecond
-	sr.appendOutput(make([]byte, outputWindowBytes))
-	mgr.add(8, sr)
+	sr, _ := stalledReapRelay(t, mgr, 8, 60*time.Millisecond)
 
 	sr.markDetached()
 	done := make(chan bool, 1)
@@ -464,19 +458,7 @@ func TestReadPumpDrainsPtyWhileDetached(t *testing.T) {
 			}
 		}
 	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		sr.mu.Lock()
-		end := sr.ring.End()
-		sr.mu.Unlock()
-		if end >= total {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("detached read pump stalled at ring end %d, want %d", end, total)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitRingEnd(t, sr, total)
 	if mgr.get(9) == nil {
 		t.Fatal("detached stream reaped")
 	}

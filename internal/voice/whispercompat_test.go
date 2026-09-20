@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -43,8 +42,7 @@ func TestWhisperCompatDescriptor(t *testing.T) {
 }
 
 func TestWhisperCompatFeedPostsUtterance(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	t.Setenv("GO_FAKE_PROTOCOL", "2")
 
 	type request struct {
 		auth  string
@@ -82,7 +80,7 @@ func TestWhisperCompatFeedPostsUtterance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
@@ -111,22 +109,11 @@ func TestWhisperCompatFeedPostsUtterance(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
+	waitEventsClosed(t, eng.Events())
 }
 
 func TestWhisperCompatFeedHTTPError(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
+	t.Setenv("GO_FAKE_PROTOCOL", "2")
 
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -144,7 +131,7 @@ func TestWhisperCompatFeedHTTPError(t *testing.T) {
 	}
 	defer eng.Close()
 
-	ev := waitFeedEvent(t, eng.Events(), func(ev Event) bool {
+	ev := waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == EventError && strings.Contains(ev.Msg, "401")
 	})
 	if !strings.Contains(ev.Msg, "bad key") {

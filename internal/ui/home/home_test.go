@@ -72,96 +72,76 @@ func loadedModel(t *testing.T) (Model, *db.Host) {
 	return m, &h
 }
 
-func TestHomeShortcut_SSHConnect_Enter(t *testing.T) {
-	m, h := loadedModel(t)
-
-	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	_ = out
-	msg := firstMsg(cmd)
-	cm, ok := msg.(types.SSHConnectMsg)
-	if !ok {
-		t.Fatalf("want SSHConnectMsg, got %T %#v", msg, msg)
+func TestHomeShortcuts(t *testing.T) {
+	cases := []struct {
+		name  string
+		key   tea.KeyPressMsg
+		check func(t *testing.T, msg tea.Msg, h *db.Host)
+	}{
+		{"enter connects via ssh", tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), func(t *testing.T, msg tea.Msg, h *db.Host) {
+			cm, ok := msg.(types.SSHConnectMsg)
+			if !ok {
+				t.Fatalf("want SSHConnectMsg, got %T %#v", msg, msg)
+			}
+			if cm.HostID != h.ID {
+				t.Fatalf("HostID: got %d want %d", cm.HostID, h.ID)
+			}
+		}},
+		{"plain s opens sftp", tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}), func(t *testing.T, msg tea.Msg, h *db.Host) {
+			sm, ok := msg.(types.SFTPOpenMsg)
+			if !ok {
+				t.Fatalf("want SFTPOpenMsg, got %T %#v", msg, msg)
+			}
+			if sm.HostID != h.ID {
+				t.Fatalf("HostID: got %d want %d", sm.HostID, h.ID)
+			}
+		}},
+		{"e opens editor in new tab", tea.KeyPressMsg(tea.Key{Code: 'e', Text: "e"}), func(t *testing.T, msg tea.Msg, h *db.Host) {
+			tm, ok := msg.(types.NewTabMsg)
+			if !ok {
+				t.Fatalf("want NewTabMsg, got %T %#v", msg, msg)
+			}
+			if tm.Type != "editor" {
+				t.Fatalf("tab type: %q", tm.Type)
+			}
+			if tm.Data == nil {
+				t.Fatal("expected editor data for edit shortcut")
+			}
+		}},
+		{"n opens new host tab", tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}), func(t *testing.T, msg tea.Msg, h *db.Host) {
+			tm, ok := msg.(types.NewTabMsg)
+			if !ok {
+				t.Fatalf("want NewTabMsg, got %T %#v", msg, msg)
+			}
+			if tm.Title != "New Host" {
+				t.Fatalf("title: %q", tm.Title)
+			}
+		}},
+		{"ctrl shift m opens local tmux menu", tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModCtrl | tea.ModShift}), func(t *testing.T, msg tea.Msg, h *db.Host) {
+			tm, ok := msg.(types.TmuxMenuMsg)
+			if !ok {
+				t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
+			}
+			if tm.HostID != 0 {
+				t.Fatalf("HostID: got %d want 0 (local tmux menu)", tm.HostID)
+			}
+		}},
+		{"m opens host tmux menu", tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}), func(t *testing.T, msg tea.Msg, h *db.Host) {
+			tm, ok := msg.(types.TmuxMenuMsg)
+			if !ok {
+				t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
+			}
+			if tm.HostID != h.ID {
+				t.Fatalf("HostID: got %d want %d", tm.HostID, h.ID)
+			}
+		}},
 	}
-	if cm.HostID != h.ID {
-		t.Fatalf("HostID: got %d want %d", cm.HostID, h.ID)
-	}
-}
-
-func TestHomeShortcut_SFTPOpen_plainS(t *testing.T) {
-	m, h := loadedModel(t)
-
-	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
-	_ = out
-	msg := firstMsg(cmd)
-	sm, ok := msg.(types.SFTPOpenMsg)
-	if !ok {
-		t.Fatalf("want SFTPOpenMsg, got %T %#v", msg, msg)
-	}
-	if sm.HostID != h.ID {
-		t.Fatalf("HostID: got %d want %d", sm.HostID, h.ID)
-	}
-}
-
-func TestHomeShortcut_Edit_NewTab(t *testing.T) {
-	m, _ := loadedModel(t)
-
-	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'e', Text: "e"}))
-	_ = out
-	msg := firstMsg(cmd)
-	tm, ok := msg.(types.NewTabMsg)
-	if !ok {
-		t.Fatalf("want NewTabMsg, got %T %#v", msg, msg)
-	}
-	if tm.Type != "editor" {
-		t.Fatalf("tab type: %q", tm.Type)
-	}
-	if tm.Data == nil {
-		t.Fatal("expected editor data for edit shortcut")
-	}
-}
-
-func TestHomeShortcut_NewHost(t *testing.T) {
-	m, _ := loadedModel(t)
-
-	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}))
-	_ = out
-	msg := firstMsg(cmd)
-	tm, ok := msg.(types.NewTabMsg)
-	if !ok {
-		t.Fatalf("want NewTabMsg, got %T %#v", msg, msg)
-	}
-	if tm.Title != "New Host" {
-		t.Fatalf("title: %q", tm.Title)
-	}
-}
-
-func TestHomeShortcut_TmuxMenu(t *testing.T) {
-	m, _ := loadedModel(t)
-
-	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModCtrl | tea.ModShift}))
-	_ = out
-	msg := firstMsg(cmd)
-	tm, ok := msg.(types.TmuxMenuMsg)
-	if !ok {
-		t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
-	}
-	if tm.HostID != 0 {
-		t.Fatalf("HostID: got %d want 0 (local tmux menu)", tm.HostID)
-	}
-}
-
-func TestHomeShortcut_SSHTmux(t *testing.T) {
-	m, h := loadedModel(t)
-
-	out, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}))
-	_ = out
-	msg := firstMsg(cmd)
-	tm, ok := msg.(types.TmuxMenuMsg)
-	if !ok {
-		t.Fatalf("want TmuxMenuMsg, got %T %#v", msg, msg)
-	}
-	if tm.HostID != h.ID {
-		t.Fatalf("HostID: got %d want %d", tm.HostID, h.ID)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, h := loadedModel(t)
+			_, cmd := m.Update(tc.key)
+			tc.check(t, firstMsg(cmd), h)
+		})
 	}
 }
 

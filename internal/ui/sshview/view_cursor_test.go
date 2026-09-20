@@ -2,21 +2,10 @@ package sshview
 
 import (
 	"testing"
-
-	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
-func newCursorTestModel(t *testing.T) *Model {
-	t.Helper()
-	m := New(&internalssh.InteractiveSession{Stdin: newProbeStdin()}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.SetSize(40, 10)
-	return m
-}
-
 func TestViewReportsInnerCursor(t *testing.T) {
-	m := newCursorTestModel(t)
+	m, _ := newProbeModel(t)
 	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("hello")})
 	v := m.View()
 	if v.Cursor == nil {
@@ -28,7 +17,7 @@ func TestViewReportsInnerCursor(t *testing.T) {
 }
 
 func TestViewReportsHiddenCursorPosition(t *testing.T) {
-	m := newCursorTestModel(t)
+	m, _ := newProbeModel(t)
 	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("hello")})
 	m.cursorHidden = true
 	v := m.View()
@@ -41,7 +30,7 @@ func TestViewReportsHiddenCursorPosition(t *testing.T) {
 }
 
 func TestViewOmitsCursorWhenScrolled(t *testing.T) {
-	m := newCursorTestModel(t)
+	m, _ := newProbeModel(t)
 	_, _ = m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("hello")})
 	m.scrollOffset = 1
 	if v := m.View(); v.Cursor != nil {

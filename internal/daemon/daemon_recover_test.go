@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 	"testing"
 	"time"
@@ -12,18 +11,9 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
-func captureLog(t *testing.T) *daemonWriteCloser {
-	t.Helper()
-	w := &daemonWriteCloser{}
-	old := log.Writer()
-	log.SetOutput(w)
-	t.Cleanup(func() { log.SetOutput(old) })
-	return w
-}
-
 func TestHandleFrameOpenHandlerPanicRecovered(t *testing.T) {
 	restoreTmuxStubs(t)
-	logs := captureLog(t)
+	logs := captureStallLog(t)
 	tmuxListSessions = func(context.Context, string) ([]types.TmuxSession, error) {
 		panic("boom")
 	}
@@ -50,7 +40,7 @@ func TestHandleFrameOpenHandlerPanicRecovered(t *testing.T) {
 }
 
 func TestHandleFramePanicRecovered(t *testing.T) {
-	logs := captureLog(t)
+	logs := captureStallLog(t)
 	rt := testTmuxRuntime(t)
 
 	handleFrame(rt, relay.Frame{Type: relay.FrameData, StreamID: 91, Payload: []byte("x")}, nil, nil, context.Background())

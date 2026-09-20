@@ -255,55 +255,32 @@ func TestSSHReconnectAlias(t *testing.T) {
 	}
 }
 
-func TestMigrateTmuxKeyBindingsDefaults(t *testing.T) {
-	cfg := KeyBindingConfig{
-		TmuxMenu:     []string{"m"},
-		BatchActions: []string{"ctrl+shift+m"},
-	}
-	migrateTmuxKeyBindings(&cfg, "linux")
-	if len(cfg.TmuxMenu) != 1 || cfg.TmuxMenu[0] != "ctrl+shift+m" {
-		t.Fatalf("TmuxMenu = %#v", cfg.TmuxMenu)
-	}
-	if len(cfg.BatchActions) != 1 || cfg.BatchActions[0] != "ctrl+shift+a" {
-		t.Fatalf("BatchActions = %#v", cfg.BatchActions)
-	}
-}
-
-func TestMigrateTmuxKeyBindingsWindows(t *testing.T) {
-	cfg := KeyBindingConfig{
-		TmuxMenu:     []string{"m"},
-		BatchActions: []string{"alt+shift+m"},
-	}
-	migrateTmuxKeyBindings(&cfg, "windows")
-	if len(cfg.TmuxMenu) != 1 || cfg.TmuxMenu[0] != "alt+shift+m" {
-		t.Fatalf("TmuxMenu = %#v", cfg.TmuxMenu)
-	}
-	if len(cfg.BatchActions) != 1 || cfg.BatchActions[0] != "alt+shift+a" {
-		t.Fatalf("BatchActions = %#v", cfg.BatchActions)
-	}
-}
-
-func TestMigrateTmuxKeyBindingsKeepsCustom(t *testing.T) {
-	cfg := KeyBindingConfig{
-		TmuxMenu:     []string{"x"},
-		BatchActions: []string{"ctrl+shift+z"},
-	}
-	migrateTmuxKeyBindings(&cfg, "linux")
-	if cfg.TmuxMenu[0] != "x" || cfg.BatchActions[0] != "ctrl+shift+z" {
-		t.Fatalf("custom bindings changed: %#v", cfg)
-	}
-}
-
-func TestMigrateTmuxKeyBindingsKeepsCustomBatchActions(t *testing.T) {
-	cfg := KeyBindingConfig{
-		TmuxMenu:     []string{"m"},
-		BatchActions: []string{"ctrl+shift+z"},
-	}
-	migrateTmuxKeyBindings(&cfg, "linux")
-	if len(cfg.TmuxMenu) != 1 || cfg.TmuxMenu[0] != "ctrl+shift+m" {
-		t.Fatalf("TmuxMenu = %#v", cfg.TmuxMenu)
-	}
-	if cfg.BatchActions[0] != "ctrl+shift+z" {
-		t.Fatalf("custom BatchActions changed: %#v", cfg.BatchActions)
+func TestMigrateTmuxKeyBindings(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		goos      string
+		tmuxMenu  string
+		batch     string
+		wantTmux  string
+		wantBatch string
+	}{
+		{name: "linux defaults", goos: "linux", tmuxMenu: "m", batch: "ctrl+shift+m", wantTmux: "ctrl+shift+m", wantBatch: "ctrl+shift+a"},
+		{name: "windows defaults", goos: "windows", tmuxMenu: "m", batch: "alt+shift+m", wantTmux: "alt+shift+m", wantBatch: "alt+shift+a"},
+		{name: "keeps custom", goos: "linux", tmuxMenu: "x", batch: "ctrl+shift+z", wantTmux: "x", wantBatch: "ctrl+shift+z"},
+		{name: "keeps custom batch actions", goos: "linux", tmuxMenu: "m", batch: "ctrl+shift+z", wantTmux: "ctrl+shift+m", wantBatch: "ctrl+shift+z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := KeyBindingConfig{
+				TmuxMenu:     []string{tc.tmuxMenu},
+				BatchActions: []string{tc.batch},
+			}
+			migrateTmuxKeyBindings(&cfg, tc.goos)
+			if len(cfg.TmuxMenu) != 1 || cfg.TmuxMenu[0] != tc.wantTmux {
+				t.Fatalf("TmuxMenu = %#v", cfg.TmuxMenu)
+			}
+			if len(cfg.BatchActions) != 1 || cfg.BatchActions[0] != tc.wantBatch {
+				t.Fatalf("BatchActions = %#v", cfg.BatchActions)
+			}
+		})
 	}
 }

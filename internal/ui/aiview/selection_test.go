@@ -20,11 +20,15 @@ func newSelectionModel() *Model {
 
 func mouse(x, y int) tea.Mouse { return tea.Mouse{X: x, Y: y, Button: tea.MouseLeft} }
 
+func dragMouse(m *Model, x1, y1, x2, y2 int) {
+	m.Update(tea.MouseClickMsg(mouse(x1, y1)))
+	m.Update(tea.MouseMotionMsg(mouse(x2, y2)))
+}
+
 func TestDragSelectCopiesPlainText(t *testing.T) {
 	m := newSelectionModel()
 
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
+	dragMouse(m, 2, 3, 10, 3)
 	if !m.sel.Active || !m.sel.Dragging {
 		t.Fatal("drag did not activate selection")
 	}
@@ -47,8 +51,7 @@ func TestDragSelectCopiesPlainText(t *testing.T) {
 
 func TestDragSelectAcrossLines(t *testing.T) {
 	m := newSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(3, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(8, 5)))
+	dragMouse(m, 3, 3, 8, 5)
 	_, cmd := m.Update(tea.MouseReleaseMsg(mouse(8, 5)))
 	if cmd == nil {
 		t.Fatal("release after drag returned no clipboard cmd")
@@ -61,8 +64,7 @@ func TestDragSelectAcrossLines(t *testing.T) {
 
 func TestDragSelectCopyShowsToast(t *testing.T) {
 	m := newSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
+	dragMouse(m, 2, 3, 10, 3)
 	_, cmd := m.Update(tea.MouseReleaseMsg(mouse(10, 3)))
 	if cmd == nil {
 		t.Fatal("release after drag returned no clipboard cmd")
@@ -90,8 +92,7 @@ func TestClickWithoutDragSelectsNothing(t *testing.T) {
 
 func TestEscClearsSelection(t *testing.T) {
 	m := newSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
+	dragMouse(m, 2, 3, 10, 3)
 	m.Update(keyMsg(tea.KeyEscape, 0))
 	if m.sel.Active {
 		t.Fatal("esc did not clear the selection")
@@ -103,8 +104,7 @@ func TestEscClearsSelection(t *testing.T) {
 
 func TestCtrlLDoesNotClear(t *testing.T) {
 	m := newSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(10, 3)))
+	dragMouse(m, 2, 3, 10, 3)
 	m.Update(keyMsg('l', tea.ModCtrl))
 	if !m.sel.Active {
 		t.Fatal("ctrl+l must not clear the selection")
@@ -125,8 +125,7 @@ func TestSelectionFollowsScrollOffset(t *testing.T) {
 	if off == 0 {
 		t.Fatal("expected scrolled viewport")
 	}
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(6, 3)))
+	dragMouse(m, 2, 3, 6, 3)
 	m.Update(tea.MouseReleaseMsg(mouse(6, 3)))
 	text := m.sel.Text(strings.Split(m.viewport.GetContent(), "\n"))
 	if text != "note" {
@@ -184,8 +183,7 @@ func TestDragSelectAutoScrollsAtBottomEdge(t *testing.T) {
 
 func TestDragSelectAutoScrollStopsOnRelease(t *testing.T) {
 	m := newTallSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(2, 22)))
+	dragMouse(m, 2, 3, 2, 22)
 	m.Update(tea.MouseReleaseMsg(mouse(2, 22)))
 	if m.selAutoScroll.Dir != 0 || m.selAutoScroll.Queued {
 		t.Fatal("release must stop auto-scroll")
@@ -199,8 +197,7 @@ func TestDragSelectAutoScrollStopsOnRelease(t *testing.T) {
 
 func TestDragSelectIgnoresStaleAutoScrollTick(t *testing.T) {
 	m := newTallSelectionModel()
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(2, 22)))
+	dragMouse(m, 2, 3, 2, 22)
 	off := m.viewport.YOffset()
 	m.Update(selectionAutoScrollMsg{seq: m.selSeq + 1})
 	if m.viewport.YOffset() != off {
@@ -214,8 +211,7 @@ func selectAll(t *testing.T, m *Model) string {
 	if len(lines) < 2 {
 		t.Fatal("content did not wrap")
 	}
-	m.Update(tea.MouseClickMsg(mouse(2, 3)))
-	m.Update(tea.MouseMotionMsg(mouse(98, 2+len(lines))))
+	dragMouse(m, 2, 3, 98, 2+len(lines))
 	if _, cmd := m.Update(tea.MouseReleaseMsg(mouse(98, 2+len(lines)))); cmd == nil {
 		t.Fatal("release returned no clipboard cmd")
 	}

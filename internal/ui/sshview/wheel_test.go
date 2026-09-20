@@ -6,16 +6,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func TestWheelForwardedInNormalScreenWhenMouseModeOn(t *testing.T) {
-	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.SetSize(40, 10)
+	m, stdin := newProbeModel(t)
 
 	_, _ = m.Update(ChunkMsg{
 		StreamID: m.StreamID(),
@@ -33,10 +27,7 @@ func TestWheelForwardedInNormalScreenWhenMouseModeOn(t *testing.T) {
 }
 
 func TestWheelScrollsScrollbackWhenMouseModeOff(t *testing.T) {
-	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.SetSize(40, 10)
+	m, stdin := newProbeModel(t)
 
 	_, _ = m.Update(ChunkMsg{
 		StreamID: m.StreamID(),
@@ -57,10 +48,7 @@ func TestWheelScrollsScrollbackWhenMouseModeOff(t *testing.T) {
 }
 
 func TestWheelAltScreenSendsArrowKeysWhenMouseModeOff(t *testing.T) {
-	stdin := newProbeStdin()
-	m := New(&internalssh.InteractiveSession{Stdin: stdin}, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.SetSize(40, 10)
+	m, stdin := newProbeModel(t)
 
 	_, _ = m.Update(ChunkMsg{
 		StreamID: m.StreamID(),

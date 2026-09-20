@@ -22,16 +22,32 @@ func replayTestData(t *testing.T) []byte {
 	return data
 }
 
+func mustReplayState(t *testing.T, data []byte, d time.Duration) *replayState {
+	t.Helper()
+	r, err := newReplayState(data, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func newReplayDetailModel(r *replayState, w, h int) *Model {
+	m := New(nil)
+	m.SetSize(w, h)
+	m.loaded = true
+	m.detail = true
+	m.replay = r
+	m.rows = []db.ConnectionHistory{{Label: "replay"}}
+	return m
+}
+
 func TestReplaySeekRebuildsTerminal(t *testing.T) {
 	data := replayTestData(t)
 	events, err := sshview.DecodeReplay(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := newReplayState(data, 10*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, data, 10*time.Second)
 	r.seek(time.Duration(events[len(events)-1].At) * time.Millisecond)
 	if got := r.emu.Render(); got == "" {
 		t.Fatal("empty replay screen")
@@ -43,10 +59,7 @@ func TestReplaySeekRebuildsTerminal(t *testing.T) {
 }
 
 func TestReplayAppliesInitialEventsAndRestartsAtEnd(t *testing.T) {
-	r, err := newReplayState(replayTestData(t), 10*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, replayTestData(t), 10*time.Second)
 	if r.next == 0 {
 		t.Fatal("initial events were not applied")
 	}
@@ -58,10 +71,7 @@ func TestReplayAppliesInitialEventsAndRestartsAtEnd(t *testing.T) {
 }
 
 func TestReplaySpaceKeyTogglesPlayback(t *testing.T) {
-	r, err := newReplayState(replayTestData(t), 10*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, replayTestData(t), 10*time.Second)
 	m := New(nil)
 	m.detail = true
 	m.replay = r
@@ -79,17 +89,9 @@ func TestReplayProgressStaysAtBottomWithWideGrowingScreen(t *testing.T) {
 	recorder.Resize(20, 100)
 	recorder.Output([]byte(strings.Repeat("x", 200) + "\n" + strings.Repeat("y", 200)))
 	data, duration, _ := recorder.Close()
-	r, err := newReplayState(data, duration)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, data, duration)
 	r.seek(r.duration)
-	m := New(nil)
-	m.SetSize(30, 12)
-	m.loaded = true
-	m.detail = true
-	m.replay = r
-	m.rows = []db.ConnectionHistory{{Label: "replay"}}
+	m := newReplayDetailModel(r, 30, 12)
 	view := m.View().Content
 	lines := strings.Split(view, "\n")
 	if len(lines) != 12 || !strings.Contains(lines[len(lines)-1], "[paused]") {
@@ -107,17 +109,9 @@ func TestReplayAltScreenKeepsBottomRowsWhenViewportIsShorter(t *testing.T) {
 	recorder.Resize(10, 20)
 	recorder.Output([]byte("\x1b[?1049h\x1b[Hrow00\r\nrow01\r\nrow02\r\nrow03\r\nrow04\r\nrow05\r\nrow06\r\nrow07\r\nrow08\r\nrow09"))
 	data, duration, _ := recorder.Close()
-	r, err := newReplayState(data, duration)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, data, duration)
 	r.seek(r.duration)
-	m := New(nil)
-	m.SetSize(20, 8)
-	m.loaded = true
-	m.detail = true
-	m.replay = r
-	m.rows = []db.ConnectionHistory{{Label: "replay"}}
+	m := newReplayDetailModel(r, 20, 8)
 	view := m.View().Content
 	if !strings.Contains(view, "row09") || strings.Contains(view, "row00") {
 		t.Fatalf("alt-screen viewport did not keep bottom rows: %q", view)
@@ -129,17 +123,9 @@ func TestReplayNormalScreenKeepsBottomRowsWhenViewportIsShorter(t *testing.T) {
 	recorder.Resize(10, 20)
 	recorder.Output([]byte("\x1b[Hrow00\r\nrow01\r\nrow02\r\nrow03\r\nrow04\r\nrow05\r\nrow06\r\nrow07\r\nrow08\r\nrow09"))
 	data, duration, _ := recorder.Close()
-	r, err := newReplayState(data, duration)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, data, duration)
 	r.seek(r.duration)
-	m := New(nil)
-	m.SetSize(20, 8)
-	m.loaded = true
-	m.detail = true
-	m.replay = r
-	m.rows = []db.ConnectionHistory{{Label: "replay"}}
+	m := newReplayDetailModel(r, 20, 8)
 	view := m.View().Content
 	if !strings.Contains(view, "row09") || strings.Contains(view, "row00") {
 		t.Fatalf("normal viewport did not keep bottom rows: %q", view)
@@ -147,10 +133,7 @@ func TestReplayNormalScreenKeepsBottomRowsWhenViewportIsShorter(t *testing.T) {
 }
 
 func TestReplayHidesMetadataWhilePlayingAndRestoresItWhenPaused(t *testing.T) {
-	r, err := newReplayState(replayTestData(t), 10*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := mustReplayState(t, replayTestData(t), 10*time.Second)
 	m := New(nil)
 	m.SetSize(40, 10)
 	m.loaded = true
@@ -177,14 +160,8 @@ func TestReplayHidesMetadataWhilePlayingAndRestoresItWhenPaused(t *testing.T) {
 }
 
 func TestStaleReplayTickDoesNotAdvanceReplacement(t *testing.T) {
-	old, err := newReplayState(replayTestData(t), time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := newReplayState(replayTestData(t), time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	old := mustReplayState(t, replayTestData(t), time.Minute)
+	current := mustReplayState(t, replayTestData(t), time.Minute)
 	current.playing = true
 	current.lastTick = time.Now().Add(-time.Second)
 	m := New(nil)

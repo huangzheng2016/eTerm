@@ -36,9 +36,7 @@ func TestEnterDuringRunQueuesDimThenSteerAck(t *testing.T) {
 	if m.input.Value() != "" {
 		t.Fatal("input not reset after queueing")
 	}
-	fake.mu.Lock()
-	queued := append([]string(nil), fake.Queued...)
-	fake.mu.Unlock()
+	queued := queuedSnapshot(fake)
 	if len(queued) != 1 || queued[0] != "second" {
 		t.Fatalf("runner queue: %v", queued)
 	}
@@ -84,9 +82,7 @@ func TestCtrlCDuringRunDiscardsQueue(t *testing.T) {
 			t.Fatalf("system block %q was never rendered (blank gap)", b.text)
 		}
 	}
-	fake.mu.Lock()
-	remaining := fake.Queued
-	fake.mu.Unlock()
+	remaining := queuedSnapshot(fake)
 	if len(remaining) != 0 {
 		t.Fatalf("runner queue not cleared: %v", remaining)
 	}
@@ -125,9 +121,7 @@ func TestEnqueueFailureKeepsInputAndShowsError(t *testing.T) {
 			t.Fatalf("failed enqueue must not add a queued block: %+v", b)
 		}
 	}
-	fake.mu.Lock()
-	remaining := fake.Queued
-	fake.mu.Unlock()
+	remaining := queuedSnapshot(fake)
 	if len(remaining) != 0 {
 		t.Fatalf("failed enqueue must not reach the runner queue: %v", remaining)
 	}

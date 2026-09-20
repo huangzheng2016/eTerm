@@ -6,28 +6,27 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestConfirmMouseClickYes(t *testing.T) {
-	c := NewConfirm("Delete", "Delete item?").Show()
-
-	c, _ = c.Update(tea.MouseClickMsg(tea.Mouse{X: 5, Y: 6, Button: tea.MouseLeft}))
-
-	if c.IsActive() {
-		t.Fatal("expected confirm to close")
+func TestConfirmMouseClick(t *testing.T) {
+	cases := []struct {
+		name string
+		x    int
+		want bool
+	}{
+		{"yes", 5, true},
+		{"no", 16, false},
 	}
-	if !c.Result() {
-		t.Fatal("expected yes result")
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewConfirm("Delete", "Delete item?").Show()
 
-func TestConfirmMouseClickNo(t *testing.T) {
-	c := NewConfirm("Delete", "Delete item?").Show()
+			c, _ = c.Update(tea.MouseClickMsg(tea.Mouse{X: tc.x, Y: 6, Button: tea.MouseLeft}))
 
-	c, _ = c.Update(tea.MouseClickMsg(tea.Mouse{X: 16, Y: 6, Button: tea.MouseLeft}))
-
-	if c.IsActive() {
-		t.Fatal("expected confirm to close")
-	}
-	if c.Result() {
-		t.Fatal("expected no result")
+			if c.IsActive() {
+				t.Fatal("expected confirm to close")
+			}
+			if c.Result() != tc.want {
+				t.Fatalf("result = %v want %v", c.Result(), tc.want)
+			}
+		})
 	}
 }

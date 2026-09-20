@@ -13,12 +13,31 @@ import (
 	"gorm.io/gorm"
 )
 
-func newModelWithSecrets(t *testing.T) (*Model, *gorm.DB) {
+func newSyncDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	return database
+}
+
+func enableHTTPSync(m *Model) {
+	m.enableIdx = 1
+	m.modeIdx = 0
+	m.inputs[inServerURL].SetValue("https://sync.example.com")
+}
+
+func mustSaveSuccess(t *testing.T, m *Model) {
+	t.Helper()
+	if msg, ok := m.save()().(types.SuccessMsg); !ok {
+		t.Fatalf("got %T want types.SuccessMsg", msg)
+	}
+}
+
+func newModelWithSecrets(t *testing.T) (*Model, *gorm.DB) {
+	t.Helper()
+	database := newSyncDB(t)
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.Setup([]byte("pw"))
 	k := mk.GetKey()
@@ -59,11 +78,7 @@ func TestViewShowsSectionsAndMasksSecrets(t *testing.T) {
 }
 
 func TestViewShowsNotSetForEmptySecrets(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := New(database, security.NewMasterKeyManager(nil, nil, time.Minute))
+	m := New(newSyncDB(t), security.NewMasterKeyManager(nil, nil, time.Minute))
 	m.SetSize(100, 40)
 
 	view := m.View().Content
@@ -144,13 +159,8 @@ func TestSaveKeepsUntouchedSecrets(t *testing.T) {
 	beforeKey, _ := db.GetSetting(database, "sync_api_key")
 	beforePass, _ := db.GetSetting(database, "sync_passphrase")
 
-	m.enableIdx = 1
-	m.modeIdx = 0
-	m.inputs[inServerURL].SetValue("https://sync.example.com")
-	msg := m.save()()
-	if _, ok := msg.(types.SuccessMsg); !ok {
-		t.Fatalf("got %T want types.SuccessMsg", msg)
-	}
+	enableHTTPSync(m)
+	mustSaveSuccess(t, m)
 
 	afterKey, _ := db.GetSetting(database, "sync_api_key")
 	afterPass, _ := db.GetSetting(database, "sync_passphrase")
@@ -163,15 +173,10 @@ func TestSaveOverwritesEditedSecret(t *testing.T) {
 	m, database := newModelWithSecrets(t)
 	beforeKey, _ := db.GetSetting(database, "sync_api_key")
 
-	m.enableIdx = 1
-	m.modeIdx = 0
-	m.inputs[inServerURL].SetValue("https://sync.example.com")
+	enableHTTPSync(m)
 	m.pendPass = "newpass"
 	m.passDirty = true
-	msg := m.save()()
-	if _, ok := msg.(types.SuccessMsg); !ok {
-		t.Fatalf("got %T want types.SuccessMsg", msg)
-	}
+	mustSaveSuccess(t, m)
 
 	enc, _ := db.GetSetting(database, "sync_passphrase")
 	k := m.masterKey.GetKey()
@@ -196,24 +201,15 @@ func TestSaveClearsEditedSecret(t *testing.T) {
 
 	m.pendAPIKey = ""
 	m.apiKeyDirty = true
-	msg := m.save()()
-	if _, ok := msg.(types.SuccessMsg); !ok {
-		t.Fatalf("got %T want types.SuccessMsg", msg)
-	}
+	mustSaveSuccess(t, m)
 	if v, _ := db.GetSetting(database, "sync_api_key"); v != "" {
 		t.Fatalf("sync_api_key = %q, want cleared", v)
 	}
 }
 
 func TestSaveRequiresEffectivePassphrase(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := New(database, security.NewMasterKeyManager(nil, nil, time.Minute))
-	m.enableIdx = 1
-	m.modeIdx = 0
-	m.inputs[inServerURL].SetValue("https://sync.example.com")
+	m := New(newSyncDB(t), security.NewMasterKeyManager(nil, nil, time.Minute))
+	enableHTTPSync(m)
 
 	if cmd := m.save(); cmd != nil {
 		t.Fatal("expected validation failure without passphrase")

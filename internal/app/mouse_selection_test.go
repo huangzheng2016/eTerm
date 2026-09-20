@@ -11,6 +11,25 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
+func appTestSelectionApp(t *testing.T, width, height, tabW, tabH int) (App, *sshview.Model) {
+	t.Helper()
+	tab := sshview.New(nil, "test", 0, viewkeys.SSHKeys{})
+	t.Cleanup(func() { _ = tab.Close() })
+	tab.SetSize(tabW, tabH)
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.SetupNoPassword()
+	return App{
+		masterKey: mk,
+		viewState: MainView,
+		width:     width,
+		height:    height,
+		tabs: []Tab{
+			{Type: SSHTab, Title: "ssh", Model: tab},
+		},
+		activeTab: 0,
+	}, tab
+}
+
 func TestAppViewEnablesMouseDragEvents(t *testing.T) {
 	tab := sshview.New(nil, "test", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
@@ -57,21 +76,7 @@ func TestAppForwardsMouseReleaseOutsideContentDuringSSHSelection(t *testing.T) {
 }
 
 func TestAppUpdateCompletesSSHSelectionWhenReleaseIsAboveContent(t *testing.T) {
-	tab := sshview.New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = tab.Close() })
-	tab.SetSize(80, 10)
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.SetupNoPassword()
-	a := App{
-		masterKey: mk,
-		viewState: MainView,
-		width:     80,
-		height:    20,
-		tabs: []Tab{
-			{Type: SSHTab, Title: "ssh", Model: tab},
-		},
-		activeTab: 0,
-	}
+	a, tab := appTestSelectionApp(t, 80, 20, 80, 10)
 	top := a.MainViewChromeTopLines()
 
 	next, _ := a.Update(tea.MouseClickMsg(tea.Mouse{X: 2, Y: top + 2, Button: tea.MouseLeft}))
@@ -104,22 +109,8 @@ func TestAppUpdateCopiesSSHSelectionWhenReleaseLeavesContent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tab := sshview.New(nil, "test", 0, viewkeys.SSHKeys{})
-			t.Cleanup(func() { _ = tab.Close() })
-			tab.SetSize(20, 5)
+			a, tab := appTestSelectionApp(t, 20, 12, 20, 5)
 			tab.Update(sshview.ChunkMsg{StreamID: tab.StreamID(), Data: []byte("hello world\r\n")})
-			mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-			mk.SetupNoPassword()
-			a := App{
-				masterKey: mk,
-				viewState: MainView,
-				width:     20,
-				height:    12,
-				tabs: []Tab{
-					{Type: SSHTab, Title: "ssh", Model: tab},
-				},
-				activeTab: 0,
-			}
 			top := a.MainViewChromeTopLines()
 			contentH := a.mainContentHeight()
 
@@ -149,21 +140,7 @@ func TestAppUpdateCopiesSSHSelectionWhenReleaseLeavesContent(t *testing.T) {
 }
 
 func TestAppUpdateForwardsOutsideMotionToStartSelectionAutoScroll(t *testing.T) {
-	tab := sshview.New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = tab.Close() })
-	tab.SetSize(20, 5)
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.SetupNoPassword()
-	a := App{
-		masterKey: mk,
-		viewState: MainView,
-		width:     20,
-		height:    12,
-		tabs: []Tab{
-			{Type: SSHTab, Title: "ssh", Model: tab},
-		},
-		activeTab: 0,
-	}
+	a, _ := appTestSelectionApp(t, 20, 12, 20, 5)
 	top := a.MainViewChromeTopLines()
 
 	next, _ := a.Update(tea.MouseClickMsg(tea.Mouse{X: 2, Y: top + 2, Button: tea.MouseLeft}))

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -119,9 +120,9 @@ func fullClientPayload(data []byte) []byte {
 	return payload
 }
 
-func waitFeedEvent(t *testing.T, ch <-chan Event, match func(Event) bool) Event {
+func waitEvent(t *testing.T, ch <-chan Event, match func(Event) bool) Event {
 	t.Helper()
-	timeout := time.After(10 * time.Second)
+	timeout := time.After(15 * time.Second)
 	for {
 		select {
 		case ev, ok := <-ch:
@@ -137,33 +138,64 @@ func waitFeedEvent(t *testing.T, ch <-chan Event, match func(Event) bool) Event 
 	}
 }
 
-func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_CHUNK", "6400")
-	defer os.Unsetenv("GO_FAKE_CHUNK")
+func waitEventsClosed(t *testing.T, ch <-chan Event) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("events channel not closed after Close")
+		}
+	}
+}
 
-	srv := newFeedServer(t)
+func waitSignal(t *testing.T, ch <-chan struct{}, msg string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(msg)
+	}
+}
+
+func expectAudio(t *testing.T, ch <-chan []byte, want []byte, msg string) {
+	t.Helper()
+	select {
+	case got := <-ch:
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s: got %v, want %v", msg, got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s: not received", msg)
+	}
+}
+
+func newFeedTestEngine(t *testing.T, srv *feedServer) *VolcanoFeedEngine {
+	t.Helper()
+	t.Setenv("GO_FAKE_PROTOCOL", "2")
 	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
+	t.Cleanup(httpSrv.Close)
 	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
+	return NewVolcanoFeedEngine(VolcanoFeedConfig{
 		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
 		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
 	})
+}
+
+func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
+	t.Setenv("GO_FAKE_CHUNK", "6400")
+
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 
 	assertCycle := func() {
 		t.Helper()
 		for i, want := range [][]byte{bytes.Repeat([]byte{1}, 6400), bytes.Repeat([]byte{2}, 6400)} {
-			select {
-			case got := <-srv.audio:
-				if !bytes.Equal(got, want) {
-					t.Fatalf("audio %d = %v, want %v", i, got, want)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatalf("server did not receive audio frame %d", i)
-			}
+			expectAudio(t, srv.audio, want, fmt.Sprintf("audio frame %d", i))
 		}
 		select {
 		case seq := <-srv.final:
@@ -173,7 +205,7 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("server did not receive final frame")
 		}
-		final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+		final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 		if final.Text != "hello" {
 			t.Fatalf("final transcript = %q", final.Text)
 		}
@@ -184,11 +216,7 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 	}
 	assertCycle()
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session after utterance_end")
-	}
+	waitSignal(t, srv.conn2, "no redialed session after utterance_end")
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -204,34 +232,14 @@ func TestVolcanoFeedRoutesPassthrough(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
+	waitEventsClosed(t, eng.Events())
 }
 
 func TestVolcanoFeedFirstChunkLands(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newFeedServer(t)
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -253,20 +261,10 @@ func TestVolcanoFeedFirstChunkLands(t *testing.T) {
 }
 
 func TestVolcanoFeedAggregatesPCMTo200ms(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newFeedServer(t)
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -284,31 +282,14 @@ func TestVolcanoFeedAggregatesPCMTo200ms(t *testing.T) {
 
 	eng.onAudio(bytes.Repeat([]byte{0x22}, 1600))
 	want := append(bytes.Repeat([]byte{0x11}, 4800), bytes.Repeat([]byte{0x22}, 1600)...)
-	select {
-	case got := <-srv.audio:
-		if !bytes.Equal(got, want) {
-			t.Fatalf("aggregated frame = %d bytes, want %d", len(got), len(want))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("aggregated frame not sent")
-	}
+	expectAudio(t, srv.audio, want, "aggregated frame")
 }
 
 func TestVolcanoFeedStopFlushesBufferedPCM(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newFeedServer(t)
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -318,15 +299,8 @@ func TestVolcanoFeedStopFlushesBufferedPCM(t *testing.T) {
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case got := <-srv.audio:
-		if !bytes.Equal(got, want) {
-			t.Fatalf("flushed frame = %d bytes, want %d", len(got), len(want))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("buffered audio not flushed on Stop")
-	}
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	expectAudio(t, srv.audio, want, "buffered audio not flushed on Stop")
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
@@ -334,28 +308,14 @@ func TestVolcanoFeedStopFlushesBufferedPCM(t *testing.T) {
 }
 
 func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-
 	srv := newFeedServer(t)
 	srv.hangSecond = true
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session")
-	}
+	waitSignal(t, srv.conn2, "no redialed session")
 
 	done := make(chan struct{})
 	go func() {
@@ -370,21 +330,11 @@ func TestVolcanoFeedCloseAbortsRedial(t *testing.T) {
 }
 
 func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_CHUNK", "6400")
-	defer os.Unsetenv("GO_FAKE_CHUNK")
+	t.Setenv("GO_FAKE_CHUNK", "6400")
 
 	srv := newFeedServer(t)
 	srv.finalDelay = 2 * time.Second
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +350,7 @@ func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
 		t.Fatal("redial did not overlap the final wait")
 	}
 
-	final := waitFeedEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello" {
 		t.Fatalf("final transcript = %q", final.Text)
 	}
@@ -411,21 +361,11 @@ func TestVolcanoFeedRedialOverlapsFinalWait(t *testing.T) {
 }
 
 func TestVolcanoFeedRedialIsAsync(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newFeedServer(t)
 	srv.secondDelay = 1500 * time.Millisecond
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -437,32 +377,18 @@ func TestVolcanoFeedRedialIsAsync(t *testing.T) {
 		t.Fatalf("onUtteranceEnd blocked for %v", elapsed)
 	}
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session")
-	}
+	waitSignal(t, srv.conn2, "no redialed session")
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestVolcanoFeedRedialWindowAudioReplayed(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newFeedServer(t)
 	srv.secondDelay = time.Second
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -473,14 +399,7 @@ func TestVolcanoFeedRedialWindowAudioReplayed(t *testing.T) {
 	chunkB := bytes.Repeat([]byte{2}, 6400)
 
 	eng.onAudio(chunkA)
-	select {
-	case got := <-srv.audio:
-		if !bytes.Equal(got, chunkA) {
-			t.Fatalf("conn1 audio = %d bytes, want chunkA", len(got))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("conn1 did not receive chunkA")
-	}
+	expectAudio(t, srv.audio, chunkA, "conn1 chunkA")
 
 	eng.onAudio(tail)
 	eng.onUtteranceEnd()
@@ -493,14 +412,7 @@ func TestVolcanoFeedRedialWindowAudioReplayed(t *testing.T) {
 		t.Fatal("audio during redial window was not buffered")
 	}
 
-	select {
-	case got := <-srv.audio:
-		if !bytes.Equal(got, tail) {
-			t.Fatalf("conn1 tail = %d bytes, want %d", len(got), len(tail))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("conn1 did not receive the buffered tail")
-	}
+	expectAudio(t, srv.audio, tail, "conn1 tail")
 	select {
 	case seq := <-srv.final:
 		if seq >= 0 {
@@ -510,19 +422,8 @@ func TestVolcanoFeedRedialWindowAudioReplayed(t *testing.T) {
 		t.Fatal("conn1 did not receive final frame")
 	}
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session")
-	}
-	select {
-	case got := <-srv.audio2:
-		if !bytes.Equal(got, chunkB) {
-			t.Fatalf("conn2 replayed audio = %d bytes, want chunkB", len(got))
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("window audio was not replayed to the new connection")
-	}
+	waitSignal(t, srv.conn2, "no redialed session")
+	expectAudio(t, srv.audio2, chunkB, "window audio not replayed to the new connection")
 
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
@@ -559,20 +460,10 @@ func TestVolcanoFeedRejectsOldHelper(t *testing.T) {
 }
 
 func TestVolcanoFeedSetContextInheritsOnRedial(t *testing.T) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	defer os.Unsetenv("GO_FAKE_PROTOCOL")
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	defer os.Unsetenv("GO_FAKE_NO_AUDIO")
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
 
 	srv := newFeedServer(t)
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	defer httpSrv.Close()
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -594,19 +485,10 @@ func TestVolcanoFeedSetContextInheritsOnRedial(t *testing.T) {
 
 	eng.onUtteranceEnd()
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session")
-	}
+	waitSignal(t, srv.conn2, "no redialed session")
 	select {
 	case cfg := <-srv.configs:
-		var v struct {
-			Corpus struct {
-				Context string `json:"context"`
-			} `json:"corpus"`
-		}
-		if json.Unmarshal(cfg, &v) != nil || v.Corpus.Context != contextJSON {
+		if got := feedConfigContext(t, cfg); got != contextJSON {
 			t.Fatalf("redialed config lost context: %s", cfg)
 		}
 	case <-time.After(5 * time.Second):
@@ -798,26 +680,10 @@ func feedConfigContext(t *testing.T, cfg []byte) string {
 	return v.Corpus.Context
 }
 
-func newContextFeedTestEngine(t *testing.T) (*VolcanoFeedEngine, *feedServer) {
-	os.Setenv("GO_FAKE_PROTOCOL", "2")
-	t.Cleanup(func() { os.Unsetenv("GO_FAKE_PROTOCOL") })
-	os.Setenv("GO_FAKE_NO_AUDIO", "1")
-	t.Cleanup(func() { os.Unsetenv("GO_FAKE_NO_AUDIO") })
-
-	srv := newFeedServer(t)
-	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
-	t.Cleanup(httpSrv.Close)
-	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
-
-	eng := NewVolcanoFeedEngine(VolcanoFeedConfig{
-		Volcano: VolcanoConfig{APIKey: "test-key", URL: wsURL},
-		Helper:  LocalConfig{BinPath: fakeHelperWrapper(t)},
-	})
-	return eng, srv
-}
-
 func TestVolcanoFeedRefreshesContextFromProviderOnRedial(t *testing.T) {
-	eng, srv := newContextFeedTestEngine(t)
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 
 	current := `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"first"}]}`
 	eng.SetContextProvider(func() string { return current })
@@ -834,11 +700,7 @@ func TestVolcanoFeedRefreshesContextFromProviderOnRedial(t *testing.T) {
 	current = `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"second"}]}`
 	eng.onUtteranceEnd()
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no redialed session")
-	}
+	waitSignal(t, srv.conn2, "no redialed session")
 	if got := feedConfigContext(t, <-srv.configs); !strings.Contains(got, `"second"`) || strings.Contains(got, `"first"`) {
 		t.Fatalf("redial did not use provider value: %q", got)
 	}
@@ -849,7 +711,9 @@ func TestVolcanoFeedRefreshesContextFromProviderOnRedial(t *testing.T) {
 }
 
 func TestVolcanoFeedPanickingProviderDoesNotBreakRecording(t *testing.T) {
-	eng, srv := newContextFeedTestEngine(t)
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 	eng.SetContextProvider(func() string { panic("boom") })
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -862,11 +726,7 @@ func TestVolcanoFeedPanickingProviderDoesNotBreakRecording(t *testing.T) {
 
 	eng.onUtteranceEnd()
 
-	select {
-	case <-srv.conn2:
-	case <-time.After(5 * time.Second):
-		t.Fatal("redial after provider panic did not happen")
-	}
+	waitSignal(t, srv.conn2, "redial after provider panic did not happen")
 	if got := feedConfigContext(t, <-srv.configs); got != "" {
 		t.Fatalf("panicking provider leaked context on redial: %q", got)
 	}
@@ -877,7 +737,9 @@ func TestVolcanoFeedPanickingProviderDoesNotBreakRecording(t *testing.T) {
 }
 
 func TestVolcanoFeedEmptyProviderMeansNoContext(t *testing.T) {
-	eng, srv := newContextFeedTestEngine(t)
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 	if err := eng.SetContext(`{"context_type":"dialog_ctx"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +755,9 @@ func TestVolcanoFeedEmptyProviderMeansNoContext(t *testing.T) {
 }
 
 func TestVolcanoFeedContextReusesLastGoodOnProviderPanic(t *testing.T) {
-	eng, srv := newContextFeedTestEngine(t)
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 
 	mode := "good"
 	eng.SetContextProvider(func() string {
@@ -925,7 +789,9 @@ func TestVolcanoFeedContextReusesLastGoodOnProviderPanic(t *testing.T) {
 }
 
 func TestVolcanoFeedContextEmptyThenPanicReusesLastGood(t *testing.T) {
-	eng, srv := newContextFeedTestEngine(t)
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 
 	mode := "good"
 	eng.SetContextProvider(func() string {
@@ -966,7 +832,9 @@ func TestVolcanoFeedContextEmptyThenPanicReusesLastGood(t *testing.T) {
 }
 
 func TestVolcanoFeedNilProviderRestoresStaticContext(t *testing.T) {
-	eng, srv := newContextFeedTestEngine(t)
+	t.Setenv("GO_FAKE_NO_AUDIO", "1")
+	srv := newFeedServer(t)
+	eng := newFeedTestEngine(t, srv)
 
 	static := `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"static"}]}`
 	if err := eng.SetContext(static); err != nil {

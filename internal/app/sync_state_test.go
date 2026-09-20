@@ -1,24 +1,13 @@
 package app
 
 import (
-	"path/filepath"
 	"testing"
-	"time"
 
-	"github.com/huangzheng2016/eTerm/internal/db"
-	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
 )
 
 func TestSyncStartDisabledDoesNotSetInFlight(t *testing.T) {
-	gdb, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.Setup([]byte("pw"))
-	a := NewApp(gdb, mk)
-	a.viewState = MainView
+	a := tickTestApp(t)
 
 	next, cmd := a.Update(types.SyncStartMsg{})
 	updated := next.(App)
@@ -36,14 +25,7 @@ func TestSyncStartDisabledDoesNotSetInFlight(t *testing.T) {
 }
 
 func TestSyncTickDisabledDoesNotSetInFlight(t *testing.T) {
-	gdb, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.Setup([]byte("pw"))
-	a := NewApp(gdb, mk)
-	a.viewState = MainView
+	a := tickTestApp(t)
 
 	next, cmd := a.Update(types.SyncTickMsg{})
 	updated := next.(App)
@@ -59,14 +41,7 @@ func TestSyncTickDisabledDoesNotSetInFlight(t *testing.T) {
 }
 
 func TestSyncStartWhileInFlightShowsToastCommand(t *testing.T) {
-	gdb, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
-	mk.Setup([]byte("pw"))
-	a := NewApp(gdb, mk)
-	a.viewState = MainView
+	a := tickTestApp(t)
 	a.syncing = true
 
 	next, cmd := a.Update(types.SyncStartMsg{})

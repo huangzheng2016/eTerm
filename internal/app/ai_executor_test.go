@@ -5,13 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/huangzheng2016/eTerm/internal/ai"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
-	"gorm.io/gorm"
 )
 
 func TestDecodeSendKeys(t *testing.T) {
@@ -138,13 +136,7 @@ func TestAISharedStatePeers(t *testing.T) {
 }
 
 func TestAIStorePersistenceRoundTrip(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.AppSetting{}); err != nil {
-		t.Fatal(err)
-	}
+	database := aiTestDB(t)
 	mk := security.NewMasterKeyManager(nil, nil, 0)
 	mk.Setup([]byte("pw"))
 
@@ -194,13 +186,7 @@ func TestBridgeModelsAndSwitch(t *testing.T) {
 	store.Upsert(ai.Provider{Name: "free-tokens_kimi", Type: ai.ProviderOpenAI, APIKey: "k"})
 	store.Upsert(ai.Provider{Name: "mine", Type: ai.ProviderOpenAI, APIKey: "k2", DefaultModel: "gpt-5"})
 	store.Models = append(store.Models, ai.ModelAlias{Alias: "free-tokens_kimi/kimi-k3-highspeed", Provider: "free-tokens_kimi", Model: "kimi-k3-highspeed"})
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.AppSetting{}); err != nil {
-		t.Fatal(err)
-	}
+	database := aiTestDB(t)
 	bridge := &aiBridge{store: store, db: database, mk: security.NewMasterKeyManager(nil, nil, 0)}
 
 	models := bridge.Models()

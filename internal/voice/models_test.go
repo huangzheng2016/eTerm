@@ -189,6 +189,53 @@ func TestRegisterEngineDuplicatePanics(t *testing.T) {
 	})
 }
 
+func TestStreamFeedDescriptors(t *testing.T) {
+	for id, missing := range map[string]string{
+		"assemblyai": "AssemblyAI API key",
+		"deepgram":   "Deepgram API key",
+	} {
+		d, ok := EngineDescriptorByID(id)
+		if !ok {
+			t.Fatalf("%s engine not registered", id)
+		}
+		if d.Ready(map[string]string{}) {
+			t.Fatalf("%s: ready without key", id)
+		}
+		if !d.Ready(map[string]string{"api_key": "k"}) {
+			t.Fatalf("%s: not ready with key", id)
+		}
+		if got := FirstMissingParam(d, map[string]string{}); got != missing {
+			t.Fatalf("%s: first missing = %q", id, got)
+		}
+		eng, err := d.New(map[string]string{"api_key": "k"}, FeedDeps{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := eng.(*streamFeedEngine); !ok {
+			t.Fatalf("%s New = %T", id, eng)
+		}
+		eng.Close()
+	}
+}
+
+func TestEnginesRequireAPIKey(t *testing.T) {
+	type startCloser interface {
+		Start(context.Context) error
+		Close() error
+	}
+	engines := map[string]startCloser{
+		"assemblyai": NewAssemblyAIEngine(AssemblyAIConfig{}),
+		"deepgram":   NewDeepgramEngine(DeepgramConfig{}),
+		"volcano":    NewVolcanoEngine(VolcanoConfig{}),
+	}
+	for name, eng := range engines {
+		if err := eng.Start(context.Background()); err == nil {
+			t.Fatalf("%s: expected auth error", name)
+		}
+		eng.Close()
+	}
+}
+
 func downloadTestSpec() ModelSpec {
 	return ModelSpec{
 		ID: "test-model", Name: "Test", Kind: "sensevoice",

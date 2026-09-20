@@ -43,17 +43,22 @@ func (fakeExecutor) ListTabs(ctx context.Context) ([]TabInfo, error) {
 	return []TabInfo{{ID: "t1", Title: "shell", Type: "local", Active: true}}, nil
 }
 
-func TestAgentRunEmitsEventsAndHistory(t *testing.T) {
-	ctx := context.Background()
+func newTestAgent(t *testing.T, m model.ChatModel, queue *steerQueue) *Agent {
+	t.Helper()
 	tools, err := BuildTools(fakeExecutor{}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	adkAgent, err := buildADKAgent(ctx, &fakeModel{}, tools, "test instruction", 4, 100000, nil)
+	adkAgent, err := buildADKAgent(context.Background(), m, tools, "test instruction", 4, 100000, queue)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &Agent{agent: adkAgent}
+	return &Agent{agent: adkAgent, queue: queue}
+}
+
+func TestAgentRunEmitsEventsAndHistory(t *testing.T) {
+	ctx := context.Background()
+	a := newTestAgent(t, &fakeModel{}, nil)
 
 	var texts, toolCalls, toolResults []string
 	var sawDone, sawErr bool
@@ -124,7 +129,7 @@ func TestDequeueLastPreventsInjection(t *testing.T) {
 	ctx := context.Background()
 	m := &steerToolModel{release: make(chan struct{}), entered: make(chan struct{})}
 	queue := &steerQueue{}
-	a := newSteerAgent(t, m, queue)
+	a := newTestAgent(t, m, queue)
 
 	done := drainRun(a, ctx, "list tabs")
 	<-m.entered
@@ -204,15 +209,8 @@ func (m *echoModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 
 func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := &Agent{agent: adkAgent, historyBudget: 1000}
+	a := newTestAgent(t, &echoModel{}, nil)
+	a.historyBudget = 1000
 
 	for i := 0; i < 10; i++ {
 		for range a.Run(ctx, "question") {
@@ -236,15 +234,7 @@ func TestHistoryStaysBoundedAcrossTurns(t *testing.T) {
 
 func TestExportImportHistoryRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := &Agent{agent: adkAgent}
+	a := newTestAgent(t, &echoModel{}, nil)
 
 	if data, err := a.ExportHistory(0); err != nil || data != nil {
 		t.Fatalf("empty export: got %q, %v", data, err)
@@ -256,7 +246,7 @@ func TestExportImportHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("export: %v, %d bytes", err, len(data))
 	}
 
-	b := &Agent{agent: adkAgent}
+	b := newTestAgent(t, &echoModel{}, nil)
 	if err := b.ImportHistory(data); err != nil {
 		t.Fatal(err)
 	}
@@ -275,15 +265,7 @@ func TestExportImportHistoryRoundTrip(t *testing.T) {
 
 func TestExportHistoryCapDropsOldestTurns(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := &Agent{agent: adkAgent}
+	a := newTestAgent(t, &echoModel{}, nil)
 	for i := 0; i < 5; i++ {
 		for range a.Run(ctx, "question") {
 		}
@@ -313,15 +295,7 @@ func TestExportHistoryCapDropsOldestTurns(t *testing.T) {
 
 func TestUndoLastTurn(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := &Agent{agent: adkAgent}
+	a := newTestAgent(t, &echoModel{}, nil)
 	for range a.Run(ctx, "first") {
 	}
 	for range a.Run(ctx, "second") {
@@ -361,15 +335,9 @@ func TestTrimHistoryKeepsNewestTurnOverBudget(t *testing.T) {
 
 func TestUsageReflectsHistory(t *testing.T) {
 	ctx := context.Background()
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(ctx, &echoModel{}, tools, "test instruction", 4, 100000, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := &Agent{agent: adkAgent, historyBudget: 100000, contextWindow: 100000}
+	a := newTestAgent(t, &echoModel{}, nil)
+	a.historyBudget = 100000
+	a.contextWindow = 100000
 
 	used, max := a.Usage()
 	if used != 0 || max != 100000 {
@@ -396,15 +364,9 @@ func TestUsageReflectsHistory(t *testing.T) {
 func TestUsageDuringRunDoesNotBlock(t *testing.T) {
 	ctx := context.Background()
 	m := &gatedModel{release: make(chan struct{}), entered: make(chan struct{})}
-	tools, err := BuildTools(fakeExecutor{}, nil, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adkAgent, err := buildADKAgent(ctx, m, tools, "test instruction", 4, 100000, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := &Agent{agent: adkAgent, historyBudget: 100000, contextWindow: 100000}
+	a := newTestAgent(t, m, nil)
+	a.historyBudget = 100000
+	a.contextWindow = 100000
 
 	runDone := make(chan struct{})
 	go func() {

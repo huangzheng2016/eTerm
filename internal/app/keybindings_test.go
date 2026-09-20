@@ -19,24 +19,23 @@ func TestBuildKeyMapNewTabHelpUsesConfig(t *testing.T) {
 	}
 }
 
-func TestDefaultLocalTerminalKey(t *testing.T) {
+func TestDefaultKeyBindingValues(t *testing.T) {
 	cfg := defaultKeyBindingConfig("linux")
-	if len(cfg.LocalTerminal) != 1 || cfg.LocalTerminal[0] != "ctrl+shift+t" {
-		t.Fatalf("LocalTerminal = %#v", cfg.LocalTerminal)
+	tests := []struct {
+		name string
+		got  []string
+		want string
+	}{
+		{"LocalTerminal", cfg.LocalTerminal, "ctrl+shift+t"},
+		{"PasteBlobURL", cfg.PasteBlobURL, "ctrl+shift+i"},
+		{"ToggleChrome", cfg.ToggleChrome, "ctrl+shift+z"},
+		{"TabPageLeft", cfg.TabPageLeft, "alt+shift+left"},
+		{"TabPageRight", cfg.TabPageRight, "alt+shift+right"},
 	}
-}
-
-func TestDefaultPasteBlobURLKey(t *testing.T) {
-	cfg := defaultKeyBindingConfig("linux")
-	if len(cfg.PasteBlobURL) != 1 || cfg.PasteBlobURL[0] != "ctrl+shift+i" {
-		t.Fatalf("PasteBlobURL = %#v", cfg.PasteBlobURL)
-	}
-}
-
-func TestDefaultToggleChromeKey(t *testing.T) {
-	cfg := defaultKeyBindingConfig("linux")
-	if len(cfg.ToggleChrome) != 1 || cfg.ToggleChrome[0] != "ctrl+shift+z" {
-		t.Fatalf("ToggleChrome = %#v", cfg.ToggleChrome)
+	for _, tt := range tests {
+		if len(tt.got) != 1 || tt.got[0] != tt.want {
+			t.Fatalf("%s = %#v, want [%q]", tt.name, tt.got, tt.want)
+		}
 	}
 }
 
@@ -67,16 +66,6 @@ func TestWindowsDefaultsAvoidCtrlShiftLetters(t *testing.T) {
 	}
 	if cfg.CloseTabSafe[0] != "alt+shift+w" || cfg.RenameTab[0] != "alt+shift+r" {
 		t.Fatalf("close=%v rename=%v", cfg.CloseTabSafe, cfg.RenameTab)
-	}
-}
-
-func TestDefaultTabPageKeys(t *testing.T) {
-	cfg := DefaultKeyBindingConfig()
-	if len(cfg.TabPageLeft) != 1 || cfg.TabPageLeft[0] != "alt+shift+left" {
-		t.Fatalf("TabPageLeft = %#v", cfg.TabPageLeft)
-	}
-	if len(cfg.TabPageRight) != 1 || cfg.TabPageRight[0] != "alt+shift+right" {
-		t.Fatalf("TabPageRight = %#v", cfg.TabPageRight)
 	}
 }
 

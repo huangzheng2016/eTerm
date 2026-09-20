@@ -277,51 +277,44 @@ func TestWaitNilClearsReadEOF(t *testing.T) {
 	}
 }
 
-func TestAbnormalStreamDoneShowsReconnectDialog(t *testing.T) {
-	m := New(nil, "host-a", 42, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+func TestAbnormalStreamDoneShowsConnectionError(t *testing.T) {
+	cases := []struct {
+		name      string
+		target    string
+		hostID    uint
+		err       string
+		wantRetry bool
+	}{
+		{"ssh host shows reconnect dialog", "host-a", 42, "read: connection reset by peer", true},
+		{"remote local shell has no retry", "[R]remote", 0, "websocket: close 1006 abnormal closure", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(nil, tc.target, tc.hostID, viewkeys.SSHKeys{})
+			t.Cleanup(func() { _ = m.Close() })
 
-	updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New("read: connection reset by peer")})
-	if !updated.(*Model).Disconnected() {
-		t.Fatal("expected session to be marked disconnected")
-	}
-	if cmd == nil {
-		t.Fatal("expected reconnect dialog command")
-	}
-	msg := cmd()
-	got, ok := msg.(types.ConnErrorMsg)
-	if !ok {
-		t.Fatalf("got %T want types.ConnErrorMsg", msg)
-	}
-	if got.Target != "host-a" {
-		t.Fatalf("target = %q", got.Target)
-	}
-	if _, ok := got.Retry.(types.SSHReconnectMsg); !ok {
-		t.Fatalf("retry = %T want types.SSHReconnectMsg", got.Retry)
-	}
-}
-
-func TestRemoteLocalShellAbnormalStreamDoneShowsConnectionError(t *testing.T) {
-	m := New(nil, "[R]remote", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-
-	updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	if !updated.(*Model).Disconnected() {
-		t.Fatal("expected session to be marked disconnected")
-	}
-	if cmd == nil {
-		t.Fatal("expected connection error command")
-	}
-	msg := cmd()
-	got, ok := msg.(types.ConnErrorMsg)
-	if !ok {
-		t.Fatalf("got %T want types.ConnErrorMsg", msg)
-	}
-	if got.Target != "[R]remote" {
-		t.Fatalf("target = %q", got.Target)
-	}
-	if got.Retry != nil {
-		t.Fatalf("retry = %#v, want nil for remote local shell", got.Retry)
+			updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: errors.New(tc.err)})
+			if !updated.(*Model).Disconnected() {
+				t.Fatal("expected session to be marked disconnected")
+			}
+			if cmd == nil {
+				t.Fatal("expected connection error command")
+			}
+			got, ok := cmd().(types.ConnErrorMsg)
+			if !ok {
+				t.Fatalf("got %T want types.ConnErrorMsg", cmd())
+			}
+			if got.Target != tc.target {
+				t.Fatalf("target = %q", got.Target)
+			}
+			if tc.wantRetry {
+				if _, ok := got.Retry.(types.SSHReconnectMsg); !ok {
+					t.Fatalf("retry = %T want types.SSHReconnectMsg", got.Retry)
+				}
+			} else if got.Retry != nil {
+				t.Fatalf("retry = %#v, want nil for remote local shell", got.Retry)
+			}
+		})
 	}
 }
 
@@ -355,40 +348,35 @@ func TestRemoteTmuxDisconnectStartsAutoReconnect(t *testing.T) {
 }
 
 func TestNormalStreamDoneClosesWithoutReconnectDialog(t *testing.T) {
-	m := New(nil, "host-a", 42, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-
-	updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: nil})
-	if updated.(*Model).Disconnected() {
-		t.Fatal("expected normal exit, not disconnected")
-	}
-	if cmd == nil {
-		t.Fatal("expected disconnect command")
-	}
-	msg := cmd()
-	if _, ok := msg.(types.SSHDisconnectMsg); !ok {
-		t.Fatalf("got %T want types.SSHDisconnectMsg", msg)
-	}
-}
-
-func TestLocalShellExitStatusClosesWithoutReconnectDialog(t *testing.T) {
-	err := exec.Command("sh", "-c", "exit 130").Run()
-	if err == nil {
+	exitErr := exec.Command("sh", "-c", "exit 130").Run()
+	if exitErr == nil {
 		t.Fatal("expected exit error")
 	}
 
-	m := New(nil, "zsh", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	cases := []struct {
+		name   string
+		target string
+		hostID uint
+		err    error
+	}{
+		{"clean exit", "host-a", 42, nil},
+		{"local shell exit status", "zsh", 0, exitErr},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(nil, tc.target, tc.hostID, viewkeys.SSHKeys{})
+			t.Cleanup(func() { _ = m.Close() })
 
-	updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: err})
-	if updated.(*Model).Disconnected() {
-		t.Fatal("expected local shell exit, not disconnected")
-	}
-	if cmd == nil {
-		t.Fatal("expected disconnect command")
-	}
-	msg := cmd()
-	if _, ok := msg.(types.SSHDisconnectMsg); !ok {
-		t.Fatalf("got %T want types.SSHDisconnectMsg", msg)
+			updated, cmd := m.Update(StreamDoneMsg{StreamID: m.StreamID(), Err: tc.err})
+			if updated.(*Model).Disconnected() {
+				t.Fatal("expected normal exit, not disconnected")
+			}
+			if cmd == nil {
+				t.Fatal("expected disconnect command")
+			}
+			if _, ok := cmd().(types.SSHDisconnectMsg); !ok {
+				t.Fatalf("got %T want types.SSHDisconnectMsg", cmd())
+			}
+		})
 	}
 }

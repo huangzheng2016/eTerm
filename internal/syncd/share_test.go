@@ -6,12 +6,18 @@ import (
 	"time"
 )
 
-func TestShareCreateAndGet(t *testing.T) {
-	engine := testEngine(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "demo", "", "", 4)
+func mustCreateShare(t *testing.T, engine *Engine, name, target, sessionID string, maxHours int) *ShareEntry {
+	t.Helper()
+	share, err := engine.CreateShare("tenant-a", "peer-a", name, target, sessionID, maxHours)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return share
+}
+
+func TestShareCreateAndGet(t *testing.T) {
+	engine := testEngine(t)
+	share := mustCreateShare(t, engine, "demo", "", "", 4)
 	if !strings.HasPrefix(share.ID, "shr_") {
 		t.Fatalf("id = %q", share.ID)
 	}
@@ -36,10 +42,7 @@ func TestShareCreateAndGet(t *testing.T) {
 func TestShareClampHours(t *testing.T) {
 	engine := testEngine(t)
 	for _, tc := range []struct{ in, want int }{{0, 4}, {-1, 4}, {1, 1}, {200, 168}} {
-		share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", tc.in)
-		if err != nil {
-			t.Fatal(err)
-		}
+		share := mustCreateShare(t, engine, "", "", "", tc.in)
 		if share.MaxHours != tc.want {
 			t.Fatalf("max_hours %d -> %d, want %d", tc.in, share.MaxHours, tc.want)
 		}
@@ -51,10 +54,7 @@ func TestShareClampHours(t *testing.T) {
 
 func TestShareExpiredGetDeletes(t *testing.T) {
 	engine := testEngine(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	share := mustCreateShare(t, engine, "", "", "", 1)
 	engine.DB.Model(&ShareEntry{}).Where("id = ?", share.ID).Update("expires_at", time.Now().UTC().Add(-time.Hour))
 	if _, err := engine.GetShareByToken(share.Token); err != ErrShareNotFound {
 		t.Fatalf("err = %v", err)
@@ -68,10 +68,7 @@ func TestShareExpiredGetDeletes(t *testing.T) {
 
 func TestShareDelete(t *testing.T) {
 	engine := testEngine(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	share := mustCreateShare(t, engine, "", "", "", 1)
 	if err := engine.DeleteShare("tenant-b", share.Token); err != nil {
 		t.Fatal(err)
 	}
@@ -88,14 +85,8 @@ func TestShareDelete(t *testing.T) {
 
 func TestCleanupExpiredShares(t *testing.T) {
 	engine := testEngine(t)
-	expired, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	valid, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	expired := mustCreateShare(t, engine, "", "", "", 1)
+	valid := mustCreateShare(t, engine, "", "", "", 1)
 	engine.DB.Model(&ShareEntry{}).Where("id = ?", expired.ID).Update("expires_at", time.Now().UTC().Add(-time.Hour))
 	if err := engine.CleanupExpiredShares(); err != nil {
 		t.Fatal(err)

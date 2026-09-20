@@ -15,40 +15,14 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/relay"
 )
 
-func shareWSSetup(t *testing.T) (*httptest.Server, *Engine, *websocket.Conn, context.Context) {
+func shareGuestDial(t *testing.T, ctx context.Context, server *httptest.Server, token string) *websocket.Conn {
 	t.Helper()
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	t.Cleanup(server.Close)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	t.Cleanup(cancel)
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	daemon, _, err := websocket.Dial(ctx, base+"/api/v1/ws/daemon", nil)
+	guest, _, err := websocket.Dial(ctx, wsBase(server)+"/x/"+token+"/ws", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	daemon.SetReadLimit(relay.MaxWebSocketMessageBytes)
-	t.Cleanup(func() { daemon.CloseNow() })
-	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: "tenant-a", PeerID: "peer-a", Name: "host-a", Version: relay.ProtocolVersion})
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
-		t.Fatal(err)
-	}
-	waitPeer(t, server.URL)
-	return server, engine, daemon, ctx
-}
-
-func shareDaemonFrame(t *testing.T, ctx context.Context, daemon *websocket.Conn) relay.Frame {
-	t.Helper()
-	_, data, err := daemon.Read(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := relay.Decode(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
+	t.Cleanup(func() { guest.CloseNow() })
+	return guest
 }
 
 func readGuestMsg(t *testing.T, ctx context.Context, guest *websocket.Conn) shareHostMsg {
@@ -67,15 +41,30 @@ func readGuestMsg(t *testing.T, ctx context.Context, guest *websocket.Conn) shar
 	return msg
 }
 
-func shareGuestDial(t *testing.T, ctx context.Context, server *httptest.Server, token string) *websocket.Conn {
+func expectOpen(t *testing.T, ctx context.Context, daemon *websocket.Conn) relay.Frame {
 	t.Helper()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	guest, _, err := websocket.Dial(ctx, base+"/x/"+token+"/ws", nil)
-	if err != nil {
-		t.Fatal(err)
+	f := readFrame(t, ctx, daemon)
+	if f.Type != relay.FrameOpen {
+		t.Fatalf("got frame %#v, want OPEN", f)
 	}
-	t.Cleanup(func() { guest.CloseNow() })
-	return guest
+	return f
+}
+
+func expectGuestOut(t *testing.T, ctx context.Context, guest *websocket.Conn, want string) {
+	t.Helper()
+	msg := readGuestMsg(t, ctx, guest)
+	out, err := base64.StdEncoding.DecodeString(msg.D)
+	if msg.T != "out" || err != nil || string(out) != want {
+		t.Fatalf("guest msg = %+v, want out/%s", msg, want)
+	}
+}
+
+func expectGuestExit(t *testing.T, ctx context.Context, guest *websocket.Conn, reason string) {
+	t.Helper()
+	msg := readGuestMsg(t, ctx, guest)
+	if msg.T != "exit" || msg.Reason != reason {
+		t.Fatalf("guest msg = %+v, want exit/%s", msg, reason)
+	}
 }
 
 func TestShareStateReuseResetsIdle(t *testing.T) {
@@ -121,9 +110,7 @@ func TestDropShareStateIdentity(t *testing.T) {
 }
 
 func TestShareInvalidToken404(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, ctx := relayServer(t)
 
 	resp, err := http.Get(server.URL + "/x/nope")
 	if err != nil {
@@ -134,10 +121,7 @@ func TestShareInvalidToken404(t *testing.T) {
 		t.Fatalf("page status = %d", resp.StatusCode)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	base := "ws" + strings.TrimPrefix(server.URL, "http")
-	_, wsResp, err := websocket.Dial(ctx, base+"/x/nope/ws", nil)
+	_, wsResp, err := websocket.Dial(ctx, wsBase(server)+"/x/nope/ws", nil)
 	if err == nil {
 		t.Fatal("ws dial with bad token succeeded")
 	}
@@ -147,11 +131,9 @@ func TestShareInvalidToken404(t *testing.T) {
 }
 
 func TestSharePageServed(t *testing.T) {
-	server, engine, _, _ := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "demo box", "", "", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, _, _ := relaySetup(t)
+	share := mustCreateShare(t, engine, "demo box", "", "", 4)
+
 	resp, err := http.Get(server.URL + "/x/" + share.Token)
 	if err != nil {
 		t.Fatal(err)
@@ -167,17 +149,11 @@ func TestSharePageServed(t *testing.T) {
 }
 
 func TestShareWSBridge(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "demo", "", "", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "demo", "", "", 4)
 	guest := shareGuestDial(t, ctx, server, share.Token)
 
-	f := shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f)
-	}
+	f := expectOpen(t, ctx, daemon)
 	var open relay.OpenRequest
 	if err := json.Unmarshal(f.Payload, &open); err != nil {
 		t.Fatal(err)
@@ -187,148 +163,81 @@ func TestShareWSBridge(t *testing.T) {
 	}
 	streamID := f.StreamID
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID})
 
 	in, _ := json.Marshal(shareGuestMsg{T: "in", D: base64.StdEncoding.EncodeToString([]byte("ls"))})
 	if err := guest.Write(ctx, websocket.MessageText, in); err != nil {
 		t.Fatal(err)
 	}
-	f = shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameData || f.StreamID != streamID || string(f.Payload) != "ls" {
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameData || f.StreamID != streamID || string(f.Payload) != "ls" {
 		t.Fatalf("got frame %#v payload %q, want DATA ls", f, f.Payload)
 	}
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: relay.DataPayload(0, []byte("hello"))})); err != nil {
-		t.Fatal(err)
-	}
-	msg := readGuestMsg(t, ctx, guest)
-	if msg.T != "out" {
-		t.Fatalf("guest msg = %+v, want out", msg)
-	}
-	out, err := base64.StdEncoding.DecodeString(msg.D)
-	if err != nil || string(out) != "hello" {
-		t.Fatalf("out = %q err = %v", out, err)
-	}
-	f = shareDaemonFrame(t, ctx, daemon)
-	ack, ackErr := relay.ParseAck(f.Payload)
-	if f.Type != relay.FrameAck || ackErr != nil || ack != 5 {
-		t.Fatalf("got frame %#v, want ACK 5", f)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: streamID, Payload: relay.DataPayload(0, []byte("hello"))})
+	expectGuestOut(t, ctx, guest, "hello")
+	expectAck(t, ctx, daemon, 5)
 
 	rsz, _ := json.Marshal(shareGuestMsg{T: "resize", Rows: 40, Cols: 100})
 	if err := guest.Write(ctx, websocket.MessageText, rsz); err != nil {
 		t.Fatal(err)
 	}
-	f = shareDaemonFrame(t, ctx, daemon)
+	f = readFrame(t, ctx, daemon)
 	rows, cols, err := relay.ParseResize(f.Payload)
 	if f.Type != relay.FrameResize || err != nil || rows != 40 || cols != 100 {
 		t.Fatalf("got frame %#v, want RESIZE 40x100", f)
 	}
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: []byte("shell exited")})); err != nil {
-		t.Fatal(err)
-	}
-	msg = readGuestMsg(t, ctx, guest)
-	if msg.T != "exit" || msg.Reason != "shell exited" {
-		t.Fatalf("guest msg = %+v, want exit/shell exited", msg)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameClose, StreamID: streamID, Payload: []byte("shell exited")})
+	expectGuestExit(t, ctx, guest, "shell exited")
 }
 
 func TestShareWSOpenErr(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "", "", "", 4)
 	guest := shareGuestDial(t, ctx, server, share.Token)
 
-	f := shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("no shell")})); err != nil {
-		t.Fatal(err)
-	}
-	msg := readGuestMsg(t, ctx, guest)
-	if msg.T != "exit" || msg.Reason != "no shell" {
-		t.Fatalf("guest msg = %+v, want exit/no shell", msg)
-	}
+	f := expectOpen(t, ctx, daemon)
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("no shell")})
+	expectGuestExit(t, ctx, guest, "no shell")
 }
 
 func TestShareWSSecondConnectionReplacesFirst(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "", "", "", 4)
 	guest1 := shareGuestDial(t, ctx, server, share.Token)
-	f1 := shareDaemonFrame(t, ctx, daemon)
-	if f1.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f1)
-	}
+	f1 := expectOpen(t, ctx, daemon)
 
 	guest2 := shareGuestDial(t, ctx, server, share.Token)
-	f2 := shareDaemonFrame(t, ctx, daemon)
-	if f2.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN for guest2", f2)
-	}
+	f2 := expectOpen(t, ctx, daemon)
 	if f2.StreamID != f1.StreamID {
 		t.Fatalf("replacement opened stream %d, want takeover of %d", f2.StreamID, f1.StreamID)
 	}
+	expectGuestExit(t, ctx, guest1, "replaced")
 
-	msg := readGuestMsg(t, ctx, guest1)
-	if msg.T != "exit" || msg.Reason != "replaced" {
-		t.Fatalf("guest1 msg = %+v, want exit/replaced", msg)
-	}
-
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f2.StreamID})); err != nil {
-		t.Fatal(err)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f2.StreamID, Payload: relay.DataPayload(0, []byte("hi"))})); err != nil {
-		t.Fatal(err)
-	}
-	msg = readGuestMsg(t, ctx, guest2)
-	if msg.T != "out" {
-		t.Fatalf("guest2 msg = %+v, want out", msg)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f2.StreamID})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: f2.StreamID, Payload: relay.DataPayload(0, []byte("hi"))})
+	expectGuestOut(t, ctx, guest2, "hi")
 }
 
 func TestShareWSGuestDisconnectResumes(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "", "", "", 4)
 	guest1 := shareGuestDial(t, ctx, server, share.Token)
-	f1 := shareDaemonFrame(t, ctx, daemon)
-	if f1.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f1)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f1.StreamID})); err != nil {
-		t.Fatal(err)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f1.StreamID, Payload: relay.DataPayload(0, []byte("hello"))})); err != nil {
-		t.Fatal(err)
-	}
-	if msg := readGuestMsg(t, ctx, guest1); msg.T != "out" {
-		t.Fatalf("guest1 msg = %+v, want out", msg)
-	}
-	f := shareDaemonFrame(t, ctx, daemon)
-	if ack, _ := relay.ParseAck(f.Payload); f.Type != relay.FrameAck || ack != 5 {
-		t.Fatalf("got frame %#v, want ACK 5", f)
-	}
+	f1 := expectOpen(t, ctx, daemon)
+
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f1.StreamID})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: f1.StreamID, Payload: relay.DataPayload(0, []byte("hello"))})
+	expectGuestOut(t, ctx, guest1, "hello")
+	expectAck(t, ctx, daemon, 5)
 
 	guest1.CloseNow()
-	f = shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameClose || f.StreamID != f1.StreamID || string(f.Payload) != relay.CloseClientDisconnected {
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameClose || f.StreamID != f1.StreamID || string(f.Payload) != relay.CloseClientDisconnected {
 		t.Fatalf("got frame %#v payload %q, want CLOSE client-disconnected", f, f.Payload)
 	}
 
 	guest2 := shareGuestDial(t, ctx, server, share.Token)
-	f2 := shareDaemonFrame(t, ctx, daemon)
-	if f2.Type != relay.FrameOpen || f2.StreamID != f1.StreamID {
+	f2 := expectOpen(t, ctx, daemon)
+	if f2.StreamID != f1.StreamID {
 		t.Fatalf("got frame %#v, want OPEN stream %d", f2, f1.StreamID)
 	}
 	var open relay.OpenRequest
@@ -338,64 +247,37 @@ func TestShareWSGuestDisconnectResumes(t *testing.T) {
 	if open.ResumeFromSeq != 5 {
 		t.Fatalf("resume_from_seq = %d, want 5", open.ResumeFromSeq)
 	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f2.StreamID})); err != nil {
-		t.Fatal(err)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f2.StreamID, Payload: relay.DataPayload(5, []byte("world"))})); err != nil {
-		t.Fatal(err)
-	}
-	msg := readGuestMsg(t, ctx, guest2)
-	out, err := base64.StdEncoding.DecodeString(msg.D)
-	if msg.T != "out" || err != nil || string(out) != "world" {
-		t.Fatalf("guest2 msg = %+v, want out/world", msg)
-	}
-	f = shareDaemonFrame(t, ctx, daemon)
-	if ack, _ := relay.ParseAck(f.Payload); f.Type != relay.FrameAck || ack != 10 {
-		t.Fatalf("got frame %#v, want ACK 10", f)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f2.StreamID})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: f2.StreamID, Payload: relay.DataPayload(5, []byte("world"))})
+	expectGuestOut(t, ctx, guest2, "world")
+	expectAck(t, ctx, daemon, 10)
 }
 
 func TestShareWSResumeUnavailableFallsBack(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "", "", "", 4)
 	guest1 := shareGuestDial(t, ctx, server, share.Token)
-	f1 := shareDaemonFrame(t, ctx, daemon)
-	if f1.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f1)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f1.StreamID})); err != nil {
-		t.Fatal(err)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f1.StreamID, Payload: relay.DataPayload(0, []byte("hi"))})); err != nil {
-		t.Fatal(err)
-	}
-	if msg := readGuestMsg(t, ctx, guest1); msg.T != "out" {
-		t.Fatalf("guest1 msg = %+v, want out", msg)
-	}
-	f := shareDaemonFrame(t, ctx, daemon)
-	if ack, _ := relay.ParseAck(f.Payload); f.Type != relay.FrameAck || ack != 2 {
-		t.Fatalf("got frame %#v, want ACK 2", f)
-	}
+	f1 := expectOpen(t, ctx, daemon)
+
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f1.StreamID})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: f1.StreamID, Payload: relay.DataPayload(0, []byte("hi"))})
+	expectGuestOut(t, ctx, guest1, "hi")
+	expectAck(t, ctx, daemon, 2)
+
 	guest1.CloseNow()
-	f = shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameClose || string(f.Payload) != relay.CloseClientDisconnected {
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameClose || string(f.Payload) != relay.CloseClientDisconnected {
 		t.Fatalf("got frame %#v, want CLOSE client-disconnected", f)
 	}
 
 	guest2 := shareGuestDial(t, ctx, server, share.Token)
-	f2 := shareDaemonFrame(t, ctx, daemon)
-	if f2.Type != relay.FrameOpen || f2.StreamID != f1.StreamID {
+	f2 := expectOpen(t, ctx, daemon)
+	if f2.StreamID != f1.StreamID {
 		t.Fatalf("got frame %#v, want OPEN stream %d", f2, f1.StreamID)
 	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenErr, StreamID: f2.StreamID, Payload: []byte("resume unavailable")})); err != nil {
-		t.Fatal(err)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenErr, StreamID: f2.StreamID, Payload: []byte("resume unavailable")})
 
-	f3 := shareDaemonFrame(t, ctx, daemon)
-	if f3.Type != relay.FrameOpen || f3.StreamID == f1.StreamID {
+	f3 := expectOpen(t, ctx, daemon)
+	if f3.StreamID == f1.StreamID {
 		t.Fatalf("got frame %#v, want OPEN on a new stream", f3)
 	}
 	var open relay.OpenRequest
@@ -405,23 +287,13 @@ func TestShareWSResumeUnavailableFallsBack(t *testing.T) {
 	if open.ResumeFromSeq != 0 {
 		t.Fatalf("resume_from_seq = %d, want 0", open.ResumeFromSeq)
 	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f3.StreamID})); err != nil {
-		t.Fatal(err)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f3.StreamID, Payload: relay.DataPayload(0, []byte("fresh"))})); err != nil {
-		t.Fatal(err)
-	}
-	msg := readGuestMsg(t, ctx, guest2)
-	out, err := base64.StdEncoding.DecodeString(msg.D)
-	if msg.T != "out" || err != nil || string(out) != "fresh" {
-		t.Fatalf("guest2 msg = %+v, want out/fresh", msg)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f3.StreamID})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: f3.StreamID, Payload: relay.DataPayload(0, []byte("fresh"))})
+	expectGuestOut(t, ctx, guest2, "fresh")
 }
 
 func TestShareStaticFiles(t *testing.T) {
-	engine := testEngine(t)
-	server := httptest.NewServer(NewHTTPHandler(engine, ""))
-	defer server.Close()
+	server, _, _ := relayServer(t)
 
 	for _, tc := range []struct{ file, contentType string }{
 		{"xterm.js", "text/javascript; charset=utf-8"},
@@ -537,17 +409,11 @@ func TestShareCreateTargetValidation(t *testing.T) {
 }
 
 func TestShareWSTmuxAttach(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "pair", "tmux-attach", "main", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "pair", "tmux-attach", "main", 4)
 	guest := shareGuestDial(t, ctx, server, share.Token)
 
-	f := shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f)
-	}
+	f := expectOpen(t, ctx, daemon)
 	var open relay.OpenRequest
 	if err := json.Unmarshal(f.Payload, &open); err != nil {
 		t.Fatal(err)
@@ -556,50 +422,25 @@ func TestShareWSTmuxAttach(t *testing.T) {
 		t.Fatalf("open = %+v", open)
 	}
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})); err != nil {
-		t.Fatal(err)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(0, []byte("shared"))})); err != nil {
-		t.Fatal(err)
-	}
-	msg := readGuestMsg(t, ctx, guest)
-	out, err := base64.StdEncoding.DecodeString(msg.D)
-	if msg.T != "out" || err != nil || string(out) != "shared" {
-		t.Fatalf("guest msg = %+v, want out/shared", msg)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameData, StreamID: f.StreamID, Payload: relay.DataPayload(0, []byte("shared"))})
+	expectGuestOut(t, ctx, guest, "shared")
 
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID, Payload: []byte("tmux detached")})); err != nil {
-		t.Fatal(err)
-	}
-	msg = readGuestMsg(t, ctx, guest)
-	if msg.T != "exit" || msg.Reason != "tmux detached" {
-		t.Fatalf("guest msg = %+v, want exit/tmux detached", msg)
-	}
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID, Payload: []byte("tmux detached")})
+	expectGuestExit(t, ctx, guest, "tmux detached")
 }
 
 func TestShareWSExpiryDisconnects(t *testing.T) {
-	server, engine, daemon, ctx := shareWSSetup(t)
-	share, err := engine.CreateShare("tenant-a", "peer-a", "", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	server, engine, daemon, ctx := relaySetup(t)
+	share := mustCreateShare(t, engine, "", "", "", 1)
 	engine.DB.Model(&ShareEntry{}).Where("id = ?", share.ID).Update("expires_at", time.Now().UTC().Add(300*time.Millisecond))
 
 	guest := shareGuestDial(t, ctx, server, share.Token)
-	f := shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameOpen {
-		t.Fatalf("got frame %#v, want OPEN", f)
-	}
-	if err := daemon.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})); err != nil {
-		t.Fatal(err)
-	}
+	f := expectOpen(t, ctx, daemon)
+	writeFrame(t, ctx, daemon, relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
 
-	msg := readGuestMsg(t, ctx, guest)
-	if msg.T != "exit" || msg.Reason != "share expired" {
-		t.Fatalf("guest msg = %+v, want exit/share expired", msg)
-	}
-	f = shareDaemonFrame(t, ctx, daemon)
-	if f.Type != relay.FrameClose || len(f.Payload) != 0 {
+	expectGuestExit(t, ctx, guest, "share expired")
+	if f := readFrame(t, ctx, daemon); f.Type != relay.FrameClose || len(f.Payload) != 0 {
 		t.Fatalf("got frame %#v, want CLOSE kill (empty payload)", f)
 	}
 }

@@ -20,6 +20,14 @@ func testSettingsDB(t *testing.T) *Model {
 	return New(database, false)
 }
 
+func triggerReset(t *testing.T, m *Model) {
+	t.Helper()
+	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if !m.confirmReset.IsActive() {
+		t.Fatal("ctrl+r must ask for confirmation before resetting")
+	}
+}
+
 func TestTmuxConfigFileLoadsAndDisplaysBuiltIn(t *testing.T) {
 	m := testSettingsDB(t)
 	if err := db.SetSetting(m.db, "tmux_config_file", "/tmp/tmux.conf"); err != nil {
@@ -95,10 +103,7 @@ func TestTmuxConfigFileSaveEmptyAndReset(t *testing.T) {
 	}
 
 	m.tmuxConfigFile = "/custom.conf"
-	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
-	if !m.confirmReset.IsActive() {
-		t.Fatal("ctrl+r must ask for confirmation before resetting")
-	}
+	triggerReset(t, m)
 	if m.tmuxConfigFile != "/custom.conf" {
 		t.Fatalf("reset applied before confirm: %q", m.tmuxConfigFile)
 	}
@@ -111,10 +116,7 @@ func TestTmuxConfigFileSaveEmptyAndReset(t *testing.T) {
 func TestCtrlRResetCancelledKeepsValues(t *testing.T) {
 	m := testSettingsDB(t)
 	m.gridStatusWords = true
-	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
-	if !m.confirmReset.IsActive() {
-		t.Fatal("ctrl+r must ask for confirmation before resetting")
-	}
+	triggerReset(t, m)
 	m.Update(tea.KeyPressMsg(tea.Key{Code: 'n', Text: "n"}))
 	if !m.gridStatusWords {
 		t.Fatal("cancelled reset changed preferences")
@@ -125,10 +127,7 @@ func TestCtrlRConfirmMouseYesAndNo(t *testing.T) {
 	m := testSettingsDB(t)
 	m.SetSize(80, 24)
 	m.gridStatusWords = true
-	m.handleNormal(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
-	if !m.confirmReset.IsActive() {
-		t.Fatal("ctrl+r must ask for confirmation before resetting")
-	}
+	triggerReset(t, m)
 	ox, oy := dialogOrigin(m.confirmReset.View(), m.width, m.height)
 
 	m.Update(tea.MouseClickMsg(tea.Mouse{X: ox + 16, Y: oy + 6, Button: tea.MouseLeft}))

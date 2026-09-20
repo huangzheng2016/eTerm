@@ -4,9 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-
 	"github.com/huangzheng2016/eTerm/internal/ai"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
@@ -14,13 +11,7 @@ import (
 )
 
 func TestBridgeUpdateDeletePersist(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.AppSetting{}); err != nil {
-		t.Fatal(err)
-	}
+	database := aiTestDB(t)
 	mk := security.NewMasterKeyManager(nil, nil, 0)
 	mk.Setup([]byte("pw"))
 

@@ -7,7 +7,27 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/huangzheng2016/eTerm/internal/db"
 )
+
+func writeDaemonPid(t *testing.T, dir, content string) string {
+	t.Helper()
+	pidPath := filepath.Join(dir, "daemon.pid")
+	if err := os.WriteFile(pidPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return pidPath
+}
+
+func holdDaemonLock(t *testing.T, path string) {
+	t.Helper()
+	lock, err := acquireDaemonLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lock.Close() })
+}
 
 func TestDaemonCommandDefaultsToStart(t *testing.T) {
 	cmd, opts, err := parseDaemonArgs(nil)
@@ -54,6 +74,41 @@ func TestDaemonEnableParsesDBPath(t *testing.T) {
 	}
 	if cmd != "enable" || opts.DBPath != "test.db" {
 		t.Fatalf("cmd = %q, opts = %#v", cmd, opts)
+	}
+}
+
+func TestDaemonCommandParsesRename(t *testing.T) {
+	cmd, opts, err := parseDaemonArgs([]string{"rename", "my-box"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != "rename" {
+		t.Fatalf("cmd = %q, want rename", cmd)
+	}
+	if len(opts.Positionals) != 1 || opts.Positionals[0] != "my-box" {
+		t.Fatalf("positionals = %#v", opts.Positionals)
+	}
+}
+
+func TestDaemonRenameWritesSetting(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	var out strings.Builder
+	if code := renameDaemonPeer(&out, daemonOptions{DBPath: dbPath, Positionals: []string{"new-name"}}); code != 0 {
+		t.Fatalf("code = %d, out = %s", code, out.String())
+	}
+	database, err := db.InitDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := db.GetSetting(database, "daemon_peer_name"); got != "new-name" {
+		t.Fatalf("persisted name = %q, want new-name", got)
+	}
+}
+
+func TestDaemonRenameRequiresName(t *testing.T) {
+	var out strings.Builder
+	if code := renameDaemonPeer(&out, daemonOptions{}); code != 2 {
+		t.Fatalf("code = %d, want 2", code)
 	}
 }
 
@@ -105,11 +160,7 @@ func TestDaemonStatusReportsStoppedForMissingPid(t *testing.T) {
 }
 
 func TestDaemonStatusReportsRunningPid(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte("123\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	pidPath := writeDaemonPid(t, t.TempDir(), "123\n")
 	ctl := daemonController{
 		pidPath: pidPath,
 		isAlive: func(pid int) bool {
@@ -127,11 +178,7 @@ func TestDaemonStatusReportsRunningPid(t *testing.T) {
 }
 
 func TestDaemonStopEscalatesToKill(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte("123\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	pidPath := writeDaemonPid(t, t.TempDir(), "123\n")
 	killed := false
 	ctl := daemonController{
 		pidPath: pidPath,
@@ -161,11 +208,7 @@ func TestDaemonStopEscalatesToKill(t *testing.T) {
 }
 
 func TestDaemonStopFailsWhenKillDoesNotHelp(t *testing.T) {
-	dir := t.TempDir()
-	pidPath := filepath.Join(dir, "daemon.pid")
-	if err := os.WriteFile(pidPath, []byte("123\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	pidPath := writeDaemonPid(t, t.TempDir(), "123\n")
 	ctl := daemonController{
 		pidPath:   pidPath,
 		isAlive:   func(pid int) bool { return true },
@@ -184,11 +227,7 @@ func TestDaemonStopFailsWhenKillDoesNotHelp(t *testing.T) {
 
 func TestDaemonLockSecondInstanceFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "daemon.lock")
-	lock, err := acquireDaemonLock(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
+	holdDaemonLock(t, path)
 
 	if _, err := acquireDaemonLock(path); !errors.Is(err, errDaemonAlreadyRunning) {
 		t.Fatalf("err = %v, want %v", err, errDaemonAlreadyRunning)
@@ -224,11 +263,7 @@ func TestDaemonLockReleasedOnClose(t *testing.T) {
 func TestDaemonStartReportsLockHolder(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "daemon.lock")
-	lock, err := acquireDaemonLock(lockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
+	holdDaemonLock(t, lockPath)
 
 	ctl := daemonController{
 		pidPath:  filepath.Join(dir, "daemon.pid"),
@@ -247,15 +282,10 @@ func TestDaemonStartReportsLockHolder(t *testing.T) {
 }
 
 func TestDaemonEnableGuardReportsLockHolder(t *testing.T) {
-	dir := t.TempDir()
-	lockPath := filepath.Join(dir, "daemon.lock")
-	lock, err := acquireDaemonLock(lockPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
+	lockPath := filepath.Join(t.TempDir(), "daemon.lock")
+	holdDaemonLock(t, lockPath)
 
-	err = daemonEnableGuard(lockPath)
+	err := daemonEnableGuard(lockPath)
 	if err == nil {
 		t.Fatal("expected error when lock is held")
 	}

@@ -13,6 +13,11 @@ import (
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 )
 
+func testLocalRuntime(t *testing.T) *runtimeConfig {
+	t.Helper()
+	return &runtimeConfig{db: testDaemonDB(t), hasTmux: false}
+}
+
 func stubLocalNewSession(t *testing.T, fakes *[]*daemonFakeSession) {
 	t.Helper()
 	old := localNewSession
@@ -32,7 +37,7 @@ func openTarget0(target, sessionID string, streamID uint32) relay.Frame {
 func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 	var fakes []*daemonFakeSession
 	stubLocalNewSession(t, &fakes)
-	rt := &runtimeConfig{db: testTmuxRuntime(t).db, hasTmux: false}
+	rt := testLocalRuntime(t)
 	mgr := newSessionManager()
 	sender, out := newTestSender()
 	mgr.setSender(sender)
@@ -122,7 +127,7 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 	var fakes []*daemonFakeSession
 	stubLocalNewSession(t, &fakes)
-	rt := &runtimeConfig{db: testTmuxRuntime(t).db, hasTmux: false}
+	rt := testLocalRuntime(t)
 	mgr := newSessionManager()
 	sender, out := newTestSender()
 	mgr.setSender(sender)
@@ -154,7 +159,7 @@ func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 }
 
 func TestDaemonSessionAttachUnknownName(t *testing.T) {
-	rt := &runtimeConfig{db: testTmuxRuntime(t).db, hasTmux: false}
+	rt := testLocalRuntime(t)
 	sender, out := newTestSender()
 	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, "nope", 3), newSessionManager(), sender, context.Background(), context.Background())
 	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
@@ -181,7 +186,7 @@ func TestReapSkipsDaemonSessions(t *testing.T) {
 func TestDaemonSessionNewLimit(t *testing.T) {
 	var fakes []*daemonFakeSession
 	stubLocalNewSession(t, &fakes)
-	rt := &runtimeConfig{db: testTmuxRuntime(t).db, hasTmux: false}
+	rt := testLocalRuntime(t)
 	mgr := newSessionManager()
 	for i := 0; i < maxDaemonSessions; i++ {
 		mgr.namedAdd(fmt.Sprintf("shell-%d", i), uint32(100+i), time.Now())
@@ -203,7 +208,7 @@ func TestDaemonSessionNewLimit(t *testing.T) {
 func TestDaemonSessionShellExitRemovesNamedEntry(t *testing.T) {
 	var fakes []*daemonFakeSession
 	stubLocalNewSession(t, &fakes)
-	rt := &runtimeConfig{db: testTmuxRuntime(t).db, hasTmux: false}
+	rt := testLocalRuntime(t)
 	mgr := newSessionManager()
 	sender, out := newTestSender()
 	mgr.setSender(sender)
@@ -233,7 +238,7 @@ func TestDaemonSessionShellExitRemovesNamedEntry(t *testing.T) {
 func TestDaemonSessionConcurrentAttachKeepsSingleRegistration(t *testing.T) {
 	var fakes []*daemonFakeSession
 	stubLocalNewSession(t, &fakes)
-	rt := &runtimeConfig{db: testTmuxRuntime(t).db, hasTmux: false}
+	rt := testLocalRuntime(t)
 	mgr := newSessionManager()
 	sender, out := newTestSender()
 	mgr.setSender(sender)

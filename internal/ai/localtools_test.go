@@ -31,6 +31,19 @@ func invokable(t *testing.T, tools []tool.BaseTool, name string) tool.InvokableT
 	return nil
 }
 
+func toolsByName(t *testing.T, tools []tool.BaseTool) map[string]tool.BaseTool {
+	t.Helper()
+	byName := map[string]tool.BaseTool{}
+	for _, bt := range tools {
+		info, err := bt.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		byName[info.Name] = bt
+	}
+	return byName
+}
+
 func TestBashToolRunsCommand(t *testing.T) {
 	tools, err := BuildLocalTools()
 	if err != nil {
@@ -155,21 +168,14 @@ func TestBuildToolsIncludesSessionOpenTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := map[string]bool{}
-	for _, bt := range tools {
-		info, err := bt.Info(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		names[info.Name] = true
-	}
+	names := toolsByName(t, tools)
 	for _, want := range []string{"open_local_terminal", "list_hosts", "open_ssh", "list_tmux_sessions", "open_tmux", "notify", "shell_history"} {
-		if !names[want] {
-			t.Fatalf("missing %s in %v", want, names)
+		if names[want] == nil {
+			t.Fatalf("missing %s", want)
 		}
 	}
 	for _, unwanted := range []string{"list_daemons", "list_daemon_sessions", "enter_daemon", "create_session", "rename_session", "kill_session"} {
-		if names[unwanted] {
+		if names[unwanted] != nil {
 			t.Fatalf("daemon tool %s present without daemons", unwanted)
 		}
 	}
@@ -178,17 +184,10 @@ func TestBuildToolsIncludesSessionOpenTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	names = map[string]bool{}
-	for _, bt := range tools {
-		info, err := bt.Info(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		names[info.Name] = true
-	}
+	names = toolsByName(t, tools)
 	for _, want := range []string{"list_daemons", "list_daemon_sessions", "enter_daemon", "create_session", "rename_session", "kill_session"} {
-		if !names[want] {
-			t.Fatalf("missing daemon tool %s in %v", want, names)
+		if names[want] == nil {
+			t.Fatalf("missing daemon tool %s", want)
 		}
 	}
 }
@@ -209,20 +208,7 @@ func TestNotifyToolCallsExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var notifyTool tool.BaseTool
-	for _, bt := range tools {
-		info, err := bt.Info(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Name == "notify" {
-			notifyTool = bt
-		}
-	}
-	if notifyTool == nil {
-		t.Fatal("notify tool missing")
-	}
-	out, err := notifyTool.(tool.InvokableTool).InvokableRun(context.Background(), `{"text":"build finished"}`)
+	out, err := invokable(t, tools, "notify").InvokableRun(context.Background(), `{"text":"build finished"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,74 +241,76 @@ func writeHistoryFile(t *testing.T, home, rel, content string) {
 	}
 }
 
-func TestReadShellHistoryZsh(t *testing.T) {
-	home := t.TempDir()
-	writeHistoryFile(t, home, ".zsh_history", ": 1694760000:0;git status\n: 1694760001:0;ls -la\nplain command\n")
-	shell, path, cmds, err := ReadShellHistory(home, 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if shell != "zsh" || path != filepath.Join(home, ".zsh_history") {
-		t.Fatalf("shell=%q path=%q", shell, path)
-	}
-	want := []string{"plain command", "ls -la", "git status"}
-	if strings.Join(cmds, "|") != strings.Join(want, "|") {
-		t.Fatalf("cmds = %v, want %v", cmds, want)
-	}
-}
-
-func TestReadShellHistoryLimit(t *testing.T) {
-	home := t.TempDir()
-	writeHistoryFile(t, home, ".zsh_history", "one\ntwo\nthree\nfour\n")
-	_, _, cmds, err := ReadShellHistory(home, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cmds) != 2 || cmds[0] != "four" || cmds[1] != "three" {
-		t.Fatalf("cmds = %v", cmds)
-	}
-}
-
-func TestReadShellHistoryBash(t *testing.T) {
-	home := t.TempDir()
-	writeHistoryFile(t, home, ".bash_history", "#1694760000\necho hi\n#1694760001\nmake build\n")
-	shell, _, cmds, err := ReadShellHistory(home, 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if shell != "bash" {
-		t.Fatalf("shell = %q", shell)
-	}
-	if len(cmds) != 2 || cmds[0] != "make build" || cmds[1] != "echo hi" {
-		t.Fatalf("cmds = %v", cmds)
-	}
-}
-
-func TestReadShellHistoryFish(t *testing.T) {
-	home := t.TempDir()
-	writeHistoryFile(t, home, filepath.Join(".local", "share", "fish", "fish_history"), "- cmd: echo hi\n  when: 1694760000\n- cmd: cd /tmp\n  when: 1694760001\n  paths:\n    - /tmp\n")
-	shell, _, cmds, err := ReadShellHistory(home, 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if shell != "fish" {
-		t.Fatalf("shell = %q", shell)
-	}
-	if len(cmds) != 2 || cmds[0] != "cd /tmp" || cmds[1] != "echo hi" {
-		t.Fatalf("cmds = %v", cmds)
-	}
-}
-
-func TestReadShellHistoryProbeOrder(t *testing.T) {
-	home := t.TempDir()
-	writeHistoryFile(t, home, ".zsh_history", "from zsh\n")
-	writeHistoryFile(t, home, ".bash_history", "from bash\n")
-	shell, _, cmds, err := ReadShellHistory(home, 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if shell != "zsh" || len(cmds) != 1 || cmds[0] != "from zsh" {
-		t.Fatalf("shell=%q cmds=%v", shell, cmds)
+func TestReadShellHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		files     map[string]string
+		limit     int
+		wantShell string
+		wantCmds  []string
+	}{
+		{
+			name:      "zsh",
+			files:     map[string]string{".zsh_history": ": 1694760000:0;git status\n: 1694760001:0;ls -la\nplain command\n"},
+			limit:     50,
+			wantShell: "zsh",
+			wantCmds:  []string{"plain command", "ls -la", "git status"},
+		},
+		{
+			name:      "limit keeps newest",
+			files:     map[string]string{".zsh_history": "one\ntwo\nthree\nfour\n"},
+			limit:     2,
+			wantShell: "zsh",
+			wantCmds:  []string{"four", "three"},
+		},
+		{
+			name:      "bash",
+			files:     map[string]string{".bash_history": "#1694760000\necho hi\n#1694760001\nmake build\n"},
+			limit:     50,
+			wantShell: "bash",
+			wantCmds:  []string{"make build", "echo hi"},
+		},
+		{
+			name:      "fish",
+			files:     map[string]string{filepath.Join(".local", "share", "fish", "fish_history"): "- cmd: echo hi\n  when: 1694760000\n- cmd: cd /tmp\n  when: 1694760001\n  paths:\n    - /tmp\n"},
+			limit:     50,
+			wantShell: "fish",
+			wantCmds:  []string{"cd /tmp", "echo hi"},
+		},
+		{
+			name: "probe order prefers zsh",
+			files: map[string]string{
+				".zsh_history":  "from zsh\n",
+				".bash_history": "from bash\n",
+			},
+			limit:     50,
+			wantShell: "zsh",
+			wantCmds:  []string{"from zsh"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			histFile := ""
+			for rel, content := range tc.files {
+				writeHistoryFile(t, home, rel, content)
+				if len(tc.files) == 1 {
+					histFile = rel
+				}
+			}
+			shell, path, cmds, err := ReadShellHistory(home, tc.limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if shell != tc.wantShell {
+				t.Fatalf("shell = %q, want %q", shell, tc.wantShell)
+			}
+			if histFile != "" && path != filepath.Join(home, histFile) {
+				t.Fatalf("path = %q", path)
+			}
+			if strings.Join(cmds, "|") != strings.Join(tc.wantCmds, "|") {
+				t.Fatalf("cmds = %v, want %v", cmds, tc.wantCmds)
+			}
+		})
 	}
 }
 

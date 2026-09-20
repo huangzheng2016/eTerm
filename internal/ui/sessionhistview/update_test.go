@@ -12,7 +12,8 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 )
 
-func TestHistoryListHidesEmptyTranscripts(t *testing.T) {
+func historyTestDB(t *testing.T) (*gorm.DB, db.Host) {
+	t.Helper()
 	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +25,11 @@ func TestHistoryListHidesEmptyTranscripts(t *testing.T) {
 	if err := database.Create(&host).Error; err != nil {
 		t.Fatal(err)
 	}
+	return database, host
+}
+
+func TestHistoryListHidesEmptyTranscripts(t *testing.T) {
+	database, host := historyTestDB(t)
 	rows := []db.ConnectionHistory{
 		{HostID: host.ID, ConnectedAt: time.Now(), Transcript: "\n\t "},
 		{HostID: host.ID, ConnectedAt: time.Now(), Transcript: "output"},
@@ -39,17 +45,7 @@ func TestHistoryListHidesEmptyTranscripts(t *testing.T) {
 }
 
 func TestHistoryContentLoadsAfterSelectionSettles(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
-		t.Fatal(err)
-	}
-	host := db.Host{Alias: "host"}
-	if err := database.Create(&host).Error; err != nil {
-		t.Fatal(err)
-	}
+	database, host := historyTestDB(t)
 	now := time.Now()
 	rows := []db.ConnectionHistory{
 		{HostID: host.ID, ConnectedAt: now, Transcript: "first"},
@@ -109,17 +105,7 @@ func TestHistoryContentLoadsAfterSelectionSettles(t *testing.T) {
 }
 
 func TestHistoryReplayRowSkipsContentLoad(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
-		t.Fatal(err)
-	}
-	host := db.Host{Alias: "host"}
-	if err := database.Create(&host).Error; err != nil {
-		t.Fatal(err)
-	}
+	database, host := historyTestDB(t)
 	row := db.ConnectionHistory{HostID: host.ID, ConnectedAt: time.Now(), ReplayData: []byte{1, 2, 3}}
 	if err := database.Create(&row).Error; err != nil {
 		t.Fatal(err)
@@ -145,17 +131,7 @@ func TestHistoryReplayRowSkipsContentLoad(t *testing.T) {
 }
 
 func TestHistoryListShowsReplayWithoutTranscript(t *testing.T) {
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.AutoMigrate(&db.Host{}, &db.ConnectionHistory{}); err != nil {
-		t.Fatal(err)
-	}
-	host := db.Host{Alias: "host"}
-	if err := database.Create(&host).Error; err != nil {
-		t.Fatal(err)
-	}
+	database, host := historyTestDB(t)
 	if err := database.Create(&db.ConnectionHistory{HostID: host.ID, ConnectedAt: time.Now(), ReplayData: []byte{1}}).Error; err != nil {
 		t.Fatal(err)
 	}

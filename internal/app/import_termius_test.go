@@ -9,84 +9,68 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/termius_exporter/pkg/parser"
+	"gorm.io/gorm"
 )
 
-func TestBuildHostItems_ExactDuplicate(t *testing.T) {
+func appTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	existing := db.Host{
-		SyncID:     "h1",
-		Alias:      "prod",
-		Hostname:   "1.2.3.4",
-		Port:       22,
-		Username:   "root",
-		AuthMethod: "agent",
-	}
-	database.Create(&existing)
-
-	hosts := []parser.HostRecord{
-		{Aliases: []string{"prod"}, Host: "1.2.3.4", Port: 22, Username: "root"},
-	}
-	items := buildHostItems(database, hosts)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(items))
-	}
-	if !items[0].blocked {
-		t.Error("expected exact duplicate to be blocked")
-	}
-	if items[0].nameConflict {
-		t.Error("exact duplicate should not be nameConflict")
-	}
+	return database
 }
 
-func TestBuildHostItems_NameConflict(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
+func TestBuildHostItemsConflict(t *testing.T) {
+	tests := []struct {
+		name         string
+		alias        string
+		existing     *db.Host
+		wantBlocked  bool
+		wantConflict bool
+	}{
+		{
+			name:  "exact duplicate",
+			alias: "prod",
+			existing: &db.Host{
+				SyncID: "h1", Alias: "prod", Hostname: "1.2.3.4", Port: 22, Username: "root", AuthMethod: "agent",
+			},
+			wantBlocked: true,
+		},
+		{
+			name:  "name conflict",
+			alias: "prod",
+			existing: &db.Host{
+				SyncID: "h2", Alias: "prod", Hostname: "9.9.9.9", Port: 22, Username: "admin", AuthMethod: "agent",
+			},
+			wantConflict: true,
+		},
+		{name: "no conflict", alias: "new-host"},
 	}
-	existing := db.Host{
-		SyncID:     "h2",
-		Alias:      "prod",
-		Hostname:   "9.9.9.9",
-		Port:       22,
-		Username:   "admin",
-		AuthMethod: "agent",
-	}
-	database.Create(&existing)
-
-	hosts := []parser.HostRecord{
-		{Aliases: []string{"prod"}, Host: "1.2.3.4", Port: 22, Username: "root"},
-	}
-	items := buildHostItems(database, hosts)
-	if items[0].blocked {
-		t.Error("name conflict should not be blocked")
-	}
-	if !items[0].nameConflict {
-		t.Error("expected nameConflict=true")
-	}
-}
-
-func TestBuildHostItems_NoConflict(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	hosts := []parser.HostRecord{
-		{Aliases: []string{"new-host"}, Host: "1.2.3.4", Port: 22, Username: "root"},
-	}
-	items := buildHostItems(database, hosts)
-	if items[0].blocked || items[0].nameConflict {
-		t.Error("expected no conflict for new host")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database := appTestDB(t)
+			if tt.existing != nil {
+				database.Create(tt.existing)
+			}
+			items := buildHostItems(database, []parser.HostRecord{
+				{Aliases: []string{tt.alias}, Host: "1.2.3.4", Port: 22, Username: "root"},
+			})
+			if len(items) != 1 {
+				t.Fatalf("expected 1 item, got %d", len(items))
+			}
+			if items[0].blocked != tt.wantBlocked {
+				t.Errorf("blocked = %v, want %v", items[0].blocked, tt.wantBlocked)
+			}
+			if items[0].nameConflict != tt.wantConflict {
+				t.Errorf("nameConflict = %v, want %v", items[0].nameConflict, tt.wantConflict)
+			}
+		})
 	}
 }
 
 func TestBuildHostItems_DefaultAliasAndSort(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := appTestDB(t)
 	hosts := []parser.HostRecord{
 		{Aliases: []string{"zeta"}, Host: "1.2.3.4", Port: 22, Username: "root"},
 		{Host: "2.3.4.5", Port: 22, Username: "root"},
@@ -123,78 +107,67 @@ func TestImportHostListViewFitsWindowHeight(t *testing.T) {
 	}
 }
 
-func TestBuildKeyItems_ExactDuplicate(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
+func TestBuildKeyItemsConflict(t *testing.T) {
+	tests := []struct {
+		name           string
+		alias          string
+		existing       *db.SSHKey
+		fingerprints   []string
+		wantBlocked    bool
+		wantConflict   bool
+		wantExistingID bool
+	}{
+		{
+			name:  "exact duplicate",
+			alias: "deploy",
+			existing: &db.SSHKey{
+				SyncID: "k1", Name: "deploy", Type: "ssh-ed25519", Fingerprint: "SHA256:AAAA",
+			},
+			fingerprints: []string{"SHA256:AAAA"},
+			wantBlocked:  true,
+		},
+		{
+			name:  "existing fingerprint different name",
+			alias: "termius-deploy",
+			existing: &db.SSHKey{
+				SyncID: "k1", Name: "local-deploy", Type: "ssh-ed25519", Fingerprint: "SHA256:AAAA",
+			},
+			fingerprints:   []string{"SHA256:AAAA"},
+			wantBlocked:    true,
+			wantExistingID: true,
+		},
+		{
+			name:  "name conflict",
+			alias: "deploy",
+			existing: &db.SSHKey{
+				SyncID: "k2", Name: "deploy", Type: "ssh-ed25519", Fingerprint: "SHA256:BBBB",
+			},
+			fingerprints: []string{"SHA256:CCCC"},
+			wantConflict: true,
+		},
 	}
-	database.Create(&db.SSHKey{
-		SyncID:      "k1",
-		Name:        "deploy",
-		Type:        "ssh-ed25519",
-		Fingerprint: "SHA256:AAAA",
-	})
-	keys := []parser.KeyRecord{
-		{Aliases: []string{"deploy"}, PrivateKey: ""},
-	}
-	items := buildKeyItemsWithFP(database, keys, []string{"SHA256:AAAA"})
-	if !items[0].blocked {
-		t.Error("expected exact duplicate key to be blocked")
-	}
-}
-
-func TestBuildKeyItems_ExistingFingerprintDifferentName(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	existing := db.SSHKey{
-		SyncID:      "k1",
-		Name:        "local-deploy",
-		Type:        "ssh-ed25519",
-		Fingerprint: "SHA256:AAAA",
-	}
-	database.Create(&existing)
-	keys := []parser.KeyRecord{
-		{Aliases: []string{"termius-deploy"}, PrivateKey: ""},
-	}
-	items := buildKeyItemsWithFP(database, keys, []string{"SHA256:AAAA"})
-	if !items[0].blocked {
-		t.Error("expected duplicate fingerprint to be blocked")
-	}
-	if items[0].existingID != existing.ID {
-		t.Fatalf("expected existing ID %d, got %d", existing.ID, items[0].existingID)
-	}
-}
-
-func TestBuildKeyItems_NameConflict(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	database.Create(&db.SSHKey{
-		SyncID:      "k2",
-		Name:        "deploy",
-		Type:        "ssh-ed25519",
-		Fingerprint: "SHA256:BBBB",
-	})
-	keys := []parser.KeyRecord{
-		{Aliases: []string{"deploy"}, PrivateKey: ""},
-	}
-	items := buildKeyItemsWithFP(database, keys, []string{"SHA256:CCCC"})
-	if items[0].blocked {
-		t.Error("name conflict should not be blocked")
-	}
-	if !items[0].nameConflict {
-		t.Error("expected nameConflict=true")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			database := appTestDB(t)
+			database.Create(tt.existing)
+			items := buildKeyItemsWithFP(database, []parser.KeyRecord{
+				{Aliases: []string{tt.alias}, PrivateKey: ""},
+			}, tt.fingerprints)
+			if items[0].blocked != tt.wantBlocked {
+				t.Errorf("blocked = %v, want %v", items[0].blocked, tt.wantBlocked)
+			}
+			if items[0].nameConflict != tt.wantConflict {
+				t.Errorf("nameConflict = %v, want %v", items[0].nameConflict, tt.wantConflict)
+			}
+			if tt.wantExistingID && items[0].existingID != tt.existing.ID {
+				t.Errorf("existingID = %d, want %d", items[0].existingID, tt.existing.ID)
+			}
+		})
 	}
 }
 
 func TestRunTermiusImport_UsesExistingDuplicateKeyForHost(t *testing.T) {
-	database, err := db.InitDB(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	database := appTestDB(t)
 	existing := db.SSHKey{
 		SyncID:      "k1",
 		Name:        "local-deploy",

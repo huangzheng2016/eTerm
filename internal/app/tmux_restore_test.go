@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/relay"
-	"github.com/huangzheng2016/eTerm/internal/remote"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/types"
@@ -104,10 +103,7 @@ func TestTmuxRestoreSnapshotOnlyIncludesTmuxTabsInOrder(t *testing.T) {
 
 func TestUnlockPromptsForSavedTmuxRestore(t *testing.T) {
 	a := restoreTestApp(t)
-	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
-	if err := writeTmuxRestoreFile(a.tmuxRestorePath, []tmuxRestoreEntry{{Kind: tmuxRestoreLocal, Session: "work"}}); err != nil {
-		t.Fatal(err)
-	}
+	remoteTestWriteRestoreFile(t, &a, tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "work"})
 
 	next, _ := a.Update(types.MasterKeyUnlockedMsg{NoPassword: true})
 	a = next.(App)
@@ -123,10 +119,7 @@ func TestUnlockPromptsForSavedTmuxRestore(t *testing.T) {
 func TestUpgradeCommandDefersTmuxRestoreUntilUpdatePromptFinishes(t *testing.T) {
 	a := restoreTestApp(t)
 	a.forceUpdateCheck = true
-	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
-	if err := writeTmuxRestoreFile(a.tmuxRestorePath, []tmuxRestoreEntry{{Kind: tmuxRestoreLocal, Session: "work"}}); err != nil {
-		t.Fatal(err)
-	}
+	remoteTestWriteRestoreFile(t, &a, tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "work"})
 
 	next, _ := a.Update(types.MasterKeyUnlockedMsg{NoPassword: true})
 	a = next.(App)
@@ -149,10 +142,7 @@ func TestUpgradeCommandDefersTmuxRestoreUntilUpdatePromptFinishes(t *testing.T) 
 func TestUpgradeCommandPromptsTmuxRestoreAfterNoUpdate(t *testing.T) {
 	a := restoreTestApp(t)
 	a.forceUpdateCheck = true
-	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
-	if err := writeTmuxRestoreFile(a.tmuxRestorePath, []tmuxRestoreEntry{{Kind: tmuxRestoreLocal, Session: "work"}}); err != nil {
-		t.Fatal(err)
-	}
+	remoteTestWriteRestoreFile(t, &a, tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "work"})
 
 	next, _ := a.Update(types.MasterKeyUnlockedMsg{NoPassword: true})
 	a = next.(App)
@@ -165,10 +155,7 @@ func TestUpgradeCommandPromptsTmuxRestoreAfterNoUpdate(t *testing.T) {
 
 func TestDecliningTmuxRestoreClearsSnapshot(t *testing.T) {
 	a := restoreTestApp(t)
-	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
-	if err := writeTmuxRestoreFile(a.tmuxRestorePath, []tmuxRestoreEntry{{Kind: tmuxRestoreLocal, Session: "work"}}); err != nil {
-		t.Fatal(err)
-	}
+	remoteTestWriteRestoreFile(t, &a, tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "work"})
 	next, _ := a.Update(types.MasterKeyUnlockedMsg{NoPassword: true})
 	a = next.(App)
 
@@ -185,20 +172,16 @@ func TestDecliningTmuxRestoreClearsSnapshot(t *testing.T) {
 
 func TestConfirmingTmuxRestoreCreatesTabsBeforeOpeningInSavedOrder(t *testing.T) {
 	oldAttach := appAttachTmuxSession
-	oldRemoteOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() {
-		appAttachTmuxSession = oldAttach
-		remoteOpenTmuxSessionWithProgress = oldRemoteOpen
-	})
+	t.Cleanup(func() { appAttachTmuxSession = oldAttach })
 	var opened []string
 	appAttachTmuxSession = func(ctx context.Context, _ string, name string, rows, cols int) (*internalssh.InteractiveSession, error) {
 		opened = append(opened, "local:"+name)
 		return &internalssh.InteractiveSession{}, nil
 	}
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(peerID, _, sessionID string) (*internalssh.InteractiveSession, string, error) {
 		opened = append(opened, "remote:"+peerID+":"+sessionID)
 		return &internalssh.InteractiveSession{}, "", nil
-	}
+	})
 	a := restoreTestApp(t)
 	a.viewState = MainView
 	a.tabs = []Tab{{Type: HomeTab, Title: "List"}}
@@ -261,60 +244,42 @@ func TestConfirmingTmuxRestoreCreatesTabsBeforeOpeningInSavedOrder(t *testing.T)
 }
 
 func TestTmuxRestoreMissingSessionClosesOnlyPlaceholder(t *testing.T) {
-	a := restoreTestApp(t)
-	a.viewState = MainView
-	a.tabs = []Tab{{Type: HomeTab, Title: "List"}}
-	a.activeTab = 0
+	for _, tc := range []struct {
+		name  string
+		entry tmuxRestoreEntry
+		err   string
+	}{
+		{name: "local", entry: tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "gone", Title: "[T]gone"}, err: "tmux attach-session: exit status 1: can't find session: gone"},
+		{name: "daemon", entry: tmuxRestoreEntry{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer"}, err: "no such session: gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := restoreTestApp(t)
+			a.viewState = MainView
+			a.tabs = []Tab{{Type: HomeTab, Title: "List"}}
+			a.activeTab = 0
 
-	cmd := (&a).restoreTmuxSessions([]tmuxRestoreEntry{
-		{Kind: tmuxRestoreLocal, Session: "gone", Title: "[T]gone"},
-		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
-	})
-	if cmd == nil || len(a.tabs) != 3 {
-		t.Fatalf("tabs before result = %#v", a.tabs)
-	}
-	missingID := a.tabs[1].tmuxRestoreID
-	next, _ := a.Update(tmuxRestoreOpenedMsg{
-		id:    missingID,
-		entry: tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "gone", Title: "[T]gone"},
-		err:   errors.New("tmux attach-session: exit status 1: can't find session: gone"),
-	})
-	a = next.(App)
+			cmd := (&a).restoreTmuxSessions([]tmuxRestoreEntry{
+				tc.entry,
+				{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
+			})
+			if cmd == nil || len(a.tabs) != 3 {
+				t.Fatalf("tabs before result = %#v", a.tabs)
+			}
+			missingID := a.tabs[1].tmuxRestoreID
+			next, _ := a.Update(tmuxRestoreOpenedMsg{
+				id:    missingID,
+				entry: tc.entry,
+				err:   errors.New(tc.err),
+			})
+			a = next.(App)
 
-	if len(a.tabs) != 2 || a.tabs[1].Title != "[T]work" {
-		t.Fatalf("tabs after missing session = %#v", a.tabs)
-	}
-	if a.activeTab != 0 || a.connError != nil {
-		t.Fatalf("active tab=%d connError=%v", a.activeTab, a.connError)
-	}
-}
-
-func TestTmuxRestoreDaemonMissingSessionClosesPlaceholder(t *testing.T) {
-	a := restoreTestApp(t)
-	a.viewState = MainView
-	a.tabs = []Tab{{Type: HomeTab, Title: "List"}}
-	a.activeTab = 0
-
-	cmd := (&a).restoreTmuxSessions([]tmuxRestoreEntry{
-		{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer"},
-		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
-	})
-	if cmd == nil || len(a.tabs) != 3 {
-		t.Fatalf("tabs before result = %#v", a.tabs)
-	}
-	missingID := a.tabs[1].tmuxRestoreID
-	next, _ := a.Update(tmuxRestoreOpenedMsg{
-		id:    missingID,
-		entry: tmuxRestoreEntry{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer"},
-		err:   errors.New("no such session: gone"),
-	})
-	a = next.(App)
-
-	if len(a.tabs) != 2 || a.tabs[1].Title != "[T]work" {
-		t.Fatalf("tabs after daemon missing session = %#v", a.tabs)
-	}
-	if a.activeTab != 0 || a.connError != nil {
-		t.Fatalf("active tab=%d connError=%v", a.activeTab, a.connError)
+			if len(a.tabs) != 2 || a.tabs[1].Title != "[T]work" {
+				t.Fatalf("tabs after missing session = %#v", a.tabs)
+			}
+			if a.activeTab != 0 || a.connError != nil {
+				t.Fatalf("active tab=%d connError=%v", a.activeTab, a.connError)
+			}
+		})
 	}
 }
 
@@ -411,4 +376,12 @@ func restoreTestApp(t *testing.T) App {
 	_ = db.SetSetting(gdb, "sync_mode", "http")
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	return NewApp(gdb, mk).SetNoUpdateCheck(true)
+}
+
+func remoteTestWriteRestoreFile(t *testing.T, a *App, entries ...tmuxRestoreEntry) {
+	t.Helper()
+	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
+	if err := writeTmuxRestoreFile(a.tmuxRestorePath, entries); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -3,8 +3,6 @@ package sshview
 import (
 	"strings"
 	"testing"
-
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 const (
@@ -13,8 +11,7 @@ const (
 )
 
 func TestAltScreenRenderKeepsHyperlinks(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 	m.SetSize(20, 4)
 
 	_, _ = m.Update(ChunkMsg{
@@ -29,8 +26,7 @@ func TestAltScreenRenderKeepsHyperlinks(t *testing.T) {
 }
 
 func TestScrollbackRenderKeepsHyperlinks(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 	m.SetSize(20, 4)
 
 	_, _ = m.Update(ChunkMsg{
@@ -53,8 +49,7 @@ func TestScrollbackRenderKeepsHyperlinks(t *testing.T) {
 }
 
 func TestSelectionRenderKeepsHyperlinks(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, nil)
 	m.SetSize(20, 4)
 
 	_, _ = m.Update(ChunkMsg{

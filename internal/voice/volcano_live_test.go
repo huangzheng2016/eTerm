@@ -145,7 +145,7 @@ func recognizeLive(t *testing.T, cfg VolcanoConfig, pcm []byte) string {
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	ev := waitVolcanoEvent(t, eng, func(ev Event) bool { return ev.Type == EventFinal })
+	ev := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if strings.TrimSpace(ev.Text) == "" {
 		t.Fatal("empty final transcript")
 	}

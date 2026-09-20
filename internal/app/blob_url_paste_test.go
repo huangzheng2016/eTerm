@@ -23,26 +23,32 @@ import (
 	"gorm.io/gorm"
 )
 
-type testWriteCloser struct {
+type appTestStdin struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
 }
 
-func (w *testWriteCloser) Write(p []byte) (int, error) {
+func (w *appTestStdin) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.Write(p)
 }
 
-func (w *testWriteCloser) Close() error { return nil }
+func (w *appTestStdin) Close() error { return nil }
 
-func (w *testWriteCloser) String() string {
+func (w *appTestStdin) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String()
 }
 
-func (w *testWriteCloser) waitString(t *testing.T, want string) {
+func (w *appTestStdin) contains(s string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return bytes.Contains(w.buf.Bytes(), []byte(s))
+}
+
+func (w *appTestStdin) waitString(t *testing.T, want string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -56,9 +62,21 @@ func (w *testWriteCloser) waitString(t *testing.T, want string) {
 	}
 }
 
+func (w *appTestStdin) waitContains(t *testing.T, s string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if w.contains(s) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("stdin missing %q", s)
+}
+
 func TestBlobUploadDonePastesIntoOriginalTab(t *testing.T) {
-	firstStdin := &testWriteCloser{}
-	secondStdin := &testWriteCloser{}
+	firstStdin := &appTestStdin{}
+	secondStdin := &appTestStdin{}
 	first := sshview.New(&internalssh.InteractiveSession{Stdin: firstStdin}, "first", 0, viewkeys.SSHKeys{})
 	second := sshview.New(&internalssh.InteractiveSession{Stdin: secondStdin}, "second", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = first.Close() })
@@ -83,7 +101,7 @@ func TestBlobUploadDonePastesIntoOriginalTab(t *testing.T) {
 }
 
 func TestBlobUploadDoneCachesURL(t *testing.T) {
-	stdin := &testWriteCloser{}
+	stdin := &appTestStdin{}
 	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "first", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
 	expiresAt := time.Now().Add(time.Minute)
@@ -113,7 +131,7 @@ func TestBlobUploadDoneCachesURL(t *testing.T) {
 }
 
 func TestImagePasteFallbackForwardsOriginalPasteMsg(t *testing.T) {
-	stdin := &testWriteCloser{}
+	stdin := &appTestStdin{}
 	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "first", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
 
@@ -145,7 +163,7 @@ func TestLocalFilePasteUsesFileURL(t *testing.T) {
 	}
 	t.Cleanup(func() { readClipboardBlob = oldRead })
 
-	stdin := &testWriteCloser{}
+	stdin := &appTestStdin{}
 	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "local", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
 	a := App{
@@ -174,7 +192,7 @@ func TestLocalFolderPasteUsesFileURL(t *testing.T) {
 	}
 	t.Cleanup(func() { readClipboardBlob = oldRead })
 
-	stdin := &testWriteCloser{}
+	stdin := &appTestStdin{}
 	tab := sshview.New(&internalssh.InteractiveSession{Stdin: stdin}, "local", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
 	a := App{
@@ -334,7 +352,7 @@ func localClipboardPasteTestApp(t *testing.T) (App, *sshview.Model) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tab := sshview.New(&internalssh.InteractiveSession{Stdin: &testWriteCloser{}}, "local", 0, viewkeys.SSHKeys{})
+	tab := sshview.New(&internalssh.InteractiveSession{Stdin: &appTestStdin{}}, "local", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() { _ = tab.Close() })
 	cfg := DefaultKeyBindingConfig()
 	return App{

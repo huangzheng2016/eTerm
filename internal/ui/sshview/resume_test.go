@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 type trackingWriteCloser struct {
@@ -36,8 +35,7 @@ func TestResumeSessionDrainsPendingOutputAndContinues(t *testing.T) {
 	pr1, _ := io.Pipe()
 	done1 := make(chan error, 1)
 	sess1 := &internalssh.InteractiveSession{Stdout: pr1, Done: done1}
-	m := New(sess1, "t", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, sess1)
 	m.SetSize(80, 24)
 	m.ch <- []byte("queued")
 	m.closeChFor(m.ch)
@@ -74,8 +72,7 @@ func TestResumeSessionClosesReplacedSession(t *testing.T) {
 	done1 := make(chan error, 1)
 	sess1 := &internalssh.InteractiveSession{Stdin: stdin1, Stdout: pr1, Done: done1}
 	sess1.AddCloser(closer1)
-	m := New(sess1, "t", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, sess1)
 	m.SetSize(80, 24)
 
 	pr2, _ := io.Pipe()
@@ -92,8 +89,7 @@ func TestResumeSessionClosesReplacedSession(t *testing.T) {
 }
 
 func TestStaleWaitChunkReturnsNil(t *testing.T) {
-	m := New(&internalssh.InteractiveSession{}, "t", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
+	m := newTestModel(t, &internalssh.InteractiveSession{})
 	m.SetSize(80, 24)
 	stale := waitChunk(m)
 	m.closeChFor(m.ch)

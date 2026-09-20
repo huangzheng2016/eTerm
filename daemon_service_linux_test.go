@@ -25,6 +25,11 @@ func stubRunSystemctl(t *testing.T, fn func(args ...string) (string, error)) *[]
 	return &calls
 }
 
+func stubSystemctlOK(t *testing.T) *[]string {
+	t.Helper()
+	return stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+}
+
 func newNoPasswordDB(t *testing.T, dir string) string {
 	t.Helper()
 	dbPath := filepath.Join(dir, "eterm.db")
@@ -118,7 +123,7 @@ func TestDaemonServiceEnableWritesUnitAndCommands(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	dbPath := newNoPasswordDB(t, dir)
-	calls := stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	calls := stubSystemctlOK(t)
 	if err := daemonServiceEnable(daemonOptions{DBPath: dbPath}); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +142,7 @@ func TestDaemonServiceEnableIdempotentLoadsLatestConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	dbPath := newNoPasswordDB(t, dir)
-	stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	stubSystemctlOK(t)
 	if err := daemonServiceEnable(daemonOptions{DBPath: dbPath}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +158,7 @@ func TestDaemonServiceEnableIdempotentLoadsLatestConfig(t *testing.T) {
 func TestDaemonServiceEnableRejectsPassword(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	calls := stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	calls := stubSystemctlOK(t)
 	err := daemonServiceEnable(daemonOptions{Password: "secret"})
 	if err == nil || !strings.Contains(err.Error(), "password") {
 		t.Fatalf("err = %v", err)
@@ -169,7 +174,7 @@ func TestDaemonServiceEnableRejectsPassword(t *testing.T) {
 func TestDaemonServiceEnableRejectsMissingDB(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	calls := stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	calls := stubSystemctlOK(t)
 	err := daemonServiceEnable(daemonOptions{DBPath: filepath.Join(dir, "missing.db")})
 	if err == nil || !strings.Contains(err.Error(), "not initialized") {
 		t.Fatalf("err = %v", err)
@@ -190,7 +195,7 @@ func TestDaemonServiceEnableRejectsPasswordProtectedDB(t *testing.T) {
 	if sqlDB, err := database.DB(); err == nil {
 		sqlDB.Close()
 	}
-	calls := stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	calls := stubSystemctlOK(t)
 	err = daemonServiceEnable(daemonOptions{DBPath: dbPath})
 	if err == nil || !strings.Contains(err.Error(), "no-password") {
 		t.Fatalf("err = %v", err)
@@ -233,7 +238,7 @@ func TestDaemonServiceDisableRemovesUnitAndCommands(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	unitPath := writeDaemonServiceUnit(t, dir)
-	calls := stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	calls := stubSystemctlOK(t)
 	if err := daemonServiceDisable(); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +255,7 @@ func TestDaemonServiceDisableRemovesUnitAndCommands(t *testing.T) {
 func TestDaemonServiceDisableNotInstalled(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	calls := stubRunSystemctl(t, func(args ...string) (string, error) { return "", nil })
+	calls := stubSystemctlOK(t)
 	if err := daemonServiceDisable(); err != nil {
 		t.Fatal(err)
 	}

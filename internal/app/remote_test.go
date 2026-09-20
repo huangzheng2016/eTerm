@@ -79,12 +79,7 @@ func TestRemoteTmuxRenameRequestOpensPrompt(t *testing.T) {
 }
 
 func TestRenameRemoteTmuxUpdatesOpenTabTitle(t *testing.T) {
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Tmux:      true,
-		SessionID: "work",
-	})
+	tab := remoteTestTmuxTab()
 	a := App{
 		viewState: MainView,
 		tabs:      []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}},
@@ -110,12 +105,7 @@ func TestRenameRemoteTmuxDoesNotUpdateTabWhenRemoteRenameFails(t *testing.T) {
 	remoteRenameTmuxSession = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) error {
 		return errors.New("rename failed")
 	}
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Tmux:      true,
-		SessionID: "work",
-	})
+	tab := remoteTestTmuxTab()
 	a := remoteHTTPTestApp(t)
 	a.viewState = MainView
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
@@ -147,15 +137,125 @@ func TestRemoteTmuxTabTitle(t *testing.T) {
 	}
 }
 
+func TestRemotePeerRenameRequestOpensPrompt(t *testing.T) {
+	a := App{}
+	next, cmd := a.Update(types.RemotePeerRenameRequestMsg{
+		Peer:        types.RemotePeer{ID: "p1", Name: "peer"},
+		CurrentName: "peer",
+	})
+	a = next.(App)
+
+	if cmd == nil {
+		t.Fatal("expected blink command")
+	}
+	if a.renamePrompt == nil {
+		t.Fatal("expected rename prompt")
+	}
+
+	a.renamePrompt.input.SetValue("box")
+	_, cmd = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	msg, ok := cmd().(types.RemotePeerRenameMsg)
+	if !ok {
+		t.Fatalf("got %T want RemotePeerRenameMsg", cmd())
+	}
+	if msg.Peer.ID != "p1" || msg.Name != "box" {
+		t.Fatalf("bad rename msg %+v", msg)
+	}
+}
+
+func TestRenameRemotePeerSuccess(t *testing.T) {
+	oldRename := remoteRenamePeer
+	t.Cleanup(func() { remoteRenamePeer = oldRename })
+	var gotPeer, gotName string
+	remoteRenamePeer = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, name string) error {
+		gotPeer, gotName = peerID, name
+		return nil
+	}
+	a := remoteHTTPTestApp(t)
+
+	_, cmd := a.renameRemotePeer(types.RemotePeerRenameMsg{Peer: types.RemotePeer{ID: "p1", Name: "peer"}, Name: "box"})
+	msg, ok := cmd().(remotePeerRenameAppliedMsg)
+	if !ok {
+		t.Fatalf("got %T want remotePeerRenameAppliedMsg", cmd())
+	}
+	if gotPeer != "p1" || gotName != "box" {
+		t.Fatalf("rename call = %q %q", gotPeer, gotName)
+	}
+	if msg.Name != "box" {
+		t.Fatalf("applied name = %q", msg.Name)
+	}
+}
+
+func TestRenameRemotePeerFailureReturnsError(t *testing.T) {
+	oldRename := remoteRenamePeer
+	t.Cleanup(func() { remoteRenamePeer = oldRename })
+	remoteRenamePeer = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, name string) error {
+		return errors.New("rename failed")
+	}
+	a := remoteHTTPTestApp(t)
+
+	_, cmd := a.renameRemotePeer(types.RemotePeerRenameMsg{Peer: types.RemotePeer{ID: "p1", Name: "peer"}, Name: "box"})
+	if _, ok := cmd().(types.ErrorMsg); !ok {
+		t.Fatalf("got %T want ErrorMsg", cmd())
+	}
+}
+
+func TestRenameRemotePeerUpdatesOpenTabTitles(t *testing.T) {
+	mkTab := func(title string) *sshview.Model {
+		tab := sshview.New(&internalssh.InteractiveSession{}, title, 0, viewkeys.SSHKeys{})
+		tab.SetRemoteReconnect(&types.RemoteReconnect{Peer: types.RemotePeer{ID: "p1", Name: "peer"}})
+		return tab
+	}
+	a := App{
+		viewState: MainView,
+		tabs: []Tab{
+			{Type: SSHTab, Title: "[T]peer-work", Model: mkTab("[T]peer-work")},
+			{Type: LocalTab, Title: "[R]peer", Model: mkTab("[R]peer")},
+			{Type: SSHTab, Title: "[R]peer-web", Model: mkTab("[R]peer-web")},
+		},
+	}
+
+	a.renameRemotePeerTabs("p1", "peer", "box")
+
+	want := []string{"[T]box-work", "[R]box", "[R]box-web"}
+	for i, w := range want {
+		if a.tabs[i].Title != w {
+			t.Fatalf("tab %d title = %q, want %q", i, a.tabs[i].Title, w)
+		}
+	}
+	for i := range a.tabs {
+		spec := a.tabs[i].Model.(*sshview.Model).RemoteReconnect()
+		if spec == nil || spec.Peer.Name != "box" {
+			t.Fatalf("tab %d spec = %+v", i, spec)
+		}
+	}
+}
+
+func TestRemotePeerRenameAppliedUpdatesMenuAndRefreshes(t *testing.T) {
+	a := App{viewState: MainView}
+	a.remoteMenu = remotemenu.New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+
+	next, cmd := a.Update(remotePeerRenameAppliedMsg{Peer: types.RemotePeer{ID: "p1", Name: "peer"}, Name: "box"})
+	a = next.(App)
+
+	if a.remoteMenu.Peer.Name != "box" {
+		t.Fatalf("menu peer name = %q", a.remoteMenu.Peer.Name)
+	}
+	if cmd == nil {
+		t.Fatal("expected refresh command")
+	}
+	if _, ok := cmd().(types.RemoteDaemonRefreshMsg); !ok {
+		t.Fatalf("got %T want RemoteDaemonRefreshMsg", cmd())
+	}
+}
+
 func TestOpenRemoteTmuxNewUsesReturnedSessionID(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
 	var gotTarget, gotSession string
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, string, error) {
 		gotTarget = target
 		gotSession = sessionID
 		return &internalssh.InteractiveSession{}, "tmux-newid", nil
-	}
+	})
 	a := remoteHTTPTestApp(t)
 
 	_, cmd := a.openRemoteShell(types.RemoteShellOpenMsg{
@@ -178,14 +278,12 @@ func TestOpenRemoteTmuxNewUsesReturnedSessionID(t *testing.T) {
 }
 
 func TestOpenRemoteTmuxAttachPreservesSessionID(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
 	var gotTarget, gotSession string
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, string, error) {
 		gotTarget = target
 		gotSession = sessionID
 		return &internalssh.InteractiveSession{}, "", nil
-	}
+	})
 	a := remoteHTTPTestApp(t)
 
 	_, cmd := a.openRemoteShell(types.RemoteShellOpenMsg{
@@ -209,23 +307,13 @@ func TestOpenRemoteTmuxAttachPreservesSessionID(t *testing.T) {
 }
 
 func TestApplyRemoteTmuxReconnectReopensTmuxSession(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
 	var gotTarget, gotSession string
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, string, error) {
 		gotTarget = target
 		gotSession = sessionID
 		return &internalssh.InteractiveSession{}, "", nil
-	}
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
 	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 
@@ -254,20 +342,10 @@ func TestApplyRemoteTmuxReconnectReopensTmuxSession(t *testing.T) {
 }
 
 func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
 		return nil, "", errors.New("dial failed")
-	}
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
 	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 
@@ -308,20 +386,10 @@ func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
 }
 
 func TestRemoteTmuxAutoReconnectDoesNotStealActiveTab(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
 		return &internalssh.InteractiveSession{}, "", nil
-	}
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
 	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{
 		{Type: SSHTab, Title: "[T]peer-work", Model: tab},
@@ -391,12 +459,7 @@ func TestApplyRemoteTerminalOpenedFreshReconnectKeepsModel(t *testing.T) {
 }
 
 func TestRemoteTmuxRenameAppliedUpdatesTabAndRefreshesList(t *testing.T) {
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Tmux:      true,
-		SessionID: "work",
-	})
+	tab := remoteTestTmuxTab()
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 
@@ -516,6 +579,37 @@ func remoteHTTPTestApp(t *testing.T) App {
 		db:        database,
 		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
 	}
+}
+
+func remoteTestStubOpenTmux(t *testing.T, fn func(peerID, target, sessionID string) (*internalssh.InteractiveSession, string, error)) {
+	t.Helper()
+	old := remoteOpenTmuxSessionWithProgress
+	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = old })
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+		return fn(peerID, target, sessionID)
+	}
+}
+
+func remoteTestTmuxTab() *sshview.Model {
+	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Tmux:      true,
+		SessionID: "work",
+	})
+	return tab
+}
+
+func remoteTestReconnectingTmuxTab(is *internalssh.InteractiveSession) *sshview.Model {
+	tab := sshview.New(is, "[T]peer-work", 0, viewkeys.SSHKeys{})
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:    relay.TargetTmuxAttach,
+		Tmux:      true,
+		SessionID: "work",
+	})
+	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
+	return updated.(*sshview.Model)
 }
 
 func TestTmuxKillRequestRequiresConfirm(t *testing.T) {
@@ -720,12 +814,7 @@ func TestRenameTabShortcutDoesNotUseTmuxRenameForPlainPrefix(t *testing.T) {
 }
 
 func TestRenameTabShortcutUsesRemoteTmuxRename(t *testing.T) {
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Tmux:      true,
-		SessionID: "work",
-	})
+	tab := remoteTestTmuxTab()
 	a := renameShortcutTestApp([]Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}})
 
 	next, _ := a.Update(ctrlShiftR())
@@ -761,20 +850,10 @@ func ctrlShiftR() tea.KeyPressMsg {
 }
 
 func TestRemoteTmuxAutoReconnectExhaustedSurfacesOpenError(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
 		return nil, "", errors.New("no such session")
-	}
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
 	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 
@@ -806,22 +885,12 @@ func (c closeTracker) Write(p []byte) (int, error) { return len(p), nil }
 func (c closeTracker) Close() error                { *c.closed = true; return nil }
 
 func TestApplyRemoteShellReconnectDropsDuplicateWhileInFlight(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
 	opens := 0
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
 		opens++
 		return &internalssh.InteractiveSession{}, "", nil
-	}
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
 	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 	msg := types.RemoteShellReconnectMsg{
@@ -865,15 +934,7 @@ func TestApplyRemoteShellReconnectDropsDuplicateWhileInFlight(t *testing.T) {
 }
 
 func TestApplyRemoteTerminalOpenedDropsStaleGeneration(t *testing.T) {
-	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
-	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab, reconnectGen: 2, reconnectInFlight: true}}
 
@@ -936,26 +997,16 @@ func TestUnlockResetClosesTerminalSessions(t *testing.T) {
 }
 
 func TestUnlockResetDropsInFlightReconnectDelivery(t *testing.T) {
-	oldOpen := remoteOpenTmuxSessionWithProgress
-	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = oldOpen })
 	deliveredClosed := false
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
 		return &internalssh.InteractiveSession{Stdin: closeTracker{closed: &deliveredClosed}}, "", nil
-	}
+	})
 	a := tickTestApp(t)
 	if err := db.SetSetting(a.db, "sync_mode", "http"); err != nil {
 		t.Fatal(err)
 	}
 	origClosed := false
-	tab := sshview.New(&internalssh.InteractiveSession{Stdin: closeTracker{closed: &origClosed}}, "[T]peer-work", 0, viewkeys.SSHKeys{})
-	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "work",
-	})
-	updated, _ := tab.Update(sshview.StreamDoneMsg{StreamID: tab.StreamID(), Err: errors.New("websocket: close 1006 abnormal closure")})
-	tab = updated.(*sshview.Model)
+	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{Stdin: closeTracker{closed: &origClosed}})
 	a.tabs = append(a.tabs,
 		Tab{Type: HomeTab, Title: "List"},
 		Tab{Type: SSHTab, Title: "[T]peer-work", Model: tab},

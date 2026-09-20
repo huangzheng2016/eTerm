@@ -20,15 +20,7 @@ func TestBuildFullClientRequest(t *testing.T) {
 	if seq := int32(binary.BigEndian.Uint32(frame[4:])); seq != 1 {
 		t.Fatalf("seq = %d", seq)
 	}
-	size := int(binary.BigEndian.Uint32(frame[8:]))
-	payload, err := gunzipData(frame[12 : 12+size])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var value map[string]any
-	if err := json.Unmarshal(payload, &value); err != nil {
-		t.Fatal(err)
-	}
+	value := fullClientPayloadMap(t, cfg)
 	audio := value["audio"].(map[string]any)
 	if audio["format"] != "pcm" || audio["bits"] != float64(16) || audio["channel"] != float64(1) {
 		t.Fatalf("audio: %v", audio)
@@ -47,19 +39,7 @@ func TestBuildFullClientRequest(t *testing.T) {
 
 func TestBuildFullClientRequestWithContext(t *testing.T) {
 	cfg := VolcanoConfig{SampleRate: 16000, SmartFormat: true, Context: `{"hotwords":[],"context_type":"dialog_ctx","context_data":[{"speaker":"user","text":"kubectl get pods"}]}`}
-	frame, err := buildFullClientRequest(cfg, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	size := int(binary.BigEndian.Uint32(frame[8:]))
-	payload, err := gunzipData(frame[12 : 12+size])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var value map[string]any
-	if err := json.Unmarshal(payload, &value); err != nil {
-		t.Fatal(err)
-	}
+	value := fullClientPayloadMap(t, cfg)
 	corpus, ok := value["corpus"].(map[string]any)
 	if !ok {
 		t.Fatalf("corpus missing: %v", value)

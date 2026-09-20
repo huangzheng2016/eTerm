@@ -97,21 +97,6 @@ func (s *volcanoServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func waitVolcanoEvent(t *testing.T, eng *VolcanoEngine, match func(Event) bool) Event {
-	t.Helper()
-	timeout := time.After(10 * time.Second)
-	for {
-		select {
-		case ev := <-eng.Events():
-			if match(ev) {
-				return ev
-			}
-		case <-timeout:
-			t.Fatal("timed out waiting for event")
-		}
-	}
-}
-
 func TestVolcanoEngineLifecycle(t *testing.T) {
 	srv := &volcanoServer{t: t, sawAudio: make(chan int32, 1), sawFinal: make(chan int32, 1)}
 	httpSrv := httptest.NewServer(http.HandlerFunc(srv.serveHTTP))
@@ -135,7 +120,7 @@ func TestVolcanoEngineLifecycle(t *testing.T) {
 		t.Fatal("server did not receive audio frame")
 	}
 
-	partial := waitVolcanoEvent(t, eng, func(ev Event) bool { return ev.Type == EventPartial })
+	partial := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventPartial })
 	if partial.Text != "hel" {
 		t.Fatalf("partial: %q", partial.Text)
 	}
@@ -151,7 +136,7 @@ func TestVolcanoEngineLifecycle(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not receive final frame")
 	}
-	final := waitVolcanoEvent(t, eng, func(ev Event) bool { return ev.Type == EventFinal })
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello" {
 		t.Fatalf("final: %q", final.Text)
 	}
@@ -159,17 +144,7 @@ func TestVolcanoEngineLifecycle(t *testing.T) {
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
+	waitEventsClosed(t, eng.Events())
 }
 
 func TestVolcanoEngineInitialError(t *testing.T) {
@@ -196,14 +171,6 @@ func TestVolcanoEngineInitialError(t *testing.T) {
 	eng.Close()
 }
 
-func TestVolcanoEngineRequiresAuth(t *testing.T) {
-	eng := NewVolcanoEngine(VolcanoConfig{})
-	if err := eng.Start(context.Background()); err == nil {
-		t.Fatal("expected auth error")
-	}
-	eng.Close()
-}
-
 func TestVolcanoEngineConnDropEmitsError(t *testing.T) {
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
@@ -225,7 +192,7 @@ func TestVolcanoEngineConnDropEmitsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer eng.Close()
-	ev := waitVolcanoEvent(t, eng, func(ev Event) bool {
+	ev := waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == EventError && strings.Contains(ev.Msg, "connection lost")
 	})
 	if ev.Msg == "" {

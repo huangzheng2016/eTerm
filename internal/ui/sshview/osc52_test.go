@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/huangzheng2016/eTerm/internal/viewkeys"
 )
 
 func TestOSC52SystemClipboardReturnsSetClipboardCommand(t *testing.T) {
@@ -21,19 +19,9 @@ func TestOSC52SystemClipboardReturnsSetClipboardCommand(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := New(nil, "test", 0, viewkeys.SSHKeys{})
-			t.Cleanup(func() { _ = m.Close() })
-			m.ch <- []byte("next")
+			m := newTestModel(t, nil)
 
-			_, cmd := m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte(tc.seq)})
-			if cmd == nil {
-				t.Fatal("expected command")
-			}
-			msg := cmd()
-			batch, ok := msg.(tea.BatchMsg)
-			if !ok {
-				t.Fatalf("msg = %T want tea.BatchMsg", msg)
-			}
+			batch := batchForChunk(t, m, tc.seq)
 
 			found := false
 			for _, c := range batch {
@@ -49,15 +37,6 @@ func TestOSC52SystemClipboardReturnsSetClipboardCommand(t *testing.T) {
 }
 
 func TestOSC52InvalidPayloadDoesNotSetClipboard(t *testing.T) {
-	m := New(nil, "test", 0, viewkeys.SSHKeys{})
-	t.Cleanup(func() { _ = m.Close() })
-	m.ch <- []byte("next")
-
-	_, cmd := m.Update(ChunkMsg{StreamID: m.StreamID(), Data: []byte("\x1b]52;c;not-base64\x07")})
-	if cmd == nil {
-		t.Fatal("expected waitChunk command")
-	}
-	if _, ok := cmd().(ChunkMsg); !ok {
-		t.Fatalf("unexpected clipboard command")
-	}
+	m := newTestModel(t, nil)
+	expectOnlyWaitChunk(t, m, "\x1b]52;c;not-base64\x07")
 }

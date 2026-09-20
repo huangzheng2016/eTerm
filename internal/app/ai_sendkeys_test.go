@@ -8,9 +8,20 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
 	"github.com/huangzheng2016/eTerm/internal/ui/sshview"
 )
+
+func aiTestPollSendKeys(t *testing.T, a App, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	msg, ok := cmd().(aiToolSendKeysDoneMsg)
+	if !ok {
+		t.Fatalf("msg = %T", msg)
+	}
+	_, next := a.handleAIToolSendKeysDone(msg)
+	return next
+}
 
 func sendKeysTestApp(t *testing.T) (App, *sshview.Model) {
 	t.Helper()
@@ -50,11 +61,7 @@ func TestSendKeysWaitsForCommandEnd(t *testing.T) {
 	}
 
 	feedSSHChunk(sv, "\x1b]133;C\a")
-	msg, ok := cmd().(aiToolSendKeysDoneMsg)
-	if !ok {
-		t.Fatalf("msg = %T", msg)
-	}
-	_, cmd = a.handleAIToolSendKeysDone(msg)
+	cmd = aiTestPollSendKeys(t, a, cmd)
 	if cmd == nil {
 		t.Fatal("answered while the command was still running")
 	}
@@ -65,11 +72,7 @@ func TestSendKeysWaitsForCommandEnd(t *testing.T) {
 	}
 
 	feedSSHChunk(sv, "build ok\r\n\x1b]133;D;0\a")
-	msg, ok = cmd().(aiToolSendKeysDoneMsg)
-	if !ok {
-		t.Fatalf("msg = %T", msg)
-	}
-	_, cmd = a.handleAIToolSendKeysDone(msg)
+	cmd = aiTestPollSendKeys(t, a, cmd)
 	if cmd != nil {
 		t.Fatal("kept polling after command completion")
 	}
@@ -119,11 +122,7 @@ func TestSendKeysTimeoutFallback(t *testing.T) {
 		if time.Since(start) > 5*time.Second {
 			t.Fatal("send_keys never answered")
 		}
-		msg, ok := cmd().(aiToolSendKeysDoneMsg)
-		if !ok {
-			t.Fatalf("unexpected msg %T", msg)
-		}
-		_, cmd = a.handleAIToolSendKeysDone(msg)
+		cmd = aiTestPollSendKeys(t, a, cmd)
 	}
 	if resp.err != nil {
 		t.Fatalf("resp err = %v", resp.err)
@@ -145,11 +144,7 @@ func TestSendKeysStaleOSC133AnswersPromptly(t *testing.T) {
 	_, cmd := a.handleAIToolRequest(req)
 
 	feedSSHChunk(sv, "dumb shell output\r\n")
-	msg, ok := cmd().(aiToolSendKeysDoneMsg)
-	if !ok {
-		t.Fatalf("msg = %T", msg)
-	}
-	_, cmd = a.handleAIToolSendKeysDone(msg)
+	cmd = aiTestPollSendKeys(t, a, cmd)
 	if cmd != nil {
 		t.Fatal("kept polling on stale OSC 133 state")
 	}
@@ -175,20 +170,12 @@ func TestSendKeysCtxCancel(t *testing.T) {
 	_, cmd := a.handleAIToolRequest(req)
 
 	feedSSHChunk(sv, "\x1b]133;C\a")
-	msg, ok := cmd().(aiToolSendKeysDoneMsg)
-	if !ok {
-		t.Fatalf("msg = %T", msg)
-	}
-	_, cmd = a.handleAIToolSendKeysDone(msg)
+	cmd = aiTestPollSendKeys(t, a, cmd)
 	if cmd == nil {
 		t.Fatal("answered before cancel")
 	}
 	cancel()
-	msg, ok = cmd().(aiToolSendKeysDoneMsg)
-	if !ok {
-		t.Fatalf("msg = %T", msg)
-	}
-	_, _ = a.handleAIToolSendKeysDone(msg)
+	_ = aiTestPollSendKeys(t, a, cmd)
 	select {
 	case r := <-req.resp:
 		if !errors.Is(r.err, context.Canceled) {
@@ -205,11 +192,7 @@ func TestSendKeysNoOSC133AnswersAfterMinWait(t *testing.T) {
 	_, cmd := a.handleAIToolRequest(req)
 
 	feedSSHChunk(sv, "dumb shell output\r\n")
-	msg, ok := cmd().(aiToolSendKeysDoneMsg)
-	if !ok {
-		t.Fatalf("msg = %T", msg)
-	}
-	_, cmd = a.handleAIToolSendKeysDone(msg)
+	cmd = aiTestPollSendKeys(t, a, cmd)
 	if cmd != nil {
 		t.Fatal("kept polling a shell without OSC 133")
 	}

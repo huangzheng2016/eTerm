@@ -10,14 +10,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestHelperProcess(t *testing.T) {
@@ -95,21 +92,6 @@ func fakeHelperWrapper(t *testing.T) string {
 	return wrapper
 }
 
-func waitEvent(t *testing.T, eng *LocalEngine, match func(Event) bool) Event {
-	t.Helper()
-	timeout := time.After(15 * time.Second)
-	for {
-		select {
-		case ev := <-eng.Events():
-			if match(ev) {
-				return ev
-			}
-		case <-timeout:
-			t.Fatal("timed out waiting for event")
-		}
-	}
-}
-
 func TestLocalEngineRoundTrip(t *testing.T) {
 	eng := NewLocalEngine(LocalConfig{BinPath: fakeHelperWrapper(t)})
 	ctx := context.Background()
@@ -121,19 +103,19 @@ func TestLocalEngineRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	echo := waitEvent(t, eng, func(ev Event) bool { return ev.Type == "echo" })
+	echo := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == "echo" })
 	for _, want := range []string{`"cmd":"set_vad_params"`, `"threshold":0.7`, `"trailing_silence":1.5`, `"max_segment":20`, `"no_speech_timeout":7`} {
 		if !strings.Contains(echo.Text, want) {
 			t.Fatalf("set_vad_params echo missing %s: %s", want, echo.Text)
 		}
 	}
 
-	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventState && ev.State == StateListening })
+	waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventState && ev.State == StateListening })
 
 	if err := eng.SetVAD(VADParams{Threshold: 0.7}); err != nil {
 		t.Fatal(err)
 	}
-	echo = waitEvent(t, eng, func(ev Event) bool {
+	echo = waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == "echo" && strings.Contains(ev.Text, `"threshold":0.7`)
 	})
 	if !strings.Contains(echo.Text, `"no_speech_timeout":0`) {
@@ -143,26 +125,16 @@ func TestLocalEngineRoundTrip(t *testing.T) {
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	final := waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventFinal })
+	final := waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 	if final.Text != "hello world" {
 		t.Fatalf("final text: %q", final.Text)
 	}
-	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventState && ev.State == StateIdle })
+	waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventState && ev.State == StateIdle })
 
 	if err := eng.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case _, ok := <-eng.Events():
-			if !ok {
-				return
-			}
-		case <-deadline:
-			t.Fatal("events channel not closed after Close")
-		}
-	}
+	waitEventsClosed(t, eng.Events())
 }
 
 func TestLocalEngineRejectsOldProtocol(t *testing.T) {
@@ -188,15 +160,15 @@ func TestLocalEngineRestartOnCrash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitEvent(t, eng, func(ev Event) bool {
+	waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == EventError && strings.Contains(ev.Msg, "restarted")
 	})
-	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventState && ev.State == StateListening })
+	waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventState && ev.State == StateListening })
 
 	if err := eng.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	waitEvent(t, eng, func(ev Event) bool { return ev.Type == EventFinal })
+	waitEvent(t, eng.Events(), func(ev Event) bool { return ev.Type == EventFinal })
 }
 
 func TestLocalEngineStopAfterCrashGiveUp(t *testing.T) {
@@ -209,7 +181,7 @@ func TestLocalEngineStopAfterCrashGiveUp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitEvent(t, eng, func(ev Event) bool {
+	waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == EventError && strings.Contains(ev.Msg, "giving up")
 	})
 	if err := eng.Stop(); err != nil {
@@ -249,11 +221,7 @@ func TestEnsureHelperBinaryDownload(t *testing.T) {
 		"libsherpa-fake.dylib": "dylib-bytes",
 	})
 	sum := sha256.Sum256(tarball)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", strconv.Itoa(len(tarball)))
-		w.Write(tarball)
-	}))
-	defer srv.Close()
+	srv := serveBytes(t, tarball)
 
 	cacheDir := t.TempDir()
 	var pcts []float64
@@ -337,7 +305,7 @@ func TestLocalEngineSetModel(t *testing.T) {
 	if err := eng.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	echo := waitEvent(t, eng, func(ev Event) bool {
+	echo := waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == "echo" && strings.Contains(ev.Text, "set_model")
 	})
 	for _, want := range []string{`"cmd":"set_model"`, `"path":"/models/sv"`, `"kind":"sensevoice-int8"`} {
@@ -349,7 +317,7 @@ func TestLocalEngineSetModel(t *testing.T) {
 	if err := eng.SetModel("/models/pf", "paraformer"); err != nil {
 		t.Fatal(err)
 	}
-	echo = waitEvent(t, eng, func(ev Event) bool {
+	echo = waitEvent(t, eng.Events(), func(ev Event) bool {
 		return ev.Type == "echo" && strings.Contains(ev.Text, `/models/pf`)
 	})
 	if !strings.Contains(echo.Text, `"kind":"paraformer"`) {
