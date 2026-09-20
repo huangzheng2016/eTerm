@@ -48,17 +48,15 @@ func (a App) handleOverlayMouse(msg tea.MouseClickMsg, rendered string, onClick 
 		a.helpOverlay = false
 		a.upgradePrompt = nil
 		a.connError = nil
-		a.voiceSettingsView = nil
-		a, voiceCmd := a.endVoiceTest()
 		if a.confirm.IsActive() {
 			a.confirm, _ = a.confirm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 			cmd := a.processConfirmResult()
-			return a, tea.Batch(cmd, voiceCmd)
+			return a, cmd
 		}
 		if hadUpgradePrompt {
 			a.promptDeferredTmuxRestore()
 		}
-		return a, voiceCmd
+		return a, nil
 	}
 	if onClick != nil {
 		return onClick(lx, ly)
@@ -94,22 +92,6 @@ func (a App) escMenuMouse(lx, ly int) (tea.Model, tea.Cmd) {
 		if closed {
 			a.escMenu = nil
 		}
-		return a, cmd
-	}
-	return a, nil
-}
-
-func (a App) voiceSettingsMouse(lx, ly int) (tea.Model, tea.Cmd) {
-	if a.voiceSettingsView == nil {
-		return a, nil
-	}
-	itemY := ly - 4
-	if a.voiceSettingsView.noticeText() != "" {
-		itemY -= 2
-	}
-	if itemY >= 0 && itemY < a.voiceSettingsView.rowCount() {
-		a.voiceSettingsView.cursor = itemY
-		_, cmd := a.voiceSettingsView.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 		return a, cmd
 	}
 	return a, nil

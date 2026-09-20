@@ -12,10 +12,13 @@ type ParamSpec struct {
 	Secret   bool
 	Required bool
 	Default  string
+	Options  []string
 }
 
 type FeedDeps struct {
 	VAD                VADParams
+	DDC                bool
+	EndWindowSize      int
 	OnDownloadProgress func(pct float64)
 }
 

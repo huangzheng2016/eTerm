@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -27,7 +28,11 @@ func helperArchiveExt(goos string) string {
 	return ".tar.gz"
 }
 
-var DefaultHelperURL = "https://github.com/huangzheng2016/eTerm/releases/latest/download/voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + helperArchiveExt(runtime.GOOS)
+const helperTagPrefix = "voicehelper/v"
+
+func helperDownloadURL(tag string) string {
+	return "https://github.com/huangzheng2016/eTerm/releases/download/" + tag + "/voicehelper-" + runtime.GOOS + "-" + runtime.GOARCH + helperArchiveExt(runtime.GOOS)
+}
 
 func helperBinaryName() string {
 	if runtime.GOOS == "windows" {
@@ -70,8 +75,8 @@ func HelperVersion() string {
 }
 
 func LatestHelperVersion(ctx context.Context) (string, error) {
-	const latestURL = "https://api.github.com/repos/huangzheng2016/eTerm/releases/latest"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestURL, nil)
+	const releasesURL = "https://api.github.com/repos/huangzheng2016/eTerm/releases?per_page=100"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, releasesURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -83,23 +88,87 @@ func LatestHelperVersion(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GET %s: %s", latestURL, resp.Status)
+		return "", fmt.Errorf("GET %s: %s", releasesURL, resp.Status)
 	}
-	var rel struct {
+	var rels []struct {
 		TagName string `json:"tag_name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&rels); err != nil {
 		return "", err
 	}
-	if rel.TagName == "" {
-		return "", fmt.Errorf("latest release has no tag")
+	tags := make([]string, 0, len(rels))
+	for _, rel := range rels {
+		tags = append(tags, rel.TagName)
 	}
-	return rel.TagName, nil
+	return latestHelperTag(tags), nil
+}
+
+func latestHelperTag(tags []string) string {
+	latest := ""
+	for _, tag := range tags {
+		if !strings.HasPrefix(tag, helperTagPrefix) {
+			continue
+		}
+		if latest == "" || compareVersion(tag, latest) > 0 {
+			latest = tag
+		}
+	}
+	return latest
+}
+
+func normalizeHelperVersion(v string) string {
+	return strings.TrimPrefix(v, helperTagPrefix)
+}
+
+func compareVersion(a, b string) int {
+	as := strings.Split(strings.TrimPrefix(normalizeHelperVersion(a), "v"), ".")
+	bs := strings.Split(strings.TrimPrefix(normalizeHelperVersion(b), "v"), ".")
+	for i := 0; i < len(as) || i < len(bs); i++ {
+		var ai, bi int
+		if i < len(as) {
+			ai, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			bi, _ = strconv.Atoi(bs[i])
+		}
+		if ai != bi {
+			if ai < bi {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+func helperUpdateAvailable(installed, latest string) bool {
+	if latest == "" {
+		return false
+	}
+	if !strings.HasPrefix(installed, helperTagPrefix) {
+		return true
+	}
+	return compareVersion(installed, latest) != 0
+}
+
+func defaultHelperURL(ctx context.Context) (string, error) {
+	tag, err := LatestHelperVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+	if tag == "" {
+		return "", fmt.Errorf("no %s* release found", helperTagPrefix)
+	}
+	return helperDownloadURL(tag), nil
 }
 
 func DownloadHelper(ctx context.Context, url string, onProgress func(pct float64)) error {
 	if url == "" {
-		url = DefaultHelperURL
+		var err error
+		url, err = defaultHelperURL(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	cacheDir := DefaultCacheDir()
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
@@ -134,7 +203,11 @@ func ensureHelperBinary(ctx context.Context, cfg LocalConfig) (string, error) {
 
 	url := cfg.DownloadURL
 	if url == "" {
-		url = DefaultHelperURL
+		var err error
+		url, err = defaultHelperURL(ctx)
+		if err != nil {
+			return "", err
+		}
 	}
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return "", err

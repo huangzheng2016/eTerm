@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -19,13 +20,13 @@ import (
 )
 
 const (
-	vrowEngine = iota
-	vrowHelper
-	vrowModels
+	vrowHelper = iota
 	vrowTest
 	vrowThreshold
 	vrowSilence
 	vrowSentenceEnd
+	vrowContext
+	vrowDDC
 	vrowParam
 	vrowModel
 	vrowCustomPath
@@ -33,13 +34,18 @@ const (
 	vrowEngineOption
 )
 
-const (
-	voiceViewMain = iota
-	voiceViewModels
-	voiceViewEngines
-)
-
 const voiceHelperTarget = "helper"
+
+var (
+	voiceCatStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4"))
+	voiceLabelStyle    = lipgloss.NewStyle().Width(24)
+	voiceKeyStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("230"))
+	voiceSelectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
+	voiceDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#666"))
+	voiceCaptureStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00")).Bold(true)
+	voiceHintStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#888"))
+	voiceErrStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+)
 
 type voiceRow struct {
 	kind      int
@@ -48,14 +54,24 @@ type voiceRow struct {
 	engineIdx int
 }
 
+type voiceSection struct {
+	title string
+	rows  []voiceRow
+}
+
 type voiceSettingsModel struct {
 	db     *gorm.DB
 	mk     *security.MasterKeyManager
 	cfg    voiceSettings
+	saved  voiceSettings
 	cursor int
-	view   int
+	scroll int
+	width  int
+	height int
 	edit   int
 	input  textinput.Model
+
+	modified bool
 
 	modelsRoot        string
 	helperInstalledFn func() bool
@@ -83,13 +99,63 @@ type voiceSettingsModel struct {
 	testErr  string
 }
 
+func (a App) voiceTab() *voiceSettingsModel {
+	for i := range a.tabs {
+		if a.tabs[i].Type != VoiceTab {
+			continue
+		}
+		if m, ok := a.tabs[i].Model.(*voiceSettingsModel); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+func (a App) activeTabIsVoiceSettings() bool {
+	if a.viewState != MainView || a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return false
+	}
+	return a.tabs[a.activeTab].Type == VoiceTab
+}
+
+func cloneVoiceSettings(cfg voiceSettings) voiceSettings {
+	out := cfg
+	if cfg.Params != nil {
+		out.Params = make(map[string]map[string]string, len(cfg.Params))
+		for id, params := range cfg.Params {
+			p := make(map[string]string, len(params))
+			for k, v := range params {
+				p[k] = v
+			}
+			out.Params[id] = p
+		}
+	}
+	return out
+}
+
 func newVoiceSettingsModel(database *gorm.DB, mk *security.MasterKeyManager, cfg voiceSettings) *voiceSettingsModel {
 	ti := textinput.New()
 	ti.CharLimit = 256
-	m := &voiceSettingsModel{db: database, mk: mk, cfg: cfg, edit: -1, input: ti, modelsRoot: voice.ModelsRoot()}
+	staged := cloneVoiceSettings(cfg)
+	m := &voiceSettingsModel{
+		db:         database,
+		mk:         mk,
+		cfg:        staged,
+		saved:      cloneVoiceSettings(cfg),
+		edit:       -1,
+		input:      ti,
+		modelsRoot: voice.ModelsRoot(),
+	}
 	m.refreshInstallState()
 	return m
 }
+
+func (m *voiceSettingsModel) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+}
+
+func (m *voiceSettingsModel) Init() tea.Cmd { return nil }
 
 func (m *voiceSettingsModel) refreshInstallState() {
 	installed := m.helperInstalledFn
@@ -116,52 +182,6 @@ func (m *voiceSettingsModel) refreshInstallState() {
 	}
 }
 
-func (m *voiceSettingsModel) rows() []voiceRow {
-	if m.view == voiceViewModels {
-		rows := make([]voiceRow, 0, len(voice.ModelCatalog())+1)
-		for i := range voice.ModelCatalog() {
-			rows = append(rows, voiceRow{kind: vrowModel, modelIdx: i})
-		}
-		return append(rows, voiceRow{kind: vrowCustomPath})
-	}
-	if m.view == voiceViewEngines {
-		rows := make([]voiceRow, 0, len(enginePickerDescriptors()))
-		for i := range enginePickerDescriptors() {
-			rows = append(rows, voiceRow{kind: vrowEngineOption, engineIdx: i})
-		}
-		return rows
-	}
-	rows := []voiceRow{{kind: vrowEngine}}
-	if m.cfg.Engine == voiceEngineLocal {
-		rows = append(rows, voiceRow{kind: vrowHelper}, voiceRow{kind: vrowModels})
-		if m.precisionAvailable() {
-			rows = append(rows, voiceRow{kind: vrowPrecision})
-		}
-	}
-	rows = append(rows,
-		voiceRow{kind: vrowTest},
-		voiceRow{kind: vrowThreshold},
-		voiceRow{kind: vrowSilence},
-		voiceRow{kind: vrowSentenceEnd},
-	)
-	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
-		for _, p := range d.Params {
-			rows = append(rows, voiceRow{kind: vrowParam, param: p})
-		}
-	}
-	return rows
-}
-
-func (m *voiceSettingsModel) precisionAvailable() bool {
-	if m.cfg.Engine != voiceEngineLocal {
-		return false
-	}
-	if m.cfg.CustomModelDir != "" {
-		return voice.HasBothPrecisions(m.cfg.CustomModelDir)
-	}
-	return voice.ModelByID(m.cfg.ModelID).Kind == voice.ModelKindSenseVoice
-}
-
 func enginePickerDescriptors() []voice.EngineDescriptor {
 	descs := voice.EngineDescriptors()
 	out := make([]voice.EngineDescriptor, 0, len(descs))
@@ -180,12 +200,87 @@ func enginePickerDescriptors() []voice.EngineDescriptor {
 	return out
 }
 
-func (m *voiceSettingsModel) rowCount() int { return len(m.rows()) }
+func (m *voiceSettingsModel) sections() []voiceSection {
+	engine := voiceSection{title: "Engine"}
+	for i := range enginePickerDescriptors() {
+		engine.rows = append(engine.rows, voiceRow{kind: vrowEngineOption, engineIdx: i})
+	}
+	if _, ok := voice.EngineDescriptorByID(m.cfg.Engine); !ok {
+		engine.rows = append(engine.rows, voiceRow{kind: vrowEngineOption, engineIdx: -1})
+	}
+	sections := []voiceSection{engine}
 
-func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
+	if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok && len(d.Params) > 0 {
+		params := voiceSection{title: d.Label + " 设置"}
+		for _, p := range d.Params {
+			params.rows = append(params.rows, voiceRow{kind: vrowParam, param: p})
+		}
+		sections = append(sections, params)
+	}
+
+	if m.cfg.Engine == voiceEngineLocal {
+		model := voiceSection{title: "Model"}
+		for i := range voice.ModelCatalog() {
+			model.rows = append(model.rows, voiceRow{kind: vrowModel, modelIdx: i})
+		}
+		model.rows = append(model.rows, voiceRow{kind: vrowCustomPath})
+		if m.precisionAvailable() {
+			model.rows = append(model.rows, voiceRow{kind: vrowPrecision})
+		}
+		sections = append(sections, model, voiceSection{
+			title: "Voice Helper",
+			rows:  []voiceRow{{kind: vrowHelper}},
+		})
+	}
+
+	sections = append(sections, voiceSection{
+		title: "Input",
+		rows: []voiceRow{
+			{kind: vrowThreshold},
+			{kind: vrowSilence},
+			{kind: vrowSentenceEnd},
+		},
+	})
+
+	sections = append(sections, voiceSection{
+		title: "Microphone test",
+		rows:  []voiceRow{{kind: vrowTest}},
+	})
+
+	if m.cfg.Engine == voiceEngineVolcano {
+		sections = append(sections, voiceSection{
+			title: "Volcano features",
+			rows:  []voiceRow{{kind: vrowContext}, {kind: vrowDDC}},
+		})
+	}
+	return sections
+}
+
+func (m *voiceSettingsModel) rows() []voiceRow {
+	var out []voiceRow
+	for _, s := range m.sections() {
+		out = append(out, s.rows...)
+	}
+	return out
+}
+
+func (m *voiceSettingsModel) precisionAvailable() bool {
+	if m.cfg.Engine != voiceEngineLocal {
+		return false
+	}
+	if m.cfg.CustomModelDir != "" {
+		return voice.HasBothPrecisions(m.cfg.CustomModelDir)
+	}
+	return voice.ModelByID(m.cfg.ModelID).Kind == voice.ModelKindSenseVoice
+}
+
+func (m *voiceSettingsModel) save() tea.Cmd {
 	database := m.db
 	mk := m.mk
-	cfg := m.cfg
+	cfg := cloneVoiceSettings(m.cfg)
+	keepEngine := m.saved.Engine == cfg.Engine &&
+		m.saved.DDC == cfg.DDC &&
+		reflect.DeepEqual(m.saved.engineParams(cfg.Engine), cfg.engineParams(cfg.Engine))
 	return func() tea.Msg {
 		if err := persistVoiceSettings(database, mk, cfg); err != nil {
 			return types.ErrorMsg{Err: err}
@@ -194,10 +289,21 @@ func (m *voiceSettingsModel) persist(keepEngine bool) tea.Cmd {
 	}
 }
 
-func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
+func (m *voiceSettingsModel) saveDone(cfg voiceSettings) {
+	m.saved = cloneVoiceSettings(cfg)
+	m.modified = false
+}
+
+func (m *voiceSettingsModel) reset() {
+	m.cfg = cloneVoiceSettings(m.saved)
+	m.modified = false
+	m.customErr = ""
+}
+
+func (m *voiceSettingsModel) adjust(dir int) {
 	rows := m.rows()
 	if m.cursor < 0 || m.cursor >= len(rows) {
-		return nil
+		return
 	}
 	switch rows[m.cursor].kind {
 	case vrowThreshold:
@@ -208,7 +314,6 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		if m.cfg.VADThreshold > 1 {
 			m.cfg.VADThreshold = 1
 		}
-		return m.persist(true)
 	case vrowSilence:
 		m.cfg.VADSilenceMs += dir * 50
 		if m.cfg.VADSilenceMs < 50 {
@@ -217,22 +322,61 @@ func (m *voiceSettingsModel) adjust(dir int) tea.Cmd {
 		if m.cfg.VADSilenceMs > 5000 {
 			m.cfg.VADSilenceMs = 5000
 		}
-		return m.persist(true)
 	case vrowSentenceEnd:
 		if m.cfg.SentenceEnd == voice.SentenceEndEnter {
 			m.cfg.SentenceEnd = voice.SentenceEndSpace
 		} else {
 			m.cfg.SentenceEnd = voice.SentenceEndEnter
 		}
-		return m.persist(true)
+	case vrowContext:
+		m.cfg.Context = !m.cfg.Context
+	case vrowDDC:
+		m.cfg.DDC = !m.cfg.DDC
 	case vrowPrecision:
 		m.cfg.ModelInt8 = !m.cfg.ModelInt8
 		m.cfg.Verified = false
 		m.testText = ""
 		m.testErr = ""
-		return m.persist(true)
+	case vrowParam:
+		opts := rows[m.cursor].param.Options
+		if len(opts) == 0 {
+			return
+		}
+		key := rows[m.cursor].param.Key
+		cur := m.cfg.engineParams(m.cfg.Engine)[key]
+		idx := -1
+		for i, o := range opts {
+			if o == cur {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			if dir > 0 {
+				idx = 0
+			} else {
+				idx = len(opts) - 1
+			}
+		} else {
+			idx = (idx + dir + len(opts)) % len(opts)
+		}
+		m.cfg.setEngineParam(m.cfg.Engine, key, opts[idx])
+	default:
+		return
 	}
-	return nil
+	m.modified = true
+}
+
+func (m *voiceSettingsModel) selectEngine(idx int) {
+	descs := enginePickerDescriptors()
+	if idx < 0 || idx >= len(descs) {
+		return
+	}
+	if descs[idx].ID == m.cfg.Engine {
+		return
+	}
+	m.cfg.Engine = descs[idx].ID
+	m.cfg.Verified = false
+	m.modified = true
 }
 
 func (m *voiceSettingsModel) startDownload(target string) tea.Cmd {
@@ -282,60 +426,80 @@ func (m *voiceSettingsModel) modelAction(i int) tea.Cmd {
 		m.cfg.Verified = false
 		m.testText = ""
 		m.testErr = ""
-		return m.persist(true)
+		m.modified = true
+		return nil
 	}
 	return m.startDownload(spec.ID)
 }
 
-func (m *voiceSettingsModel) enterModels() {
-	m.view = voiceViewModels
-	m.cursor = 0
-	m.customErr = ""
-}
-
-func (m *voiceSettingsModel) leaveModels() {
-	m.view = voiceViewMain
-	m.cursor = 0
-	for i, r := range m.rows() {
-		if r.kind == vrowModels {
-			m.cursor = i
-		}
-	}
-}
-
-func (m *voiceSettingsModel) enterEngines() {
-	m.view = voiceViewEngines
-	m.cursor = 0
-	for i, d := range enginePickerDescriptors() {
-		if d.ID == m.cfg.Engine {
-			m.cursor = i
-		}
-	}
-}
-
-func (m *voiceSettingsModel) leaveEngines() {
-	m.view = voiceViewMain
-	m.cursor = 0
-}
-
-func (m *voiceSettingsModel) selectEngine(idx int) tea.Cmd {
-	descs := enginePickerDescriptors()
-	if idx < 0 || idx >= len(descs) {
+func (m *voiceSettingsModel) activate(allowEdit bool) tea.Cmd {
+	rows := m.rows()
+	if m.cursor < 0 || m.cursor >= len(rows) {
 		return nil
 	}
-	m.leaveEngines()
-	if descs[idx].ID == m.cfg.Engine {
-		return nil
+	r := rows[m.cursor]
+	switch r.kind {
+	case vrowEngineOption:
+		m.selectEngine(r.engineIdx)
+	case vrowHelper:
+		return m.helperAction()
+	case vrowModel:
+		return m.modelAction(r.modelIdx)
+	case vrowTest:
+		if m.testing {
+			return func() tea.Msg { return voiceTestRequestMsg{stop: true} }
+		}
+		m.testText = ""
+		m.testErr = ""
+		return func() tea.Msg { return voiceTestRequestMsg{} }
+	case vrowCustomPath:
+		if allowEdit {
+			return m.startEdit()
+		}
+	case vrowParam:
+		if len(r.param.Options) > 0 {
+			m.adjust(1)
+			return nil
+		}
+		if allowEdit {
+			return m.startEdit()
+		}
+	default:
+		m.adjust(1)
 	}
-	m.cfg.Engine = descs[idx].ID
-	m.cfg.Verified = false
-	return m.persist(false)
+	return nil
 }
 
-func (m *voiceSettingsModel) commitEdit(rows []voiceRow) tea.Cmd {
+func (m *voiceSettingsModel) startEdit() tea.Cmd {
+	rows := m.rows()
+	if m.cursor < 0 || m.cursor >= len(rows) {
+		return nil
+	}
+	r := rows[m.cursor]
+	m.edit = m.cursor
+	m.input.EchoMode = textinput.EchoNormal
+	var v string
+	switch r.kind {
+	case vrowParam:
+		if r.param.Secret {
+			m.input.EchoMode = textinput.EchoPassword
+			m.input.EchoCharacter = '*'
+		}
+		v = m.cfg.engineParams(m.cfg.Engine)[r.param.Key]
+	case vrowCustomPath:
+		m.customErr = ""
+		v = m.cfg.CustomModelDir
+	}
+	m.input.SetWidth(max(20, m.width-30-lipgloss.Width(m.input.Prompt)))
+	m.input.SetValue(v)
+	return m.input.Focus()
+}
+
+func (m *voiceSettingsModel) commitEdit() {
+	rows := m.rows()
 	if m.edit < 0 || m.edit >= len(rows) {
 		m.edit = -1
-		return nil
+		return
 	}
 	r := rows[m.edit]
 	v := strings.TrimSpace(m.input.Value())
@@ -344,66 +508,49 @@ func (m *voiceSettingsModel) commitEdit(rows []voiceRow) tea.Cmd {
 	switch r.kind {
 	case vrowParam:
 		m.cfg.setEngineParam(m.cfg.Engine, r.param.Key, v)
-		return m.persist(false)
+		m.modified = true
 	case vrowCustomPath:
 		if v == "" {
 			m.cfg.CustomModelDir = ""
 			m.customErr = ""
 			m.cfg.Verified = false
-			return m.persist(true)
+			m.modified = true
+			return
 		}
 		if !voice.ValidCustomModelDir(v) {
 			m.customErr = "needs tokens.txt and model.onnx or model.int8.onnx"
-			return nil
+			return
 		}
 		m.cfg.CustomModelDir = v
 		m.customErr = ""
 		m.cfg.Verified = false
 		m.testText = ""
 		m.testErr = ""
-		return m.persist(true)
+		m.modified = true
 	}
-	return nil
 }
 
-func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.Cmd) {
+func (m *voiceSettingsModel) handleEdit(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "escape":
+		m.edit = -1
+		m.input.Blur()
+		return m, nil
+	case "enter":
+		m.commitEdit()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m *voiceSettingsModel) handleNormal(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	rows := m.rows()
 	if m.cursor >= len(rows) {
 		m.cursor = len(rows) - 1
 	}
-	if m.edit >= 0 {
-		switch msg.String() {
-		case "esc", "escape":
-			m.edit = -1
-			m.input.Blur()
-			return false, nil
-		case "enter":
-			return false, m.commitEdit(rows)
-		}
-		m.input, cmd = m.input.Update(msg)
-		return false, cmd
-	}
 	switch msg.String() {
-	case "esc", "escape":
-		switch m.view {
-		case voiceViewModels:
-			m.leaveModels()
-			return false, nil
-		case voiceViewEngines:
-			m.leaveEngines()
-			return false, nil
-		}
-		return true, nil
-	case "left", "h":
-		switch m.view {
-		case voiceViewModels:
-			m.leaveModels()
-			return false, nil
-		case voiceViewEngines:
-			m.leaveEngines()
-			return false, nil
-		}
-		return false, m.adjust(-1)
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -412,60 +559,84 @@ func (m *voiceSettingsModel) Update(msg tea.KeyPressMsg) (closed bool, cmd tea.C
 		if m.cursor < len(rows)-1 {
 			m.cursor++
 		}
-	case "right", "l", " ":
-		if m.view == voiceViewMain {
-			switch rows[m.cursor].kind {
-			case vrowModels:
-				m.enterModels()
-				return false, nil
-			case vrowEngine:
-				m.enterEngines()
-				return false, nil
-			}
-		}
-		return false, m.adjust(1)
+	case "left", "h":
+		m.adjust(-1)
+	case "right", "l":
+		m.adjust(1)
+	case " ":
+		return m, m.activate(false)
 	case "enter":
-		switch rows[m.cursor].kind {
-		case vrowEngine:
-			m.enterEngines()
-			return false, nil
-		case vrowEngineOption:
-			return false, m.selectEngine(rows[m.cursor].engineIdx)
-		case vrowHelper:
-			return false, m.helperAction()
-		case vrowModels:
-			m.enterModels()
-			return false, nil
-		case vrowTest:
-			if m.testing {
-				return false, func() tea.Msg { return voiceTestRequestMsg{stop: true} }
-			}
-			m.testText = ""
-			m.testErr = ""
-			return false, func() tea.Msg { return voiceTestRequestMsg{} }
-		case vrowModel:
-			return false, m.modelAction(rows[m.cursor].modelIdx)
-		case vrowParam:
-			m.edit = m.cursor
-			m.input.SetValue(m.cfg.engineParams(m.cfg.Engine)[rows[m.cursor].param.Key])
-			m.input.SetWidth(40)
-			return false, m.input.Focus()
-		case vrowCustomPath:
-			m.edit = m.cursor
-			m.customErr = ""
-			m.input.SetValue(m.cfg.CustomModelDir)
-			m.input.SetWidth(40)
-			return false, m.input.Focus()
-		}
-		return false, m.adjust(1)
+		return m, m.activate(true)
+	case "ctrl+s":
+		return m, m.save()
+	case "ctrl+r":
+		m.reset()
+	case "esc", "escape":
+		return m, func() tea.Msg { return types.CloseTabMsg{Index: -1} }
 	}
-	return false, nil
+	return m, nil
 }
 
-func (m *voiceSettingsModel) paste(msg tea.PasteMsg) {
-	if m.edit >= 0 {
-		m.input = inputpaste.TextInput(m.input, msg)
+func (m *voiceSettingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.SetSize(msg.Width, msg.Height)
+		return m, nil
+	case tea.MouseWheelMsg:
+		if m.edit >= 0 {
+			return m, nil
+		}
+		maxScr := len(m.buildScrollLines()) - m.visibleRows()
+		if maxScr < 0 {
+			maxScr = 0
+		}
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			if m.scroll > 0 {
+				m.scroll--
+			}
+		case tea.MouseWheelDown:
+			if m.scroll < maxScr {
+				m.scroll++
+			}
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if m.edit >= 0 || msg.Button != tea.MouseLeft || msg.Y < 2 {
+			return m, nil
+		}
+		lineIdx := m.scroll + (msg.Y - 2)
+		lines := m.buildScrollLines()
+		if lineIdx < 0 || lineIdx >= len(lines) {
+			return m, nil
+		}
+		li := lines[lineIdx].logicalIdx
+		if li < 0 {
+			return m, nil
+		}
+		m.cursor = li
+		rows := m.rows()
+		switch rows[li].kind {
+		case vrowCustomPath:
+			return m, m.startEdit()
+		case vrowParam:
+			if len(rows[li].param.Options) == 0 {
+				return m, m.startEdit()
+			}
+		}
+		return m, nil
+	case tea.PasteMsg:
+		if m.edit >= 0 {
+			m.input = inputpaste.TextInput(m.input, msg)
+		}
+		return m, nil
+	case tea.KeyPressMsg:
+		if m.edit >= 0 {
+			return m.handleEdit(msg)
+		}
+		return m.handleNormal(msg)
 	}
+	return m, nil
 }
 
 func (m *voiceSettingsModel) downloadStarted(target string) {
@@ -540,17 +711,17 @@ func (m *voiceSettingsModel) helperValue() string {
 	case m.dlErrTarget == voiceHelperTarget && m.dlErr != "":
 		return "failed: " + m.dlErr
 	case !m.helperOK:
-		return "not installed - enter to download"
+		return "not installed"
 	case m.checkingUpdate:
-		return "installed (" + m.helperVersionDisplay() + ") - checking for updates"
+		return "checking for updates"
 	case m.updateErr != "":
-		return "installed (" + m.helperVersionDisplay() + ") - update check failed: " + m.updateErr
+		return "update check failed: " + m.updateErr
 	case m.updateAvailable():
-		return "update available (" + m.helperVersionDisplay() + " -> " + m.updateTag + ") - enter to update"
+		return "update " + m.helperVersionDisplay() + " -> " + m.updateTag
 	case m.updateChecked:
-		return "installed (" + m.helperVersionDisplay() + ") - up to date"
+		return "up to date (" + m.helperVersionDisplay() + ")"
 	}
-	return "installed (" + m.helperVersionDisplay() + ") - enter to check for updates"
+	return "installed (" + m.helperVersionDisplay() + ")"
 }
 
 func (m *voiceSettingsModel) modelValue(i int) string {
@@ -601,13 +772,13 @@ func (m *voiceSettingsModel) testValue() string {
 		if m.testText != "" {
 			return "recording... " + shorten(m.testText)
 		}
-		return "recording... speak now (enter stops)"
+		return "recording... speak now"
 	case m.testErr != "":
 		return "failed: " + shorten(m.testErr)
 	case m.testText != "":
 		return "heard: " + shorten(m.testText)
 	case m.cfg.Verified:
-		return "verified - enter to test again"
+		return "verified - enter to run again"
 	}
 	return "enter to record a sample"
 }
@@ -616,7 +787,7 @@ func (m *voiceSettingsModel) statusLine() string {
 	if issue := voiceSetupIssue(m.cfg, m.modelsRoot); issue != "" {
 		return "setup incomplete - " + issue
 	}
-	return "ready - ctrl+r starts recording"
+	return "ready - ctrl+r starts recording outside this tab"
 }
 
 func (m *voiceSettingsModel) noticeText() string {
@@ -629,55 +800,65 @@ func (m *voiceSettingsModel) noticeText() string {
 	return ""
 }
 
-func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value string) {
+func (m *voiceSettingsModel) rowText(r voiceRow) (label, value string, dim bool) {
 	switch r.kind {
-	case vrowEngine:
-		label = "Engine >"
-		if d, ok := voice.EngineDescriptorByID(m.cfg.Engine); ok {
-			value = d.Label
-		} else {
-			value = m.cfg.Engine + " (unknown)"
-		}
 	case vrowEngineOption:
+		if r.engineIdx < 0 {
+			label = m.cfg.Engine + " (unknown)"
+			value = "[active]"
+			return
+		}
 		d := enginePickerDescriptors()[r.engineIdx]
 		label = d.Label
 		if d.ID == m.cfg.Engine {
 			value = "[active]"
 		}
+		dim = value == ""
 	case vrowHelper:
 		label, value = "Voice Helper", m.helperValue()
-	case vrowModels:
-		label = "Model >"
-		switch {
-		case m.dlTarget != "" && m.dlTarget != voiceHelperTarget:
-			value = fmt.Sprintf("downloading %.0f%%", m.dlPct)
-		case m.dlErrTarget != "" && m.dlErrTarget != voiceHelperTarget && m.dlErr != "":
-			value = "failed: " + m.dlErr
-		case m.cfg.CustomModelDir != "":
-			value = "custom path"
-		default:
-			value = voice.ModelByID(m.cfg.ModelID).Name
-		}
+		dim = !m.helperOK
 	case vrowTest:
 		label, value = "Microphone test", m.testValue()
 	case vrowThreshold:
-		label, value = "speech sensitivity (0-1)", threshold
+		label = "speech sensitivity (0-1)"
+		value = fmt.Sprintf("%.2f", m.cfg.VADThreshold)
+		if m.cfg.VADThreshold == 0 {
+			value = "default"
+		}
 	case vrowSilence:
-		label, value = "end-of-sentence silence (ms)", strconv.Itoa(m.cfg.VADSilenceMs)
+		label, value = "end-of-sentence silence", strconv.Itoa(m.cfg.VADSilenceMs)+" ms"
 	case vrowSentenceEnd:
 		label, value = "Sentence end", string(m.cfg.SentenceEnd)
+	case vrowContext:
+		label = "Context awareness"
+		value = "off"
+		if m.cfg.Context {
+			value = "on"
+		}
+		dim = !m.cfg.Context
+	case vrowDDC:
+		label = "Semantic smoothing (DDC)"
+		value = "off"
+		if m.cfg.DDC {
+			value = "on"
+		}
+		dim = !m.cfg.DDC
 	case vrowParam:
 		label = r.param.Label
 		v := m.cfg.engineParams(m.cfg.Engine)[r.param.Key]
-		if r.param.Secret {
+		switch {
+		case r.param.Secret:
 			value = maskVoiceKey(v)
-		} else if v == "" {
+			dim = v == ""
+		case v == "":
 			value = "(not set)"
-		} else {
+			dim = true
+		default:
 			value = v
 		}
 	case vrowModel:
 		label, value = voice.ModelCatalog()[r.modelIdx].Name, m.modelValue(r.modelIdx)
+		dim = !m.modelOK[r.modelIdx]
 	case vrowPrecision:
 		label = "Precision"
 		value = "fp32"
@@ -686,55 +867,143 @@ func (m *voiceSettingsModel) rowText(r voiceRow, threshold string) (label, value
 		}
 	case vrowCustomPath:
 		label, value = "Custom model path", m.customValue()
+		dim = m.cfg.CustomModelDir == ""
 	}
 	return
 }
 
-func (m *voiceSettingsModel) View() string {
-	rows := m.rows()
-	if m.cursor >= len(rows) {
+func truncateVoiceValue(s string, max int) string {
+	if max <= 0 || lipgloss.Width(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	for len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+		if candidate := string(runes) + "..."; lipgloss.Width(candidate) <= max {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func (m *voiceSettingsModel) valueWidth() int {
+	w := m.width - 30
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
+type voiceScrollLine struct {
+	text       string
+	logicalIdx int
+}
+
+func (m *voiceSettingsModel) rowLine(r voiceRow, idx int) string {
+	cursor := "  "
+	selected := idx == m.cursor
+	if selected {
+		cursor = "> "
+	}
+	label, value, dim := m.rowText(r)
+	label = truncateVoiceValue(label, 24)
+	if m.edit == idx {
+		value = m.input.View()
+	} else {
+		value = truncateVoiceValue(value, m.valueWidth())
+	}
+	if selected {
+		return fmt.Sprintf("%s%s  %s", cursor, voiceSelectedStyle.Render(voiceLabelStyle.Render(label)), voiceSelectedStyle.Render(value))
+	}
+	valueStyle := voiceKeyStyle
+	if dim {
+		valueStyle = voiceDimStyle
+	}
+	if strings.HasPrefix(value, "failed:") || strings.HasPrefix(value, "invalid:") {
+		valueStyle = voiceErrStyle
+	}
+	return fmt.Sprintf("%s%s  %s", cursor, voiceLabelStyle.Render(label), valueStyle.Render(value))
+}
+
+func (m *voiceSettingsModel) buildScrollLines() []voiceScrollLine {
+	var out []voiceScrollLine
+	idx := 0
+	for si, sec := range m.sections() {
+		if si > 0 {
+			out = append(out, voiceScrollLine{"", -1})
+		}
+		out = append(out, voiceScrollLine{voiceCatStyle.Render("  " + sec.title), -1})
+		for _, r := range sec.rows {
+			out = append(out, voiceScrollLine{m.rowLine(r, idx), idx})
+			idx++
+		}
+	}
+	return out
+}
+
+func (m *voiceSettingsModel) visibleRows() int {
+	rows := m.height - 4
+	if rows < 5 {
+		rows = 5
+	}
+	return rows
+}
+
+func (m *voiceSettingsModel) View() tea.View {
+	if rows := m.rows(); m.cursor >= len(rows) {
 		m.cursor = len(rows) - 1
 	}
-	threshold := fmt.Sprintf("%.2f", m.cfg.VADThreshold)
-	if m.cfg.VADThreshold == 0 {
-		threshold = "default"
-	}
-	title := "Voice Input"
-	hint := "up/down move · left/right change · enter select/edit · esc close"
-	switch m.view {
-	case voiceViewModels:
-		title = "Voice Input - Model"
-		hint = "up/down move · left/right change · enter select/download · esc back"
-	case voiceViewEngines:
-		title = "Voice Input - Engine"
-		hint = "up/down move · enter select · esc back"
-	}
-	var lines []string
-	lines = append(lines, ui.TitleStyle.Render(title), "")
-	if notice := m.noticeText(); notice != "" {
-		lines = append(lines, ui.DimStyle.Render(notice), "")
-	}
-	for i, r := range rows {
-		cursor := "  "
-		style := ui.DimStyle
-		if i == m.cursor {
-			cursor = "▸ "
-			style = ui.SelectedStyle
+
+	var b strings.Builder
+
+	title := ui.TitleStyle.Render("Voice Input")
+	hints := voiceHintStyle.Render("space/enter:select/edit  left/right:change  C-s:save  C-r:reset  wheel:scroll  esc:close")
+	b.WriteString(title + "  " + hints + "\n")
+
+	if m.edit >= 0 {
+		label := "value"
+		rows := m.rows()
+		if m.edit < len(rows) {
+			label, _, _ = m.rowText(rows[m.edit])
 		}
-		label, value := m.rowText(r, threshold)
-		if m.edit == i {
-			value = m.input.View()
+		b.WriteString(voiceCaptureStyle.Render("  Enter "+label+"...  (enter to accept, esc to cancel)") + "\n")
+	} else if notice := m.noticeText(); notice != "" {
+		b.WriteString(voiceCaptureStyle.Render("  "+notice) + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+
+	lines := m.buildScrollLines()
+
+	cursorLine := 0
+	for li, sl := range lines {
+		if sl.logicalIdx == m.cursor {
+			cursorLine = li
+			break
 		}
-		lines = append(lines, fmt.Sprintf("%s%s %s", cursor, style.Render(fmt.Sprintf("%-28s", label)), ui.DimStyle.Render(value)))
 	}
-	lines = append(lines, "")
-	if m.view == voiceViewMain {
-		lines = append(lines, ui.DimStyle.Render(m.statusLine()))
+
+	vis := m.visibleRows()
+	if m.scroll > cursorLine {
+		m.scroll = cursorLine
 	}
-	lines = append(lines, ui.DimStyle.Render(hint))
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7D56F4")).
-		Padding(1, 3).
-		Render(strings.Join(lines, "\n"))
+	if cursorLine >= m.scroll+vis {
+		m.scroll = cursorLine - vis + 1
+	}
+	end := m.scroll + vis
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	for i := m.scroll; i < end; i++ {
+		b.WriteString(lines[i].text + "\n")
+	}
+
+	footer := voiceDimStyle.Render("  " + m.statusLine())
+	if m.modified {
+		footer += "  " + voiceCaptureStyle.Render("* unsaved changes")
+	}
+	b.WriteString(footer)
+
+	return tea.NewView(b.String())
 }

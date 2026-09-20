@@ -86,6 +86,22 @@ func buildFullClientRequest(cfg VolcanoConfig, seq int32) ([]byte, error) {
 	if rate == 0 {
 		rate = 16000
 	}
+	req := map[string]any{
+		"model_name":      "bigmodel",
+		"enable_itn":      cfg.SmartFormat,
+		"enable_ddc":      cfg.DDC,
+		"enable_punc":     cfg.SmartFormat,
+		"show_utterances": true,
+	}
+	if ms := cfg.EndWindowSize; ms > 0 {
+		if ms < 300 {
+			ms = 300
+		}
+		if ms > 5000 {
+			ms = 5000
+		}
+		req["end_window_size"] = ms
+	}
 	payload := map[string]any{
 		"user": map[string]any{"uid": "eterm"},
 		"audio": map[string]any{
@@ -96,13 +112,10 @@ func buildFullClientRequest(cfg VolcanoConfig, seq int32) ([]byte, error) {
 			"channel":  1,
 			"language": volcanoLanguage(cfg.Language),
 		},
-		"request": map[string]any{
-			"model_name":      "bigmodel",
-			"enable_itn":      cfg.SmartFormat,
-			"enable_ddc":      false,
-			"enable_punc":     cfg.SmartFormat,
-			"show_utterances": true,
-		},
+		"request": req,
+	}
+	if cfg.Context != "" {
+		payload["corpus"] = map[string]any{"context": cfg.Context}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

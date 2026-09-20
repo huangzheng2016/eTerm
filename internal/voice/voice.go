@@ -40,6 +40,7 @@ type Engine interface {
 	Stop() error
 	SetVAD(p VADParams) error
 	SetModel(dir, kind string) error
+	SetContext(ctx string) error
 	Events() <-chan Event
 	Close() error
 }

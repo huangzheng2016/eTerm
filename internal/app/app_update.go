@@ -273,18 +273,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.commandPalette.Update(msg)
 		}
 
-		if a.voiceSettingsView != nil {
-			closed, cmd := a.voiceSettingsView.Update(msg)
-			if closed {
-				a.voiceSettingsView = nil
-				var tc tea.Cmd
-				a, tc = a.endVoiceTest()
-				return a, tea.Batch(cmd, tc)
-			}
-			return a, cmd
-		}
-
-		if a.viewState == MainView && !a.activeTabIsSettings() && key.Matches(msg, a.keyMap.VoiceInput) {
+		if a.viewState == MainView && !a.activeTabIsSettings() && !a.activeTabIsVoiceSettings() && !a.activeTabIsShortcuts() && key.Matches(msg, a.keyMap.VoiceInput) {
 			return a.toggleVoice()
 		}
 
@@ -559,10 +548,6 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.commandPalette.paste(msg)
 			return a, nil
 		}
-		if a.voiceSettingsView != nil {
-			a.voiceSettingsView.paste(msg)
-			return a, nil
-		}
 		if a.aiVisible && a.aiView != nil {
 			return a, a.updateAIView(msg)
 		}
@@ -660,11 +645,6 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a.escMenuMouse(lx, ly)
 				})
 			}
-			if a.voiceSettingsView != nil {
-				return a.handleOverlayMouse(msg, a.voiceSettingsView.View(), func(lx, ly int) (tea.Model, tea.Cmd) {
-					return a.voiceSettingsMouse(lx, ly)
-				})
-			}
 			if a.helpOverlay {
 				a.helpOverlay = false
 				return a, nil
@@ -740,6 +720,12 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx = a.activeTab
 		}
 		if idx >= 0 && idx < len(a.tabs) && len(a.tabs) > 1 && !isListView(a.tabs[idx].Type) {
+			if a.tabs[idx].Type == VoiceTab {
+				var vc tea.Cmd
+				a, vc = a.endVoiceTest()
+				next, cc := a.closeTabAt(idx)
+				return next, tea.Batch(vc, cc)
+			}
 			return a.closeTabAt(idx)
 		}
 		return a, nil
@@ -1217,8 +1203,8 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.voiceTest = false
 			a.voiceTestSeq++
 			a.voiceSwallowFinal = false
-			if a.voiceSettingsView != nil {
-				a.voiceSettingsView.testError(msg.err.Error())
+			if vt := a.voiceTab(); vt != nil {
+				vt.testError(msg.err.Error())
 			}
 			return a, nil
 		}
@@ -1256,18 +1242,19 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case voiceHelperUpdateCheckMsg:
-		if a.voiceSettingsView != nil {
-			a.voiceSettingsView.updateCheckDone(msg.tag, msg.err)
+		if vt := a.voiceTab(); vt != nil {
+			vt.updateCheckDone(msg.tag, msg.err)
 		}
 		return a, nil
 
 	case openVoiceSettingsMsg:
-		a = a.ensureVoiceCfg()
-		a.voiceSettingsView = newVoiceSettingsModel(a.db, a.masterKey, a.voiceCfg)
-		return a, nil
+		return a.openVoiceSettingsTab(false)
 
 	case voiceSettingsChangedMsg:
 		a.voiceCfg = msg.cfg
+		if vt := a.voiceTab(); vt != nil {
+			vt.saveDone(msg.cfg)
+		}
 		if a.voiceEngine == nil {
 			return a, nil
 		}
@@ -1342,6 +1329,9 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case types.OpenSettingsMsg:
 		return a.openSettingsTab()
+
+	case openShortcutsMsg:
+		return a.openShortcutsTab()
 
 	case types.OpenSyncMsg:
 		return a.openSyncTab()

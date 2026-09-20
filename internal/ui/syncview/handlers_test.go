@@ -41,7 +41,8 @@ func TestSaveReportsMissingMasterKeyForSecrets(t *testing.T) {
 	m.enableIdx = 1
 	m.modeIdx = 0
 	m.inputs[inServerURL].SetValue("https://sync.example.com")
-	m.inputs[inPassphrase].SetValue("secret")
+	m.pendPass = "secret"
+	m.passDirty = true
 
 	msg := m.save()()
 
@@ -61,7 +62,8 @@ func TestCtrlYSavesThenStartsSync(t *testing.T) {
 	m.enableIdx = 1
 	m.modeIdx = 0
 	m.inputs[inServerURL].SetValue("https://sync.example.com")
-	m.inputs[inPassphrase].SetValue("secret")
+	m.pendPass = "secret"
+	m.passDirty = true
 
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'y', Mod: tea.ModCtrl}))
 	if cmd == nil {

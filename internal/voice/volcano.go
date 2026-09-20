@@ -11,22 +11,32 @@ import (
 )
 
 const (
-	defaultVolcanoURL     = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
-	ResourceIDSeedASR     = "volc.seedasr.sauc.duration"
-	ResourceIDBigASR      = "volc.bigasr.sauc.duration"
-	volcanoInitialTimeout = 5 * time.Second
-	volcanoFinalTimeout   = 8 * time.Second
+	defaultVolcanoURL           = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+	ResourceIDSeedASR           = "volc.seedasr.sauc.duration"
+	ResourceIDSeedASRConcurrent = "volc.seedasr.sauc.concurrent"
+	ResourceIDBigASR            = "volc.bigasr.sauc.duration"
+	ResourceIDBigASRConcurrent  = "volc.bigasr.sauc.concurrent"
+	volcanoInitialTimeout       = 5 * time.Second
+	volcanoFinalTimeout         = 8 * time.Second
 )
 
+var VolcanoResourceIDs = []string{
+	ResourceIDSeedASR,
+	ResourceIDSeedASRConcurrent,
+	ResourceIDBigASR,
+	ResourceIDBigASRConcurrent,
+}
+
 type VolcanoConfig struct {
-	APIKey      string
-	AppKey      string
-	AccessKey   string
-	ResourceID  string
-	URL         string
-	Language    string
-	SampleRate  int
-	SmartFormat bool
+	APIKey        string
+	ResourceID    string
+	URL           string
+	Language      string
+	SampleRate    int
+	SmartFormat   bool
+	DDC           bool
+	EndWindowSize int
+	Context       string
 }
 
 type VolcanoEngine struct {
@@ -78,19 +88,14 @@ func (e *VolcanoEngine) Start(ctx context.Context) error {
 	if e.started {
 		return nil
 	}
-	if e.cfg.APIKey == "" && (e.cfg.AppKey == "" || e.cfg.AccessKey == "") {
-		return fmt.Errorf("volcano: APIKey or AppKey+AccessKey required")
+	if e.cfg.APIKey == "" {
+		return fmt.Errorf("volcano: APIKey required")
 	}
 
 	header := http.Header{}
 	header.Set("X-Api-Resource-Id", e.resourceID())
 	header.Set("X-Api-Connect-Id", fmt.Sprintf("eterm-%d", time.Now().UnixMilli()))
-	if e.cfg.APIKey != "" {
-		header.Set("X-Api-Key", e.cfg.APIKey)
-	} else {
-		header.Set("X-Api-App-Key", e.cfg.AppKey)
-		header.Set("X-Api-Access-Key", e.cfg.AccessKey)
-	}
+	header.Set("X-Api-Key", e.cfg.APIKey)
 
 	conn, resp, err := websocket.Dial(ctx, e.url(), &websocket.DialOptions{HTTPHeader: header})
 	if err != nil {
@@ -209,6 +214,13 @@ func abs32(v int32) int32 {
 }
 
 func (e *VolcanoEngine) SetVAD(p VADParams) error {
+	return nil
+}
+
+func (e *VolcanoEngine) SetContext(ctx string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg.Context = ctx
 	return nil
 }
 

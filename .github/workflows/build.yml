@@ -4,7 +4,7 @@ on:
   push:
     branches: [master]
     tags:
-      - 'v*'
+      - 'v[0-9]*'
   pull_request:
   workflow_dispatch:
 
@@ -133,7 +133,7 @@ jobs:
         run: |
           current="${GITHUB_REF_NAME}"
           echo "Current tag (kept): $current"
-          tags=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+          tags=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' | grep -E '^v[0-9]' || true)
           echo "Existing release tags:"
           echo "$tags"
           highest=$(printf '%s\n%s\n' "$tags" "$current" | sort -V | tail -n1)

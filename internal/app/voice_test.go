@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,10 +14,12 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
+	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui"
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
@@ -32,6 +35,8 @@ type fakeVoiceEngine struct {
 	closed    bool
 	modelDir  string
 	modelKind string
+	context   string
+	contextFn func() string
 }
 
 func findVoiceRow(m *voiceSettingsModel, kind int) int {
@@ -62,6 +67,13 @@ func (f *fakeVoiceEngine) SetModel(dir, kind string) error {
 	f.modelDir = dir
 	f.modelKind = kind
 	return nil
+}
+func (f *fakeVoiceEngine) SetContext(ctx string) error {
+	f.context = ctx
+	return nil
+}
+func (f *fakeVoiceEngine) SetContextProvider(fn func() string) {
+	f.contextFn = fn
 }
 func (f *fakeVoiceEngine) Events() <-chan voice.Event { return f.events }
 func (f *fakeVoiceEngine) Close() error               { f.closed = true; close(f.events); return nil }
@@ -398,8 +410,7 @@ func TestVoiceSettingsPersistenceRoundTrip(t *testing.T) {
 	cfg.CustomModelDir = "/tmp/custom-model"
 	cfg.Verified = true
 	cfg.setEngineParam(voiceEngineVolcano, "api_key", "api-key")
-	cfg.setEngineParam(voiceEngineVolcano, "app_key", "app-key")
-	cfg.setEngineParam(voiceEngineVolcano, "access_key", "access-key")
+	cfg.setEngineParam(voiceEngineVolcano, "resource_id", voice.ResourceIDBigASRConcurrent)
 	if err := persistVoiceSettings(database, mk, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -440,8 +451,14 @@ func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
 
 	cfg := loadVoiceSettings(database, mk)
 	params := cfg.engineParams(voiceEngineVolcano)
-	if params["api_key"] != "a" || params["app_key"] != "b" || params["access_key"] != "c" {
+	if params["api_key"] != "a" {
 		t.Fatalf("migrated params = %v", params)
+	}
+	if _, ok := params["app_key"]; ok {
+		t.Fatalf("deprecated app_key migrated: %v", params)
+	}
+	if _, ok := params["access_key"]; ok {
+		t.Fatalf("deprecated access_key migrated: %v", params)
 	}
 	if _, err := db.GetSetting(database, voiceVolcanoSettingKey); err == nil {
 		t.Fatal("legacy key not deleted")
@@ -460,7 +477,7 @@ func TestVoiceSettingsMigratesLegacyVolcanoKey(t *testing.T) {
 	}
 }
 
-func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
+func TestVoiceSettingsTabStagedAdjustAndSave(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
 		t.Fatal(err)
@@ -468,124 +485,257 @@ func TestVoiceSettingsOverlayAdjustAndPersist(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
 
-	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
-	if m.view != voiceViewEngines {
-		t.Fatal("engine row did not open the picker")
-	}
-	if cmd != nil {
-		t.Fatal("opening the picker must not change the engine")
-	}
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 	for i, d := range enginePickerDescriptors() {
 		if d.ID == voiceEngineVolcano {
 			m.cursor = i
 		}
 	}
-	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_, cmd := m.Update(enter)
+	if cmd != nil {
+		t.Fatal("engine select must be staged, not persisted")
+	}
+	if m.cfg.Engine != voiceEngineVolcano || !m.modified {
+		t.Fatalf("staged engine = %q modified=%v", m.cfg.Engine, m.modified)
+	}
+	if got := loadVoiceSettings(database, mk); got.Engine != voiceEngineLocal {
+		t.Fatal("engine persisted before save")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	msg, ok := cmd().(voiceSettingsChangedMsg)
 	if !ok || msg.cfg.Engine != voiceEngineVolcano || msg.keepEngine {
-		t.Fatalf("engine change msg = %#v", msg)
+		t.Fatalf("save msg = %#v", msg)
 	}
-	if m.view != voiceViewMain {
-		t.Fatal("engine select did not return to the main view")
+	if got := loadVoiceSettings(database, mk); got.Engine != voiceEngineVolcano {
+		t.Fatal("save did not persist the engine")
 	}
-	if strings.Contains(m.View(), "coming soon") {
-		t.Fatal("gated note still in the view")
+	m.saveDone(msg.cfg)
+	if m.modified {
+		t.Fatal("modified not cleared after save")
 	}
 
 	m.cursor = findVoiceRow(m, vrowThreshold)
 	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
-	msg, ok = cmd().(voiceSettingsChangedMsg)
-	if !ok || msg.cfg.VADThreshold != 0.05 || !msg.keepEngine {
-		t.Fatalf("threshold change msg = %#v", msg)
+	if cmd != nil || m.cfg.VADThreshold != 0.05 || !m.modified {
+		t.Fatalf("threshold adjust: cmd=%v threshold=%v modified=%v", cmd, m.cfg.VADThreshold, m.modified)
 	}
 
 	m.cursor = findVoiceRow(m, vrowSilence)
-	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
-	msg, ok = cmd().(voiceSettingsChangedMsg)
-	if !ok || msg.cfg.VADSilenceMs != 1050 || !msg.keepEngine {
-		t.Fatalf("silence change msg = %#v", msg)
-	}
-	if got := loadVoiceSettings(database, mk); got.VADSilenceMs != 1050 {
-		t.Fatalf("persisted silence = %d", got.VADSilenceMs)
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if m.cfg.VADSilenceMs != 1050 {
+		t.Fatalf("silence = %d", m.cfg.VADSilenceMs)
 	}
 
 	m.cursor = findVoiceParamRow(m, "api_key")
 	if m.cursor < 0 {
 		t.Fatal("api key row missing")
 	}
-	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	m.Update(enter)
 	if m.edit < 0 {
 		t.Fatal("enter did not start editing")
 	}
 	m.input.SetValue("secret")
-	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	msg, ok = cmd().(voiceSettingsChangedMsg)
-	if !ok || msg.cfg.engineParams(voiceEngineVolcano)["api_key"] != "secret" {
-		t.Fatalf("key change msg = %#v", msg)
+	if view := m.View().Content; strings.Contains(view, "secret") || !strings.Contains(view, "******") {
+		t.Fatalf("secret echoed while editing:\n%s", view)
 	}
-	if got := loadVoiceSettings(database, mk); got.engineParams(voiceEngineVolcano)["api_key"] != "secret" {
-		t.Fatalf("persisted api key = %q", got.engineParams(voiceEngineVolcano)["api_key"])
+	_, cmd = m.Update(enter)
+	if cmd != nil {
+		t.Fatal("edit commit must be staged")
 	}
-	if view := m.View(); strings.Contains(view, "secret") || !strings.Contains(view, "(set)") {
+	if m.cfg.engineParams(voiceEngineVolcano)["api_key"] != "secret" {
+		t.Fatal("staged api key missing")
+	}
+	if view := m.View().Content; strings.Contains(view, "secret") || !strings.Contains(view, "(set)") {
 		t.Fatalf("secret not masked:\n%s", view)
 	}
 
-	closed, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	if !closed {
-		t.Fatal("esc did not close the overlay")
+	m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if m.cfg.VADThreshold != 0 || m.cfg.VADSilenceMs != 1000 || m.cfg.engineParams(voiceEngineVolcano)["api_key"] != "" {
+		t.Fatalf("reset did not restore saved values: %+v", m.cfg)
+	}
+	if m.modified {
+		t.Fatal("modified set after reset")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
+	if _, ok := cmd().(types.CloseTabMsg); !ok {
+		t.Fatalf("esc cmd = %#v", cmd())
+	}
+}
+
+func TestVoiceSettingsParamOptionsCycle(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
+	m.cfg.Engine = voiceEngineVolcano
+
+	m.cursor = findVoiceParamRow(m, "resource_id")
+	if m.cursor < 0 {
+		t.Fatal("resource_id row missing")
+	}
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.ResourceIDSeedASR {
+		t.Fatalf("default resource_id = %q", got)
+	}
+
+	right := tea.KeyPressMsg(tea.Key{Code: tea.KeyRight})
+	left := tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft})
+
+	_, cmd := m.Update(right)
+	if cmd != nil {
+		t.Fatal("options cycle must be staged")
+	}
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.VolcanoResourceIDs[1] {
+		t.Fatalf("right cycle = %q", got)
+	}
+	if got := loadVoiceSettings(database, mk).engineParams(voiceEngineVolcano)["resource_id"]; got != voice.ResourceIDSeedASR {
+		t.Fatal("cycled value persisted before save")
+	}
+
+	m.Update(left)
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.ResourceIDSeedASR {
+		t.Fatalf("left cycle = %q", got)
+	}
+
+	m.cfg.setEngineParam(voiceEngineVolcano, "resource_id", "bogus")
+	m.Update(right)
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.VolcanoResourceIDs[0] {
+		t.Fatalf("right from unknown = %q", got)
+	}
+	m.cfg.setEngineParam(voiceEngineVolcano, "resource_id", "bogus")
+	m.Update(left)
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.VolcanoResourceIDs[3] {
+		t.Fatalf("left from unknown = %q", got)
+	}
+
+	if view := m.View().Content; !strings.Contains(view, voice.VolcanoResourceIDs[3]) {
+		t.Fatalf("current value not shown:\n%s", view)
+	}
+
+	m.cfg.setEngineParam(voiceEngineVolcano, "resource_id", voice.ResourceIDSeedASR)
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if got := m.cfg.engineParams(voiceEngineVolcano)["resource_id"]; got != voice.VolcanoResourceIDs[1] {
+		t.Fatal("enter did not cycle the options param")
+	}
+	if m.edit >= 0 {
+		t.Fatal("enter on an options param started editing")
 	}
 }
 
 func TestVoiceSettingsEngineConditionalRows(t *testing.T) {
 	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+	m.SetSize(80, 30)
 
-	if findVoiceRow(m, vrowHelper) < 0 || findVoiceRow(m, vrowModels) < 0 {
+	titles := func() string {
+		var out []string
+		for _, s := range m.sections() {
+			out = append(out, s.title)
+		}
+		return strings.Join(out, "|")
+	}
+
+	if got := titles(); got != "Engine|Model|Voice Helper|Input|Microphone test" {
+		t.Fatalf("local sections = %q", got)
+	}
+	if findVoiceRow(m, vrowHelper) < 0 || findVoiceRow(m, vrowModel) < 0 {
 		t.Fatal("local helper/model rows missing")
 	}
 	if findVoiceRow(m, vrowParam) >= 0 {
 		t.Fatal("local shows engine param rows")
 	}
-	if view := m.View(); !strings.Contains(view, "Voice Helper") || !strings.Contains(view, "Model >") {
+	if findVoiceRow(m, vrowContext) >= 0 {
+		t.Fatal("local shows the volcano feature rows")
+	}
+	if view := m.View().Content; !strings.Contains(view, "Voice Helper") {
 		t.Fatalf("local rows not rendered:\n%s", view)
+	}
+	if strings.Contains(m.View().Content, "Volcano features") {
+		t.Fatal("local rendered the volcano features section")
 	}
 
 	m.cfg.Engine = voiceEngineVolcano
-	if findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
+	if got := titles(); got != "Engine|Volcano Engine 设置|Input|Microphone test|Volcano features" {
+		t.Fatalf("volcano sections = %q", got)
+	}
+	for _, r := range m.sections()[0].rows {
+		if r.kind != vrowEngineOption {
+			t.Fatal("engine section holds non-option rows")
+		}
+	}
+	if findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModel) >= 0 {
 		t.Fatal("volcano shows local-only rows")
+	}
+	if findVoiceRow(m, vrowContext) < 0 || findVoiceRow(m, vrowDDC) < 0 {
+		t.Fatal("volcano missing the volcano feature rows")
 	}
 	n := 0
 	for _, r := range m.rows() {
 		if r.kind == vrowParam {
 			n++
-			if !r.param.Secret {
-				t.Fatalf("volcano param %q not secret", r.param.Key)
-			}
 		}
 	}
-	if n != 3 {
+	if n != 2 {
 		t.Fatalf("volcano param rows = %d", n)
 	}
-	view := m.View()
-	for _, label := range []string{"Volcano API key", "Volcano App key", "Volcano Access key"} {
+	view := m.View().Content
+	for _, label := range []string{"Volcano API key", "Volcano model", voice.ResourceIDSeedASR, "Volcano features"} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("missing %q:\n%s", label, view)
 		}
 	}
+	if strings.Contains(view, "Extra features") {
+		t.Fatal("old section title still rendered")
+	}
 
 	m.cfg.Engine = "mystery"
-	if findVoiceRow(m, vrowEngine) < 0 || findVoiceRow(m, vrowTest) < 0 {
+	if got := titles(); got != "Engine|Input|Microphone test" {
+		t.Fatalf("unknown engine sections = %q", got)
+	}
+	if findVoiceRow(m, vrowTest) < 0 {
 		t.Fatal("unknown engine lost shared rows")
 	}
-	if findVoiceRow(m, vrowParam) >= 0 || findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModels) >= 0 {
+	if findVoiceRow(m, vrowParam) >= 0 || findVoiceRow(m, vrowHelper) >= 0 || findVoiceRow(m, vrowModel) >= 0 || findVoiceRow(m, vrowContext) >= 0 {
 		t.Fatal("unknown engine shows engine-specific rows")
 	}
-	if view = m.View(); !strings.Contains(view, "mystery (unknown)") {
+	if view = m.View().Content; !strings.Contains(view, "mystery (unknown)") {
 		t.Fatalf("unknown engine not labeled:\n%s", view)
 	}
-	if !strings.Contains(m.View(), "setup incomplete") {
+	if !strings.Contains(m.View().Content, "setup incomplete") {
 		t.Fatal("unknown engine shown ready")
 	}
+}
+
+func TestVoiceSettingsLongValuesTruncated(t *testing.T) {
+	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+	m.SetSize(80, 24)
+	m.dlErr = strings.Repeat("x", 300)
+	m.dlErrTarget = voiceHelperTarget
+	m.cfg.CustomModelDir = "/" + strings.Repeat("long-path-segment/", 30)
+	assertWidth := func(view string) {
+		t.Helper()
+		for _, line := range strings.Split(view, "\n")[1:] {
+			if w := lipgloss.Width(line); w > 80 {
+				t.Fatalf("line width %d exceeds 80: %q", w, line)
+			}
+		}
+	}
+	assertWidth(m.View().Content)
+
+	m.cfg.Engine = voiceEngineVolcano
+	m.cfg.setEngineParam(voiceEngineVolcano, "api_key", strings.Repeat("k", 100))
+	m.cursor = findVoiceParamRow(m, "api_key")
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.edit < 0 {
+		t.Fatal("enter did not start editing")
+	}
+	assertWidth(m.View().Content)
 }
 
 func TestDefaultVoiceEngineSelection(t *testing.T) {
@@ -650,7 +800,16 @@ func TestVoiceHotkeySkippedInSettingsTab(t *testing.T) {
 	}
 }
 
-func TestVoiceSettingsOverlayMouse(t *testing.T) {
+func voiceTabLineIndex(m *voiceSettingsModel, row int) int {
+	for i, sl := range m.buildScrollLines() {
+		if sl.logicalIdx == row {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestVoiceSettingsTabMouse(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
 		t.Fatal(err)
@@ -659,34 +818,30 @@ func TestVoiceSettingsOverlayMouse(t *testing.T) {
 	mk.UnlockNoPassword()
 
 	a := voiceTestApp(&fakeVoiceEngine{events: make(chan voice.Event)})
+	a.db = database
 	a.masterKey = mk
 	a.width = 80
 	a.height = 24
 	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
-	a.voiceSettingsView = newVoiceSettingsModel(database, mk, defaultVoiceSettings())
 
-	thresholdRow := findVoiceRow(a.voiceSettingsView, vrowThreshold)
-	if thresholdRow < 0 {
+	upd, _ := a.Update(openVoiceSettingsMsg{})
+	a = upd.(App)
+	vt := a.voiceTab()
+	if vt == nil {
+		t.Fatal("voice tab did not open")
+	}
+
+	thresholdRow := findVoiceRow(vt, vrowThreshold)
+	lineIdx := voiceTabLineIndex(vt, thresholdRow)
+	if lineIdx < 0 {
 		t.Fatal("threshold row missing")
 	}
-	ox, oy, _, _ := a.overlayBounds(a.voiceSettingsView.View())
-	click := tea.MouseClickMsg(tea.Mouse{X: ox + 3, Y: oy + 4 + thresholdRow, Button: tea.MouseLeft})
-	upd, _ := a.Update(click)
+	top := a.MainViewChromeTopLines()
+	click := tea.MouseClickMsg(tea.Mouse{X: 4, Y: top + 2 + lineIdx, Button: tea.MouseLeft})
+	upd, _ = a.Update(click)
 	a = upd.(App)
-	if a.voiceSettingsView == nil || a.voiceSettingsView.cursor != thresholdRow {
-		t.Fatal("click did not reach the overlay")
-	}
-	if a.voiceSettingsView.cfg.VADThreshold != 0.05 {
-		t.Fatalf("threshold = %v", a.voiceSettingsView.cfg.VADThreshold)
-	}
-
-	upd, _ = a.Update(tea.MouseClickMsg(tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft}))
-	a = upd.(App)
-	if a.voiceSettingsView != nil {
-		t.Fatal("outside click did not dismiss the overlay")
-	}
-	if a.activeTab != 0 {
-		t.Fatal("click fell through to the tab bar")
+	if vt.cursor != thresholdRow {
+		t.Fatalf("click cursor = %d, want %d", vt.cursor, thresholdRow)
 	}
 }
 
@@ -709,20 +864,19 @@ func TestVoiceSettingsMouseWithNotice(t *testing.T) {
 
 	upd, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 	a = upd.(App)
-	if a.voiceSettingsView == nil || a.voiceSettingsView.noticeText() == "" {
+	vt := a.voiceTab()
+	if vt == nil || vt.noticeText() == "" {
 		t.Fatal("routing notice missing")
 	}
 
-	thresholdRow := findVoiceRow(a.voiceSettingsView, vrowThreshold)
-	ox, oy, _, _ := a.overlayBounds(a.voiceSettingsView.View())
-	click := tea.MouseClickMsg(tea.Mouse{X: ox + 3, Y: oy + 6 + thresholdRow, Button: tea.MouseLeft})
+	thresholdRow := findVoiceRow(vt, vrowThreshold)
+	lineIdx := voiceTabLineIndex(vt, thresholdRow)
+	top := a.MainViewChromeTopLines()
+	click := tea.MouseClickMsg(tea.Mouse{X: 4, Y: top + 2 + lineIdx, Button: tea.MouseLeft})
 	upd, _ = a.Update(click)
 	a = upd.(App)
-	if a.voiceSettingsView == nil || a.voiceSettingsView.cursor != thresholdRow {
+	if vt.cursor != thresholdRow {
 		t.Fatal("click did not reach the row below the notice")
-	}
-	if a.voiceSettingsView.cfg.VADThreshold != 0.05 {
-		t.Fatalf("threshold = %v", a.voiceSettingsView.cfg.VADThreshold)
 	}
 }
 
@@ -777,6 +931,7 @@ func (g *gateVoiceEngine) Stop() error {
 
 func (g *gateVoiceEngine) SetVAD(voice.VADParams) error  { return nil }
 func (g *gateVoiceEngine) SetModel(string, string) error { return nil }
+func (g *gateVoiceEngine) SetContext(string) error       { return nil }
 func (g *gateVoiceEngine) Events() <-chan voice.Event    { return g.events }
 func (g *gateVoiceEngine) Close() error                  { return nil }
 
@@ -936,10 +1091,8 @@ func TestVoiceSetupReady(t *testing.T) {
 		t.Fatal("volcano ready without keys")
 	}
 	vcfg.setEngineParam(voiceEngineVolcano, "api_key", "a")
-	vcfg.setEngineParam(voiceEngineVolcano, "app_key", "b")
-	vcfg.setEngineParam(voiceEngineVolcano, "access_key", "c")
 	if !voiceSetupReady(vcfg, root) {
-		t.Fatal("volcano not ready with keys")
+		t.Fatal("volcano not ready with api key")
 	}
 
 	ucfg := defaultVoiceSettings()
@@ -981,15 +1134,16 @@ func TestVoiceHotkeyOpensSettingsWhenNotReady(t *testing.T) {
 	if a.voiceEngine != nil {
 		t.Fatal("engine was built")
 	}
-	if a.voiceSettingsView == nil {
-		t.Fatal("settings panel did not open")
+	vt := a.voiceTab()
+	if vt == nil {
+		t.Fatal("voice tab did not open")
 	}
-	view := a.voiceSettingsView.View()
+	view := vt.View().Content
 	if !strings.Contains(view, "setup incomplete") {
-		t.Fatalf("no guidance in panel: %s", view)
+		t.Fatalf("no guidance in tab: %s", view)
 	}
 	if !strings.Contains(view, "not set up yet") || !strings.Contains(view, "helper binary") {
-		t.Fatalf("no routing reason in panel: %s", view)
+		t.Fatalf("no routing reason in tab: %s", view)
 	}
 }
 
@@ -1001,16 +1155,17 @@ func TestVoiceHotkeyNoticeNamesMissingKeys(t *testing.T) {
 
 	upd, _ := a.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 	a = upd.(App)
-	if a.voiceSettingsView == nil {
-		t.Fatal("settings panel did not open")
+	vt := a.voiceTab()
+	if vt == nil {
+		t.Fatal("voice tab did not open")
 	}
-	view := a.voiceSettingsView.View()
+	view := vt.View().Content
 	if !strings.Contains(view, "not set up yet") || !strings.Contains(view, "Volcano API key") {
-		t.Fatalf("no key guidance in panel: %s", view)
+		t.Fatalf("no key guidance in tab: %s", view)
 	}
 }
 
-func TestVoiceSettingsModelSubmenu(t *testing.T) {
+func TestVoiceSettingsModelRows(t *testing.T) {
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
 		t.Fatal(err)
@@ -1018,30 +1173,28 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
 	m.modelsRoot = t.TempDir()
 	m.helperInstalledFn = func() bool { return false }
 	m.refreshInstallState()
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
 
-	m.cursor = findVoiceRow(m, vrowHelper)
+	helperIdx := findVoiceRow(m, vrowHelper)
+	m.cursor = helperIdx
 	_, cmd := m.Update(enter)
 	req, ok := cmd().(voiceDownloadRequestMsg)
 	if !ok || req.target != voiceHelperTarget {
 		t.Fatalf("helper download request = %#v", cmd())
 	}
 
-	m.cursor = findVoiceRow(m, vrowModels)
-	m.Update(enter)
-	if m.view != voiceViewModels {
-		t.Fatal("Model > did not enter the submenu")
-	}
 	rows := m.rows()
-	if len(rows) != 3 || rows[0].kind != vrowModel || rows[1].kind != vrowModel || rows[2].kind != vrowCustomPath {
-		t.Fatalf("submenu rows = %+v", rows)
+	modelIdx := findVoiceRow(m, vrowModel)
+	if modelIdx < 0 || len(rows) < modelIdx+5 || rows[modelIdx+1].kind != vrowModel || rows[modelIdx+2].kind != vrowCustomPath || rows[modelIdx+3].kind != vrowPrecision || rows[modelIdx+4].kind != vrowHelper {
+		t.Fatalf("model rows = %+v", rows)
 	}
 
-	m.cursor = 1
+	m.cursor = modelIdx + 1
 	_, cmd = m.Update(enter)
 	req, ok = cmd().(voiceDownloadRequestMsg)
 	if !ok || req.target != voice.ModelCatalog()[1].ID {
@@ -1053,46 +1206,40 @@ func TestVoiceSettingsModelSubmenu(t *testing.T) {
 	m.cfg.Verified = true
 	m.refreshInstallState()
 	_, cmd = m.Update(enter)
+	if cmd != nil {
+		t.Fatal("model select must be staged")
+	}
+	if m.cfg.ModelID != spec.ID || m.cfg.Verified || !m.modified {
+		t.Fatalf("staged model = %q verified=%v modified=%v", m.cfg.ModelID, m.cfg.Verified, m.modified)
+	}
+	if got := loadVoiceSettings(database, mk); got.ModelID == spec.ID {
+		t.Fatal("model persisted before save")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	chg, ok := cmd().(voiceSettingsChangedMsg)
 	if !ok || chg.cfg.ModelID != spec.ID || !chg.keepEngine {
-		t.Fatalf("model select msg = %#v", chg)
-	}
-	if chg.cfg.Verified {
-		t.Fatal("model switch must clear verified")
+		t.Fatalf("save msg = %#v", chg)
 	}
 	if got := loadVoiceSettings(database, mk); got.ModelID != spec.ID {
 		t.Fatalf("persisted model = %q", got.ModelID)
 	}
-	if !strings.Contains(m.View(), "[active]") {
+	m.saveDone(chg.cfg)
+	if !strings.Contains(m.View().Content, "[active]") {
 		t.Fatal("active model not marked")
 	}
 
 	m.downloadStarted(spec.ID)
 	m.downloadUpdate(voiceDownloadMsg{target: spec.ID, pct: 42})
-	if !strings.Contains(m.View(), "downloading 42%") {
+	if !strings.Contains(m.View().Content, "downloading 42%") {
 		t.Fatal("download progress not rendered")
 	}
 	m.downloadUpdate(voiceDownloadMsg{target: spec.ID, err: errTest, done: true})
-	if !strings.Contains(m.View(), "failed: boom") {
-		t.Fatalf("download error not rendered:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "failed: boom") {
+		t.Fatalf("download error not rendered:\n%s", m.View().Content)
 	}
 	if m.dlTarget != "" {
 		t.Fatal("download not cleared after done")
-	}
-
-	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
-	if m.view != voiceViewMain {
-		t.Fatal("left did not leave the submenu")
-	}
-	m.cursor = findVoiceRow(m, vrowModels)
-	m.Update(enter)
-	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	if m.view != voiceViewMain {
-		t.Fatal("esc did not leave the submenu")
-	}
-	closed, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	if !closed {
-		t.Fatal("esc did not close the overlay")
 	}
 }
 
@@ -1105,13 +1252,12 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(120, 24)
 	m.modelsRoot = t.TempDir()
 	m.helperInstalledFn = func() bool { return true }
 	m.refreshInstallState()
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
-	m.cursor = findVoiceRow(m, vrowModels)
-	m.Update(enter)
 	m.cursor = findVoiceRow(m, vrowCustomPath)
 	if m.cursor < 0 {
 		t.Fatal("custom path row missing")
@@ -1121,7 +1267,7 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	m.input.SetValue(t.TempDir())
 	_, cmd := m.Update(enter)
 	if cmd != nil {
-		t.Fatal("invalid path produced a persist command")
+		t.Fatal("invalid path produced a command")
 	}
 	if m.customErr == "" {
 		t.Fatal("no error for an invalid path")
@@ -1129,8 +1275,8 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	if m.cfg.CustomModelDir != "" {
 		t.Fatal("invalid path stored")
 	}
-	if !strings.Contains(m.View(), "invalid:") {
-		t.Fatalf("error not rendered:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "invalid:") {
+		t.Fatalf("error not rendered:\n%s", m.View().Content)
 	}
 
 	dir := t.TempDir()
@@ -1141,16 +1287,25 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	m.Update(enter)
 	m.input.SetValue(dir)
 	_, cmd = m.Update(enter)
+	if cmd != nil {
+		t.Fatal("valid path produced a command")
+	}
+	if m.cfg.CustomModelDir != dir || m.cfg.Verified || !m.modified {
+		t.Fatalf("staged custom path = %q verified=%v modified=%v", m.cfg.CustomModelDir, m.cfg.Verified, m.modified)
+	}
+	if got := loadVoiceSettings(database, mk); got.CustomModelDir != "" {
+		t.Fatal("custom path persisted before save")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	chg, ok := cmd().(voiceSettingsChangedMsg)
 	if !ok || chg.cfg.CustomModelDir != dir || !chg.keepEngine {
-		t.Fatalf("custom path msg = %#v", chg)
-	}
-	if chg.cfg.Verified {
-		t.Fatal("custom path must clear verified")
+		t.Fatalf("save msg = %#v", chg)
 	}
 	if got := loadVoiceSettings(database, mk); got.CustomModelDir != dir {
 		t.Fatalf("persisted custom dir = %q", got.CustomModelDir)
 	}
+	m.saveDone(chg.cfg)
 
 	if !voiceSetupReady(m.cfg, m.modelsRoot) {
 		t.Fatal("custom path not counted as model present")
@@ -1159,17 +1314,21 @@ func TestVoiceSettingsCustomModelPath(t *testing.T) {
 	if gotDir != dir || gotKind != voice.ModelKindSenseVoice {
 		t.Fatalf("set_model target = %q %q", gotDir, gotKind)
 	}
-	if !strings.Contains(m.View(), "[active] "+dir) {
-		t.Fatal("custom path not marked active")
+	if want := truncateVoiceValue("[active] "+dir, m.valueWidth()); !strings.Contains(m.View().Content, want) {
+		t.Fatalf("custom path not marked active: want %q", want)
 	}
 
 	m.cursor = findVoiceRow(m, vrowCustomPath)
 	m.Update(enter)
 	m.input.SetValue("")
-	_, cmd = m.Update(enter)
+	m.Update(enter)
+	if m.cfg.CustomModelDir != "" {
+		t.Fatal("clear not staged")
+	}
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	chg, ok = cmd().(voiceSettingsChangedMsg)
 	if !ok || chg.cfg.CustomModelDir != "" {
-		t.Fatalf("clear msg = %#v", chg)
+		t.Fatalf("clear save msg = %#v", chg)
 	}
 	if got := loadVoiceSettings(database, mk); got.CustomModelDir != "" {
 		t.Fatal("clear not persisted")
@@ -1184,19 +1343,28 @@ func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
 	m.cfg.Verified = true
 
 	m.cursor = findVoiceRow(m, vrowPrecision)
 	if m.cursor < 0 || m.rows()[m.cursor].kind != vrowPrecision {
-		t.Fatalf("precision row missing in main view: %+v", m.rows())
+		t.Fatalf("precision row missing: %+v", m.rows())
 	}
 	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if cmd != nil {
+		t.Fatal("precision toggle must be staged")
+	}
+	if !m.cfg.ModelInt8 || m.cfg.Verified || !m.modified {
+		t.Fatalf("staged precision: int8=%v verified=%v modified=%v", m.cfg.ModelInt8, m.cfg.Verified, m.modified)
+	}
+	if got := loadVoiceSettings(database, mk); got.ModelInt8 {
+		t.Fatal("int8 persisted before save")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	chg, ok := cmd().(voiceSettingsChangedMsg)
 	if !ok || !chg.cfg.ModelInt8 || !chg.keepEngine {
-		t.Fatalf("precision msg = %#v", chg)
-	}
-	if chg.cfg.Verified {
-		t.Fatal("precision switch must clear verified")
+		t.Fatalf("save msg = %#v", chg)
 	}
 	if got := loadVoiceSettings(database, mk); !got.ModelInt8 {
 		t.Fatal("int8 not persisted")
@@ -1204,7 +1372,7 @@ func TestVoiceSettingsPrecisionToggle(t *testing.T) {
 	if _, kind := localModelTarget(m.cfg, m.modelsRoot); kind != voice.ModelKindSenseVoiceInt8 {
 		t.Fatalf("kind = %q", kind)
 	}
-	if !strings.Contains(m.View(), "int8") {
+	if !strings.Contains(m.View().Content, "int8") {
 		t.Fatal("precision not rendered")
 	}
 
@@ -1283,19 +1451,33 @@ func TestVoiceSettingsLegacyModelIDMigration(t *testing.T) {
 	}
 }
 
-func TestVoiceSettingsEnginePickerEscKeepsEngine(t *testing.T) {
-	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
-	m.enterEngines()
-	if m.view != voiceViewEngines {
-		t.Fatal("not in the picker")
+func TestVoiceSettingsEngineSwitchStagedUntilSave(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
 	}
-	m.cursor = 1
-	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
-	if m.view != voiceViewMain {
-		t.Fatal("esc did not leave the picker")
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
+
+	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
+	for i, d := range enginePickerDescriptors() {
+		if d.ID == voiceEngineVolcano {
+			m.cursor = i
+		}
 	}
-	if m.cfg.Engine != voiceEngineLocal {
-		t.Fatalf("engine changed on esc: %q", m.cfg.Engine)
+	m.Update(enter)
+	if m.cfg.Engine != voiceEngineVolcano || !m.modified {
+		t.Fatal("engine switch not staged")
+	}
+	if got := loadVoiceSettings(database, mk); got.Engine != voiceEngineLocal {
+		t.Fatal("engine persisted before save")
+	}
+
+	m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if m.cfg.Engine != voiceEngineLocal || m.modified {
+		t.Fatalf("reset did not restore the engine: %q modified=%v", m.cfg.Engine, m.modified)
 	}
 }
 
@@ -1309,13 +1491,14 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
 	mk.UnlockNoPassword()
 	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
 	m.helperInstalledFn = func() bool { return true }
 	ver := "v3.0.0"
 	m.helperVersionFn = func() string { return ver }
 	m.refreshInstallState()
 
 	enter := tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})
-	if view := m.View(); !strings.Contains(view, "installed (v3.0.0)") {
+	if view := m.View().Content; !strings.Contains(view, "installed (v3.0.0)") {
 		t.Fatalf("version not rendered:\n%s", view)
 	}
 
@@ -1329,7 +1512,7 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	}
 
 	m.updateCheckDone("v3.1.0", nil)
-	if view := m.View(); !strings.Contains(view, "update available") || !strings.Contains(view, "v3.0.0 -> v3.1.0") {
+	if view := m.View().Content; !strings.Contains(view, "update v3.0.0 -> v3.1.0") {
 		t.Fatalf("update not offered:\n%s", view)
 	}
 	_, cmd = m.Update(enter)
@@ -1341,7 +1524,7 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	m.downloadStarted(voiceHelperTarget)
 	ver = "v3.1.0"
 	m.downloadUpdate(voiceDownloadMsg{target: voiceHelperTarget, done: true})
-	if view := m.View(); !strings.Contains(view, "installed (v3.1.0)") {
+	if view := m.View().Content; !strings.Contains(view, "installed (v3.1.0)") {
 		t.Fatalf("new version not rendered:\n%s", view)
 	}
 	if m.updateTag != "" {
@@ -1351,17 +1534,17 @@ func TestVoiceSettingsHelperUpdate(t *testing.T) {
 	_, cmd = m.Update(enter)
 	cmd()
 	m.updateCheckDone("v3.1.0", nil)
-	if view := m.View(); !strings.Contains(view, "up to date") {
+	if view := m.View().Content; !strings.Contains(view, "up to date") {
 		t.Fatalf("up-to-date not rendered:\n%s", view)
 	}
 	m.updateCheckDone("", errTest)
-	if view := m.View(); !strings.Contains(view, "update check failed: boom") {
+	if view := m.View().Content; !strings.Contains(view, "update check failed: boom") {
 		t.Fatalf("check failure not rendered:\n%s", view)
 	}
 
 	ver = "dev"
 	m.refreshInstallState()
-	if view := m.View(); !strings.Contains(view, "installed (unknown version)") {
+	if view := m.View().Content; !strings.Contains(view, "installed (unknown version)") {
 		t.Fatalf("unknown version not rendered:\n%s", view)
 	}
 }
@@ -1383,8 +1566,8 @@ func TestVoiceHelperUpdateCheckFlow(t *testing.T) {
 	}
 	upd, _ = a.Update(msg)
 	a = upd.(App)
-	if a.voiceSettingsView.updateTag != "v9.9.9" {
-		t.Fatal("panel not updated with the latest tag")
+	if a.voiceTab().updateTag != "v9.9.9" {
+		t.Fatal("tab not updated with the latest tag")
 	}
 }
 
@@ -1416,6 +1599,8 @@ func drainVoiceDownload(t *testing.T, a App, cmd tea.Cmd) App {
 func TestVoiceDownloadFlow(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
+	a.width = 80
+	a.height = 40
 	var got string
 	a.voiceDownload = func(target string, progress func(float64)) error {
 		got = target
@@ -1425,7 +1610,7 @@ func TestVoiceDownloadFlow(t *testing.T) {
 
 	upd, _ := a.Update(openVoiceSettingsMsg{})
 	a = upd.(App)
-	a.voiceSettingsView.helperInstalledFn = func() bool { return true }
+	a.voiceTab().helperInstalledFn = func() bool { return true }
 
 	upd, cmd := a.Update(voiceDownloadRequestMsg{target: voiceHelperTarget})
 	a = upd.(App)
@@ -1439,10 +1624,10 @@ func TestVoiceDownloadFlow(t *testing.T) {
 	if a.voiceDlActive {
 		t.Fatal("still active after done")
 	}
-	if a.voiceSettingsView.dlTarget != "" {
-		t.Fatal("panel download state not cleared")
+	if a.voiceTab().dlTarget != "" {
+		t.Fatal("tab download state not cleared")
 	}
-	if !a.voiceSettingsView.helperOK {
+	if !a.voiceTab().helperOK {
 		t.Fatal("helper state not refreshed")
 	}
 
@@ -1450,14 +1635,16 @@ func TestVoiceDownloadFlow(t *testing.T) {
 	upd, cmd = a.Update(voiceDownloadRequestMsg{target: voice.ModelCatalog()[0].ID})
 	a = upd.(App)
 	a = drainVoiceDownload(t, a, cmd)
-	if !strings.Contains(a.voiceSettingsView.View(), "failed: boom") {
-		t.Fatal("failed download not shown in panel")
+	if !strings.Contains(a.voiceTab().View().Content, "failed: boom") {
+		t.Fatal("failed download not shown in tab")
 	}
 }
 
 func TestVoiceTestRecordingFlow(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
+	a.width = 80
+	a.height = 40
 	database, err := db.InitDB(t.TempDir() + "/voice.db")
 	if err != nil {
 		t.Fatal(err)
@@ -1475,8 +1662,8 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	if !a.voiceTest || !a.voiceBusy {
 		t.Fatalf("test not started: test=%v busy=%v", a.voiceTest, a.voiceBusy)
 	}
-	if !a.voiceSettingsView.testing {
-		t.Fatal("panel not in testing state")
+	if !a.voiceTab().testing {
+		t.Fatal("tab not in testing state")
 	}
 	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
 		_, ok := m.(voiceStartedMsg)
@@ -1504,14 +1691,14 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "ni hao"}})
 	a = upd.(App)
-	if a.voiceSettingsView.testText != "ni hao" {
-		t.Fatalf("partial = %q", a.voiceSettingsView.testText)
+	if a.voiceTab().testText != "ni hao" {
+		t.Fatalf("partial = %q", a.voiceTab().testText)
 	}
 
 	sink := &syncWriteCloser{}
 	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
 	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
-	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.tabs = append(a.tabs, Tab{Type: SSHTab, Title: "prod", Model: sv})
 
 	upd, cmd = a.Update(voiceFinalMsg("hello test"))
 	a = upd.(App)
@@ -1521,8 +1708,8 @@ func TestVoiceTestRecordingFlow(t *testing.T) {
 	if !a.voiceCfg.Verified {
 		t.Fatal("verified not set")
 	}
-	if !strings.Contains(a.voiceSettingsView.View(), "hello test") {
-		t.Fatal("transcript not shown in panel")
+	if !strings.Contains(a.voiceTab().View().Content, "hello test") {
+		t.Fatal("transcript not shown in tab")
 	}
 	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
 		_, ok := m.(voiceStoppedMsg)
@@ -1598,6 +1785,8 @@ func TestVoiceTestTimeoutSwallowsFinal(t *testing.T) {
 func TestVoiceTestBlockedWhenNotReady(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
+	a.width = 80
+	a.height = 40
 	a.voiceReady = func(voiceSettings) bool { return false }
 
 	upd, _ := a.Update(openVoiceSettingsMsg{})
@@ -1607,7 +1796,7 @@ func TestVoiceTestBlockedWhenNotReady(t *testing.T) {
 	if a.voiceTest || cmd != nil {
 		t.Fatal("test started without a complete setup")
 	}
-	if !strings.Contains(a.voiceSettingsView.View(), "setup incomplete") {
+	if !strings.Contains(a.voiceTab().View().Content, "setup incomplete") {
 		t.Fatal("no guidance shown")
 	}
 	if fe.started {
@@ -1635,6 +1824,8 @@ func TestVoiceSettingsModelChangeAppliesToEngine(t *testing.T) {
 func TestVoiceSettingsCloseStopsTest(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
+	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
+	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
 
 	upd, _ := a.Update(openVoiceSettingsMsg{})
 	a = upd.(App)
@@ -1650,18 +1841,23 @@ func TestVoiceSettingsCloseStopsTest(t *testing.T) {
 
 	upd, cmd = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))
 	a = upd.(App)
-	if a.voiceSettingsView != nil {
-		t.Fatal("esc did not close the panel")
+	if cmd == nil {
+		t.Fatal("esc produced no close command")
 	}
-	if a.voiceTest {
-		t.Fatal("test still active after close")
-	}
+	upd, cmd = a.Update(cmd())
+	a = upd.(App)
 	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
 		_, ok := m.(voiceStoppedMsg)
 		return ok
 	}) {
 		upd, _ = a.Update(m)
 		a = upd.(App)
+	}
+	if a.voiceTab() != nil {
+		t.Fatal("esc did not close the voice tab")
+	}
+	if a.voiceTest {
+		t.Fatal("test still active after close")
 	}
 	if !fe.stopped {
 		t.Fatal("engine not stopped after close")
@@ -1716,65 +1912,11 @@ func TestVoiceTestCancelSwallowClearedOnIdle(t *testing.T) {
 	}
 }
 
-func TestVoiceSettingsOutsideClickStopsTest(t *testing.T) {
-	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
-	a := voiceTestApp(fe)
-	a.width = 80
-	a.height = 24
-	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
-	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
-
-	upd, _ := a.Update(openVoiceSettingsMsg{})
-	a = upd.(App)
-	upd, cmd := a.Update(voiceTestRequestMsg{})
-	a = upd.(App)
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStartedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
-	if !a.voiceTest {
-		t.Fatal("test not running")
-	}
-
-	upd, cmd = a.Update(tea.MouseClickMsg(tea.Mouse{X: 0, Y: 0, Button: tea.MouseLeft}))
-	a = upd.(App)
-	if a.voiceSettingsView != nil {
-		t.Fatal("outside click did not dismiss the panel")
-	}
-	if a.voiceTest {
-		t.Fatal("test still active after outside click")
-	}
-	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
-		_, ok := m.(voiceStoppedMsg)
-		return ok
-	}) {
-		upd, _ = a.Update(m)
-		a = upd.(App)
-	}
-	if !fe.stopped {
-		t.Fatal("engine not stopped after outside click")
-	}
-
-	sink := &syncWriteCloser{}
-	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
-	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
-	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
-	upd, _ = a.Update(voiceFinalMsg("abandoned test speech"))
-	a = upd.(App)
-	if sink.String() != "" {
-		t.Fatalf("flushed final delivered: %q", sink.String())
-	}
-	if a.voiceCfg.Verified {
-		t.Fatal("abandoned test marked the setup verified")
-	}
-}
-
 func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
 	a := voiceTestApp(fe)
+	a.width = 80
+	a.height = 40
 	a.voiceEngine = fe
 	a.voiceRec = true
 
@@ -1788,13 +1930,378 @@ func TestVoiceTestRejectedWhileDictating(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("unexpected command")
 	}
-	if !strings.Contains(a.voiceSettingsView.View(), "stop dictation") {
-		t.Fatalf("no refusal shown:\n%s", a.voiceSettingsView.View())
+	if !strings.Contains(a.voiceTab().View().Content, "stop dictation") {
+		t.Fatalf("no refusal shown:\n%s", a.voiceTab().View().Content)
 	}
 
 	upd, _ = a.Update(voiceEventMsg{ev: voice.Event{Type: voice.EventPartial, Text: "dictating"}})
 	a = upd.(App)
-	if a.voiceSettingsView.testText != "" {
-		t.Fatal("partial leaked into the panel")
+	if a.voiceTab().testText != "" {
+		t.Fatal("partial leaked into the tab")
+	}
+}
+
+func TestVoiceContextSettingTogglePersists(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 24)
+	if got := loadVoiceSettings(database, mk); got.Context {
+		t.Fatal("context default on")
+	}
+
+	m.cfg.Engine = voiceEngineVolcano
+	m.saved.Engine = voiceEngineVolcano
+	m.cursor = findVoiceRow(m, vrowContext)
+	if m.cursor < 0 {
+		t.Fatal("context row missing")
+	}
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if cmd != nil {
+		t.Fatal("context toggle must be staged")
+	}
+	if !m.cfg.Context || !m.modified {
+		t.Fatal("context toggle not staged")
+	}
+	if got := loadVoiceSettings(database, mk); got.Context {
+		t.Fatal("context persisted before save")
+	}
+
+	_, cmd = m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
+	chg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || !chg.cfg.Context || !chg.keepEngine {
+		t.Fatalf("save msg = %#v", chg)
+	}
+	if got := loadVoiceSettings(database, mk); !got.Context {
+		t.Fatal("context toggle not persisted")
+	}
+	if view := m.View().Content; !strings.Contains(view, "Context awareness") || !strings.Contains(view, "on") {
+		t.Fatalf("context row not rendered:\n%s", view)
+	}
+}
+
+func TestVoiceContextAIHistoryTurns(t *testing.T) {
+	var msgs []map[string]string
+	msgs = append(msgs, map[string]string{"role": "system", "content": "be helpful"})
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, map[string]string{"role": "user", "content": fmt.Sprintf("question %d", i)})
+		msgs = append(msgs, map[string]string{"role": "assistant", "content": fmt.Sprintf("answer %d", i)})
+	}
+	msgs = append(msgs, map[string]string{"role": "tool", "content": "tool output"})
+	history, err := json.Marshal(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &aiBridge{agent: &historyAgent{history: history}}
+
+	turns := b.voiceContextTurns(voice.DefaultContextMaxTurns)
+	if len(turns) != 20 {
+		t.Fatalf("turns = %d, want 20", len(turns))
+	}
+	if turns[0].Speaker != "user" || turns[0].Text != "question 2" {
+		t.Fatalf("oldest turn = %+v", turns[0])
+	}
+	if turns[1].Speaker != "bot" || turns[1].Text != "answer 2" {
+		t.Fatalf("second turn = %+v", turns[1])
+	}
+	if turns[19].Text != "answer 11" {
+		t.Fatalf("newest turn = %+v", turns[19])
+	}
+}
+
+func TestVoiceContextStringFromAIOverlay(t *testing.T) {
+	history, err := json.Marshal([]map[string]string{
+		{"role": "user", "content": "how do I list pods"},
+		{"role": "assistant", "content": "kubectl get pods"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.aiBridge = &aiBridge{agent: &historyAgent{history: history}}
+	fake := aiview.NewFakeRunner()
+	a.aiView = aiview.New(fake, fake, fake)
+	a.aiVisible = true
+	a.voiceCfg.Context = true
+
+	got := a.voiceContextString()
+	if !strings.Contains(got, `"context_type":"dialog_ctx"`) {
+		t.Fatalf("context = %q", got)
+	}
+	if !strings.Contains(got, "kubectl get pods") {
+		t.Fatalf("assistant turn missing: %q", got)
+	}
+	if strings.Contains(got, "corpus\x00") {
+		t.Fatal("junk in context")
+	}
+
+	a.voiceCfg.Context = false
+	if got := a.voiceContextString(); got != "" {
+		t.Fatalf("context not cleared: %q", got)
+	}
+}
+
+func TestVoiceContextStringFromTerminalTab(t *testing.T) {
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	feedSSHChunk(sv, "┌──────────┐\r\n│ degraded │\r\n└──────────┘\r\nkubectl   get   pods\r\nkubectl get pods\r\n$ ")
+
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.activeTab = 0
+	a.voiceCfg.Context = true
+
+	got := a.voiceContextString()
+	if !strings.Contains(got, "kubectl get pods") {
+		t.Fatalf("terminal context = %q", got)
+	}
+	if !strings.Contains(got, "degraded") {
+		t.Fatalf("bordered text lost: %q", got)
+	}
+	if strings.ContainsAny(got, "│┌┐└┘─") {
+		t.Fatalf("border runes leaked: %q", got)
+	}
+}
+
+func TestVoiceToggleSetsEngineContextProvider(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.voiceCfg.Context = true
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+	feedSSHChunk(sv, "kubectl get pods\r\n")
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.activeTab = 0
+
+	upd, cmd := a.toggleVoice()
+	a = upd
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStartedMsg)
+		return ok
+	}) {
+		upd2, _ := a.Update(m)
+		a = upd2.(App)
+	}
+	if fe.contextFn == nil {
+		t.Fatal("engine got no context provider")
+	}
+	if got := fe.contextFn(); !strings.Contains(got, `"dialog_ctx"`) || !strings.Contains(got, "kubectl get pods") {
+		t.Fatalf("provider context = %q", got)
+	}
+
+	// The provider reads live state: newly fed terminal content shows up
+	// without restarting the recording.
+	feedSSHChunk(sv, "docker compose up\r\n")
+	if got := fe.contextFn(); !strings.Contains(got, "docker compose up") {
+		t.Fatalf("provider did not pick up fresh transcript: %q", got)
+	}
+
+	upd, cmd = a.toggleVoice()
+	a = upd
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStoppedMsg)
+		return ok
+	}) {
+		upd2, _ := a.Update(m)
+		a = upd2.(App)
+	}
+
+	a.voiceCfg.Context = false
+	upd, cmd = a.toggleVoice()
+	a = upd
+	for _, m := range collectCmdMsgs(t, cmd, func(m tea.Msg) bool {
+		_, ok := m.(voiceStartedMsg)
+		return ok
+	}) {
+		upd2, _ := a.Update(m)
+		a = upd2.(App)
+	}
+	if got := fe.contextFn(); got != "" {
+		t.Fatalf("provider not cleared with the switch off: %q", got)
+	}
+}
+
+func TestVoiceContextTerminalTailUsesNewestContent(t *testing.T) {
+	sink := &syncWriteCloser{}
+	is := &internalssh.InteractiveSession{Stdin: sink, Done: make(chan error, 1)}
+	sv := sshview.New(is, "prod", 0, BuildSSHKeys(DefaultKeyBindingConfig()))
+
+	var b strings.Builder
+	b.WriteString("OLDMARKER earliest scrollback content\r\n")
+	for i := 0; i < 700; i++ {
+		fmt.Fprintf(&b, "filler line %04d xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n", i)
+	}
+	b.WriteString("NEWMARKER kubectl get pods\r\n")
+	feedSSHChunk(sv, b.String())
+
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.tabs = []Tab{{Type: SSHTab, Title: "prod", Model: sv}}
+	a.activeTab = 0
+	a.voiceCfg.Context = true
+
+	got := a.voiceContextString()
+	if !strings.Contains(got, "NEWMARKER") {
+		t.Fatalf("newest content missing from context: %q", got)
+	}
+	if strings.Contains(got, "OLDMARKER") {
+		t.Fatalf("oldest scrollback leaked into context: %q", got)
+	}
+}
+
+func TestVoiceSettingsExtraRows(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := security.NewMasterKeyManager(nil, nil, time.Minute)
+	mk.UnlockNoPassword()
+	m := newVoiceSettingsModel(database, mk, defaultVoiceSettings())
+	m.SetSize(80, 30)
+
+	if findVoiceRow(m, vrowContext) >= 0 || findVoiceRow(m, vrowDDC) >= 0 {
+		t.Fatal("local engine shows the volcano feature rows")
+	}
+	m.cfg.Engine = voiceEngineVolcano
+	if findVoiceRow(m, vrowContext) < 0 || findVoiceRow(m, vrowDDC) < 0 {
+		t.Fatal("volcano missing the extra feature rows")
+	}
+	if got := loadVoiceSettings(database, mk); !got.DDC {
+		t.Fatal("DDC default off")
+	}
+
+	m.cursor = findVoiceRow(m, vrowDDC)
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if m.cfg.DDC || !m.modified {
+		t.Fatal("DDC toggle not staged")
+	}
+	if got := loadVoiceSettings(database, mk); !got.DDC {
+		t.Fatal("DDC persisted before save")
+	}
+
+	m.cursor = findVoiceRow(m, vrowContext)
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if !m.cfg.Context {
+		t.Fatal("context toggle not staged")
+	}
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
+	chg, ok := cmd().(voiceSettingsChangedMsg)
+	if !ok || chg.cfg.DDC || !chg.cfg.Context || chg.keepEngine {
+		t.Fatalf("save msg = %#v", chg)
+	}
+	m.saveDone(chg.cfg)
+	got := loadVoiceSettings(database, mk)
+	if got.DDC || !got.Context {
+		t.Fatalf("persisted = %+v", got)
+	}
+	if view := m.View().Content; !strings.Contains(view, "Semantic smoothing (DDC)") || !strings.Contains(view, "Volcano features") {
+		t.Fatalf("volcano feature rows not rendered:\n%s", view)
+	}
+}
+
+func TestVoiceSettingsTabScrolls(t *testing.T) {
+	m := newVoiceSettingsModel(nil, nil, defaultVoiceSettings())
+	m.SetSize(80, 10)
+	total := len(m.buildScrollLines())
+	if total <= m.visibleRows() {
+		t.Fatalf("test needs more lines than the %d visible", m.visibleRows())
+	}
+
+	last := len(m.rows()) - 1
+	for i := 0; i < last; i++ {
+		m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	}
+	if m.cursor != last {
+		t.Fatalf("cursor = %d, want %d", m.cursor, last)
+	}
+	if lines := strings.Split(m.View().Content, "\n"); len(lines) > m.height {
+		t.Fatalf("view lines = %d, want <= %d", len(lines), m.height)
+	}
+	if m.scroll == 0 {
+		t.Fatal("cursor past the viewport did not scroll")
+	}
+
+	scrolled := m.scroll
+	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+	if m.scroll != scrolled-1 {
+		t.Fatalf("wheel up scroll = %d, want %d", m.scroll, scrolled-1)
+	}
+	m.Update(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown}))
+	if m.scroll != scrolled {
+		t.Fatalf("wheel down scroll = %d, want %d", m.scroll, scrolled)
+	}
+
+	for i := 0; i < last; i++ {
+		m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	}
+	m.View()
+	if m.scroll > 1 {
+		t.Fatalf("scroll did not follow the cursor back up: %d", m.scroll)
+	}
+}
+
+func TestVoiceHotkeySkippedInVoiceTab(t *testing.T) {
+	fe := &fakeVoiceEngine{events: make(chan voice.Event)}
+	a := voiceTestApp(fe)
+	a.masterKey = security.NewMasterKeyManager(nil, nil, time.Minute)
+	a.tabs = []Tab{{Type: HomeTab, Title: "List", Model: nil}}
+
+	upd, _ := a.Update(openVoiceSettingsMsg{})
+	a = upd.(App)
+	vt := a.voiceTab()
+	if vt == nil {
+		t.Fatal("voice tab did not open")
+	}
+
+	vt.cursor = findVoiceRow(vt, vrowThreshold)
+	upd, _ = a.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	a = upd.(App)
+	if !vt.modified {
+		t.Fatal("threshold change not staged")
+	}
+
+	upd, _ = a.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	a = upd.(App)
+	if a.voiceRec {
+		t.Fatal("voice hotkey fired inside the voice tab")
+	}
+	if a.voiceEngine != nil {
+		t.Fatal("engine was built")
+	}
+	if vt.modified {
+		t.Fatal("ctrl+r did not reset the staged changes")
+	}
+}
+
+func TestVoiceSettingsDDCPersistenceRoundTrip(t *testing.T) {
+	database, err := db.InitDB(t.TempDir() + "/voice.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loadVoiceSettings(database, nil); !got.DDC {
+		t.Fatal("DDC default off on an empty database")
+	}
+	if err := db.SetSetting(database, voiceDDCSettingKey, "0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadVoiceSettings(database, nil); got.DDC {
+		t.Fatal("stored DDC=0 not honored")
+	}
+	cfg := defaultVoiceSettings()
+	cfg.DDC = false
+	if err := persistVoiceSettings(database, nil, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadVoiceSettings(database, nil); got.DDC {
+		t.Fatal("DDC=0 round trip failed")
 	}
 }

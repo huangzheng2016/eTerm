@@ -41,7 +41,9 @@ const (
 	LocalTab          TabType = "local"
 	BatchResultTab    TabType = "batch-result"
 	SettingsTab       TabType = "settings"
+	ShortcutsTab      TabType = "shortcuts"
 	SyncTab           TabType = "sync"
+	VoiceTab          TabType = "voice"
 	SessionHistoryTab TabType = "session-hist"
 	SessionListTab    TabType = "sessions"
 	SessionReplayTab  TabType = "session-replay"
@@ -141,7 +143,6 @@ type App struct {
 	voiceProgressCh    chan float64
 	voiceProgressArmed bool
 	voiceMake          func(voiceSettings, func(float64)) (voice.Engine, error)
-	voiceSettingsView  *voiceSettingsModel
 	voiceTest          bool
 	voiceTestSeq       int
 	voiceSwallowFinal  bool
@@ -238,4 +239,11 @@ func (a App) Init() tea.Cmd {
 		return a.loginModel.Init()
 	}
 	return nil
+}
+
+func (a App) activeTabIsShortcuts() bool {
+	if a.viewState != MainView || a.activeTab < 0 || a.activeTab >= len(a.tabs) {
+		return false
+	}
+	return a.tabs[a.activeTab].Type == ShortcutsTab
 }

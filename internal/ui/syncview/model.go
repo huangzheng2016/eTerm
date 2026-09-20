@@ -51,4 +51,9 @@ type Model struct {
 	testing      bool
 	loadedAPIKey string
 	loadedPass   string
+	editing      int
+	pendAPIKey   string
+	pendPass     string
+	apiKeyDirty  bool
+	passDirty    bool
 }

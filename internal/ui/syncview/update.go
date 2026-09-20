@@ -29,14 +29,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		f := m.currentField()
 		idx := m.inputIdxForField(f)
-		if idx >= 0 {
+		if idx >= 0 && (!isSecretField(f) || m.editing == idx) {
 			m.inputs[idx] = inputpaste.TextInput(m.inputs[idx], msg)
 		}
 		return m, nil
 	}
 	f := m.currentField()
 	idx := m.inputIdxForField(f)
-	if idx >= 0 {
+	if idx >= 0 && (!isSecretField(f) || m.editing == idx) {
 		var cmd tea.Cmd
 		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
 		return m, cmd

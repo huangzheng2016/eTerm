@@ -12,6 +12,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	"github.com/huangzheng2016/eTerm/internal/ui/aiview"
+	"github.com/huangzheng2016/eTerm/internal/voice"
 
 	tea "charm.land/bubbletea/v2"
 	"gorm.io/gorm"
@@ -346,6 +347,47 @@ func (b *aiBridge) ContextUsage() (used, max int) {
 	return 0, 0
 }
 
+// voiceContextTurns returns the most recent user/assistant turns of the
+// current agent history as Volcano dialog_ctx turns.
+func (b *aiBridge) voiceContextTurns(limit int) []voice.ContextTurn {
+	b.mu.Lock()
+	agent := b.agent
+	b.mu.Unlock()
+	if agent == nil {
+		return nil
+	}
+	data, err := agent.ExportHistory(0)
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(data, &msgs) != nil {
+		return nil
+	}
+	turns := make([]voice.ContextTurn, 0, limit)
+	for i := len(msgs) - 1; i >= 0 && len(turns) < limit; i-- {
+		speaker := ""
+		switch msgs[i].Role {
+		case "user":
+			speaker = "user"
+		case "assistant":
+			speaker = "bot"
+		}
+		text := strings.TrimSpace(msgs[i].Content)
+		if speaker == "" || text == "" {
+			continue
+		}
+		turns = append(turns, voice.ContextTurn{Speaker: speaker, Text: text})
+	}
+	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
+		turns[i], turns[j] = turns[j], turns[i]
+	}
+	return turns
+}
+
 func aiEventToView(ev ai.Event) (aiview.AgentEvent, bool) {
 	switch ev.Type {
 	case ai.EventTextDelta:
@@ -384,19 +426,35 @@ func toolCallLabel(name, args string) string {
 func (b *aiBridge) Models() []aiview.ModelEntry {
 	aliased := map[string]bool{}
 	out := make([]aiview.ModelEntry, 0, len(b.store.Models)+len(b.store.Providers))
+	entry := func(p *ai.Provider) aiview.ModelEntry {
+		e := aiview.ModelEntry{}
+		if p != nil {
+			e.Type = p.Type
+			e.BaseURL = p.BaseURL
+			e.DefaultModel = p.DefaultModel
+			e.KeySet = p.APIKey != ""
+			e.ReadOnly = p.Source == ai.SourceKimi
+		}
+		return e
+	}
 	for _, m := range b.store.Models {
 		aliased[m.Provider] = true
-		typ := ""
-		if p := b.store.Get(m.Provider); p != nil {
-			typ = p.Type
-		}
-		out = append(out, aiview.ModelEntry{Label: m.Alias, Provider: m.Provider, Model: m.Alias, Type: typ})
+		e := entry(b.store.Get(m.Provider))
+		e.Label = m.Alias
+		e.Provider = m.Provider
+		e.Model = m.Alias
+		out = append(out, e)
 	}
 	for _, p := range b.store.Providers {
 		if aliased[p.Name] {
 			continue
 		}
-		out = append(out, aiview.ModelEntry{Label: p.Name, Provider: p.Name, Model: p.DefaultModel, Type: p.Type})
+		p := p
+		e := entry(&p)
+		e.Label = p.Name
+		e.Provider = p.Name
+		e.Model = p.DefaultModel
+		out = append(out, e)
 	}
 	return out
 }
@@ -434,6 +492,33 @@ func (b *aiBridge) Add(pv aiview.Provider) {
 		DefaultModel: strings.TrimSpace(pv.Model),
 	})
 	b.persistProviders()
+}
+
+func (b *aiBridge) Update(name string, pv aiview.Provider) error {
+	err := b.store.Update(name, ai.Provider{
+		Name:         strings.TrimSpace(pv.Name),
+		Type:         strings.ToLower(strings.TrimSpace(pv.Type)),
+		APIKey:       pv.APIKey,
+		BaseURL:      strings.TrimSpace(pv.BaseURL),
+		DefaultModel: strings.TrimSpace(pv.Model),
+	})
+	if err != nil {
+		return err
+	}
+	b.CancelRun()
+	b.persistProviders()
+	b.persistActive()
+	return nil
+}
+
+func (b *aiBridge) Delete(name string) error {
+	if err := b.store.Delete(name); err != nil {
+		return err
+	}
+	b.CancelRun()
+	b.persistProviders()
+	b.persistActive()
+	return nil
 }
 
 func (a App) ensureAI() (App, tea.Cmd) {

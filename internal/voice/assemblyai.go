@@ -162,6 +162,8 @@ func (e *AssemblyAIEngine) SetVAD(VADParams) error {
 	return nil
 }
 
+func (e *AssemblyAIEngine) SetContext(string) error { return nil }
+
 func (e *AssemblyAIEngine) Close() error {
 	e.mu.Lock()
 	if e.closed {

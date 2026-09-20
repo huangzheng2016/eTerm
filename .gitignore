@@ -53,5 +53,8 @@ Thumbs.db
 
 # Local planning notes (not committed)
 .plan/
+
+# Tower workspace (comms, worktrees)
+.tower/
 /docs/superpowers/
 tmp_remote_diag/

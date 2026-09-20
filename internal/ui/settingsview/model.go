@@ -11,6 +11,7 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/localterm"
+	"github.com/huangzheng2016/eTerm/internal/ui/components"
 )
 
 type editState int
@@ -32,15 +33,15 @@ type bindingEntry struct {
 }
 
 type Model struct {
-	db           *gorm.DB
-	entries      []bindingEntry
-	cursor       int
-	state        editState
-	width        int
-	height       int
-	scroll       int
-	modified     bool
-	defaultsJSON []byte
+	db       *gorm.DB
+	cursor   int
+	state    editState
+	width    int
+	height   int
+	scroll   int
+	modified bool
+
+	confirmReset components.ConfirmModel
 
 	saveSessionTranscript bool
 	replaySessions        bool
@@ -56,13 +57,12 @@ type Model struct {
 	pwd                   *passwordOverlay
 }
 
-func New(database *gorm.DB, configJSON []byte, defaultsJSON []byte, noPasswordMode bool) *Model {
+func New(database *gorm.DB, noPasswordMode bool) *Model {
 	m := &Model{
 		db:             database,
-		defaultsJSON:   defaultsJSON,
 		noPasswordMode: noPasswordMode,
+		confirmReset:   components.NewConfirm("Reset settings", "Restore all preferences to factory defaults?"),
 	}
-	m.entries = buildEntries(configJSON)
 	m.saveSessionTranscript = loadSaveSessionTranscript(database)
 	m.replaySessions = loadReplaySessions(database)
 	m.gridStatusWords = loadGridStatusWords(database)
@@ -141,79 +141,80 @@ func (m *Model) SetSize(w, h int) {
 	m.height = h
 }
 
+func bindingDefs() []bindingEntry {
+	return []bindingEntry{
+		{Category: "Global", Label: "Quit App", Field: "quit_app"},
+		{Category: "Global", Label: "Quit", Field: "quit"},
+		{Category: "Global", Label: "Help", Field: "help"},
+		{Category: "Global", Label: "SSH Keys Tab", Field: "new_tab"},
+		{Category: "Global", Label: "Close Tab", Field: "close_tab"},
+		{Category: "Global", Label: "Close Tab (Safe)", Field: "close_tab_safe"},
+		{Category: "Global", Label: "Next Tab", Field: "next_tab"},
+		{Category: "Global", Label: "Prev Tab", Field: "prev_tab"},
+		{Category: "Global", Label: "Tab Page Left", Field: "tab_page_left"},
+		{Category: "Global", Label: "Tab Page Right", Field: "tab_page_right"},
+		{Category: "Global", Label: "Lock", Field: "lock"},
+		{Category: "Global", Label: "Lock App", Field: "lock_app"},
+		{Category: "Global", Label: "Repaint", Field: "repaint"},
+		{Category: "Global", Label: "Forwards Tab", Field: "forward_tab"},
+		{Category: "Global", Label: "Snippets Tab", Field: "snippets_tab"},
+		{Category: "Global", Label: "Command Palette", Field: "command_palette"},
+		{Category: "Global", Label: "AI Overlay", Field: "ai_overlay"},
+		{Category: "Global", Label: "Voice Input", Field: "voice_input"},
+		{Category: "Global", Label: "Local Terminal", Field: "local_terminal"},
+		{Category: "Global", Label: "Rename Tab", Field: "rename_tab"},
+		{Category: "Global", Label: "Paste Blob URL", Field: "paste_blob_url"},
+		{Category: "Global", Label: "Toggle Chrome", Field: "toggle_chrome"},
+		{Category: "Home", Label: "SSH Connect", Field: "ssh_connect"},
+		{Category: "Home", Label: "SFTP Open", Field: "sftp_open"},
+		{Category: "Home", Label: "New Host", Field: "new_host"},
+		{Category: "Home", Label: "Edit Host", Field: "edit_host"},
+		{Category: "Home", Label: "Delete Host", Field: "delete_host"},
+		{Category: "Home", Label: "Search", Field: "search"},
+		{Category: "Home", Label: "Copy SSH", Field: "copy_ssh"},
+		{Category: "Home", Label: "Clone Host", Field: "clone_host"},
+		{Category: "Home", Label: "Toggle View", Field: "toggle_view"},
+		{Category: "Home", Label: "Quick Connect", Field: "quick_connect"},
+		{Category: "Home", Label: "Show Hidden", Field: "show_hidden"},
+		{Category: "Home", Label: "Hide Host", Field: "hide_host"},
+		{Category: "Home", Label: "Snippet Picker", Field: "snippet_picker"},
+		{Category: "Home", Label: "Session Log", Field: "session_history"},
+		{Category: "Home", Label: "Toggle Select", Field: "toggle_select"},
+		{Category: "Home", Label: "Batch Tag", Field: "batch_tag"},
+		{Category: "Home", Label: "Batch Actions", Field: "batch_actions"},
+		{Category: "Home", Label: "tmux Menu", Field: "tmux_menu"},
+		{Category: "Home", Label: "SSH tmux", Field: "ssh_tmux"},
+		{Category: "SFTP", Label: "Upload", Field: "sftp_upload"},
+		{Category: "SFTP", Label: "Download", Field: "sftp_download"},
+		{Category: "SFTP", Label: "Delete", Field: "sftp_delete"},
+		{Category: "SFTP", Label: "Mkdir", Field: "sftp_mkdir"},
+		{Category: "SFTP", Label: "Rename", Field: "sftp_rename"},
+		{Category: "SFTP", Label: "Chmod", Field: "sftp_chmod"},
+		{Category: "SFTP", Label: "Switch Left", Field: "sftp_switch_left"},
+		{Category: "SFTP", Label: "Switch Right", Field: "sftp_switch_right"},
+		{Category: "Keys", Label: "New Key", Field: "key_new"},
+		{Category: "Keys", Label: "Import Key", Field: "key_import"},
+		{Category: "Keys", Label: "Edit Key", Field: "key_edit"},
+		{Category: "Keys", Label: "Delete Key", Field: "key_delete"},
+		{Category: "Keys", Label: "Copy Fingerprint", Field: "key_copy"},
+		{Category: "Forward", Label: "Start", Field: "fwd_start"},
+		{Category: "Forward", Label: "Stop", Field: "fwd_stop"},
+		{Category: "Forward", Label: "New Rule", Field: "fwd_new"},
+		{Category: "Forward", Label: "Edit Rule", Field: "fwd_edit"},
+		{Category: "Forward", Label: "Delete Rule", Field: "fwd_delete"},
+		{Category: "Snippet", Label: "New Snippet", Field: "snip_new"},
+		{Category: "Snippet", Label: "Edit Snippet", Field: "snip_edit"},
+		{Category: "Snippet", Label: "Delete Snippet", Field: "snip_delete"},
+		{Category: "SSH", Label: "Reconnect", Field: "ssh_reconnect"},
+		{Category: "SSH", Label: "Snippet Picker", Field: "ssh_snippet_picker"},
+	}
+}
+
 func buildEntries(configJSON []byte) []bindingEntry {
 	var cfg map[string]json.RawMessage
 	_ = json.Unmarshal(configJSON, &cfg)
 
-	type fieldDef struct {
-		Category string
-		Label    string
-		Field    string
-	}
-
-	defs := []fieldDef{
-		{"Global", "Quit App", "quit_app"},
-		{"Global", "Quit", "quit"},
-		{"Global", "Help", "help"},
-		{"Global", "SSH Keys Tab", "new_tab"},
-		{"Global", "Close Tab", "close_tab"},
-		{"Global", "Close Tab (Safe)", "close_tab_safe"},
-		{"Global", "Next Tab", "next_tab"},
-		{"Global", "Prev Tab", "prev_tab"},
-		{"Global", "Tab Page Left", "tab_page_left"},
-		{"Global", "Tab Page Right", "tab_page_right"},
-		{"Global", "Lock", "lock"},
-		{"Global", "Lock App", "lock_app"},
-		{"Global", "Forwards Tab", "forward_tab"},
-		{"Global", "Snippets Tab", "snippets_tab"},
-		{"Global", "Command Palette", "command_palette"},
-		{"Global", "Local Terminal", "local_terminal"},
-		{"Global", "Rename Tab", "rename_tab"},
-		{"Global", "Paste Blob URL", "paste_blob_url"},
-		{"Global", "Toggle Chrome", "toggle_chrome"},
-		{"Home", "SSH Connect", "ssh_connect"},
-		{"Home", "SFTP Open", "sftp_open"},
-		{"Home", "New Host", "new_host"},
-		{"Home", "Edit Host", "edit_host"},
-		{"Home", "Delete Host", "delete_host"},
-		{"Home", "Search", "search"},
-		{"Home", "Copy SSH", "copy_ssh"},
-		{"Home", "Clone Host", "clone_host"},
-		{"Home", "Toggle View", "toggle_view"},
-		{"Home", "Quick Connect", "quick_connect"},
-		{"Home", "Show Hidden", "show_hidden"},
-		{"Home", "Hide Host", "hide_host"},
-		{"Home", "Snippet Picker", "snippet_picker"},
-		{"Home", "Session Log", "session_history"},
-		{"Home", "Toggle Select", "toggle_select"},
-		{"Home", "Batch Tag", "batch_tag"},
-		{"Home", "Batch Actions", "batch_actions"},
-		{"Home", "tmux Menu", "tmux_menu"},
-		{"SFTP", "Upload", "sftp_upload"},
-		{"SFTP", "Download", "sftp_download"},
-		{"SFTP", "Delete", "sftp_delete"},
-		{"SFTP", "Mkdir", "sftp_mkdir"},
-		{"SFTP", "Rename", "sftp_rename"},
-		{"SFTP", "Chmod", "sftp_chmod"},
-		{"SFTP", "Switch Left", "sftp_switch_left"},
-		{"SFTP", "Switch Right", "sftp_switch_right"},
-		{"Keys", "New Key", "key_new"},
-		{"Keys", "Import Key", "key_import"},
-		{"Keys", "Edit Key", "key_edit"},
-		{"Keys", "Delete Key", "key_delete"},
-		{"Keys", "Copy Fingerprint", "key_copy"},
-		{"Forward", "Start", "fwd_start"},
-		{"Forward", "Stop", "fwd_stop"},
-		{"Forward", "New Rule", "fwd_new"},
-		{"Forward", "Edit Rule", "fwd_edit"},
-		{"Forward", "Delete Rule", "fwd_delete"},
-		{"Snippet", "New Snippet", "snip_new"},
-		{"Snippet", "Edit Snippet", "snip_edit"},
-		{"Snippet", "Delete Snippet", "snip_delete"},
-		{"SSH", "Reconnect", "ssh_reconnect"},
-		{"SSH", "Snippet Picker", "ssh_snippet_picker"},
-	}
-
+	defs := bindingDefs()
 	entries := make([]bindingEntry, 0, len(defs))
 	for _, d := range defs {
 		var keys []string
@@ -230,15 +231,6 @@ func buildEntries(configJSON []byte) []bindingEntry {
 	return entries
 }
 
-func (m *Model) ConfigJSON() []byte {
-	result := make(map[string][]string)
-	for _, e := range m.entries {
-		result[e.Field] = e.Keys
-	}
-	data, _ := json.Marshal(result)
-	return data
-}
-
 func keyString(msg tea.KeyPressMsg) string {
 	k := msg.Key()
 	if s := msg.String(); s != "" && s != " " {
@@ -251,8 +243,8 @@ func keyString(msg tea.KeyPressMsg) string {
 	return msg.String()
 }
 
-func (m *Model) visibleRows() int {
-	rows := m.height - 4
+func visibleRowsFor(height int) int {
+	rows := height - 4
 	if rows < 5 {
 		rows = 5
 	}
