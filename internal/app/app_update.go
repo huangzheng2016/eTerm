@@ -512,6 +512,9 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.openAIOverlay()
 		case key.Matches(msg, a.keyMap.Repaint):
 			return a.repaintActiveTab()
+		case matchCtrlShiftAnyOf(msg, a.keyMap.ToggleChrome) || key.Matches(msg, a.keyMap.ToggleChrome):
+			a.chromeHidden = !a.chromeHidden
+			return a, reflowWindow(a)
 		case matchCtrlShiftAnyOf(msg, a.keyMap.PasteBlobURL) || key.Matches(msg, a.keyMap.PasteBlobURL):
 			if !a.activeTabIsSSH() {
 				break

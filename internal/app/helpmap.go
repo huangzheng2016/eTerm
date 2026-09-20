@@ -21,6 +21,7 @@ func statusBarShortcutParts(km KeyMap, cfg KeyBindingConfig, sshDisconnected boo
 		km.CloseTabSafe.Help().Key + closeLabel,
 		km.NextTab.Help().Key + " next",
 		km.PrevTab.Help().Key + " prev",
+		km.ToggleChrome.Help().Key + " hide bars",
 	}
 	if sshSession {
 		parts = append(parts,
@@ -124,7 +125,7 @@ func (h homeAppHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (h homeAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
+		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe, h.km.ToggleChrome},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
 		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet"), dynamicBinding(h.cfg.ToggleView, "group/tag"), dynamicBinding(h.cfg.TmuxMenu, "tmux"), dynamicBinding(h.cfg.SSHTmux, "ssh tmux")},
 		{h.km.SSHConnect, h.km.SFTPOpen, h.km.NewHost},
@@ -145,7 +146,7 @@ func (h sftpAppHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (h sftpAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
+		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe, h.km.ToggleChrome},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
 		{h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 		{dynamicBinding(h.cfg.SFTPUpload, "upload"), dynamicBinding(h.cfg.SFTPDownload, "download"), dynamicBinding(h.cfg.SFTPDelete, "delete")},
@@ -163,7 +164,7 @@ func (h editorAppHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (h editorAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
+		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe, h.km.ToggleChrome},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 	}
@@ -178,7 +179,7 @@ func (h keyTabAppHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (h keyTabAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
+		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe, h.km.ToggleChrome},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 		{dynamicBinding(h.cfg.KeyNew, "new key"), dynamicBinding(h.cfg.KeyImport, "import key"), dynamicBinding(h.cfg.KeyEdit, "edit key")},
@@ -195,7 +196,7 @@ func (h forwardTabAppHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (h forwardTabAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
+		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe, h.km.ToggleChrome},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 		{dynamicBinding(h.cfg.FwdNew, "new rule"), dynamicBinding(h.cfg.FwdEdit, "edit rule"), dynamicBinding(h.cfg.FwdDelete, "delete rule")},
@@ -212,7 +213,7 @@ func (h snippetTabAppHelpMap) ShortHelp() []key.Binding { return nil }
 
 func (h snippetTabAppHelpMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe},
+		{h.km.QuitApp, h.km.LocalTerminal, h.km.RenameTab, h.km.NewTab, h.km.CloseTabSafe, h.km.ToggleChrome},
 		{h.km.SnippetsTab, h.km.ForwardTab, h.km.AIOverlay, h.km.VoiceInput, h.km.NextTab, h.km.PrevTab},
 		{h.km.CloseTab, h.km.LockApp, dynamicBinding(h.cfg.SnippetPicker, "snippet")},
 		{dynamicBinding(h.cfg.SnipNew, "new snippet"), dynamicBinding(h.cfg.SnipEdit, "edit snippet"), dynamicBinding(h.cfg.SnipDelete, "delete snippet")},

@@ -26,7 +26,7 @@ func (a App) View() tea.View {
 			layoutW = 80
 		}
 		var tabChrome string
-		if len(a.tabs) > 0 {
+		if len(a.tabs) > 0 && !a.chromeHidden {
 			tabChrome = a.buildMainTabChrome(layoutW)
 		}
 
@@ -48,8 +48,8 @@ func (a App) View() tea.View {
 		allocH := 0
 		topH := 0
 		if a.activeTab >= 0 && a.activeTab < len(a.tabs) {
-			topH = lipgloss.Height(strings.TrimRight(tabChrome, "\n"))
-			allocH = a.height - topH - 1
+			topH = a.mainTabChromeTopLines()
+			allocH = a.height - topH - a.statusBarHeight()
 			if allocH < 1 {
 				allocH = 1
 			}
@@ -83,12 +83,19 @@ func (a App) View() tea.View {
 			}
 			statusBar = statusBar.SetText(a.withVoiceStatusHint(a.withAIStatusHint(hint)))
 		}
-		statusView := statusBar.View()
+		statusView := ""
+		if !a.chromeHidden {
+			statusView = statusBar.View()
+		}
 
 		var parts []string
-		parts = append(parts, strings.TrimRight(tabChrome, "\n"))
+		if !a.chromeHidden {
+			parts = append(parts, strings.TrimRight(tabChrome, "\n"))
+		}
 		parts = append(parts, contentView)
-		parts = append(parts, strings.TrimRight(statusView, "\n"))
+		if !a.chromeHidden {
+			parts = append(parts, strings.TrimRight(statusView, "\n"))
+		}
 		main := strings.Join(parts, "\n")
 		mainNoOverlay := main
 

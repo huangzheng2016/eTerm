@@ -95,6 +95,8 @@ type App struct {
 
 	helpOverlay bool
 
+	chromeHidden bool
+
 	pendingCLIConnect *CLIConnectInfo
 
 	forwardByHost map[uint]*hostForwardState

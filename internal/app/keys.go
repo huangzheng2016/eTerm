@@ -32,6 +32,7 @@ type KeyMap struct {
 	LocalTerminal  key.Binding
 	RenameTab      key.Binding
 	PasteBlobURL   key.Binding
+	ToggleChrome   key.Binding
 }
 
 func DefaultKeyMap() KeyMap {

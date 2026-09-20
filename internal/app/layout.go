@@ -52,11 +52,18 @@ func (a App) mainContentHeightForType(tabType TabType) int {
 		return max(1, a.height-3)
 	}
 	top := a.mainTabChromeTopLines()
-	h := a.height - top - 1
+	h := a.height - top - a.statusBarHeight()
 	if h < 1 {
 		return 1
 	}
 	return h
+}
+
+func (a App) statusBarHeight() int {
+	if a.chromeHidden {
+		return 0
+	}
+	return 1
 }
 
 func (a App) MainViewChromeTopLines() int {

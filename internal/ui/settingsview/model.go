@@ -170,6 +170,7 @@ func buildEntries(configJSON []byte) []bindingEntry {
 		{"Global", "Local Terminal", "local_terminal"},
 		{"Global", "Rename Tab", "rename_tab"},
 		{"Global", "Paste Blob URL", "paste_blob_url"},
+		{"Global", "Toggle Chrome", "toggle_chrome"},
 		{"Home", "SSH Connect", "ssh_connect"},
 		{"Home", "SFTP Open", "sftp_open"},
 		{"Home", "New Host", "new_host"},

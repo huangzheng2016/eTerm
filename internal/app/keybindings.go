@@ -38,6 +38,7 @@ type KeyBindingConfig struct {
 	LocalTerminal  []string `json:"local_terminal"`
 	RenameTab      []string `json:"rename_tab"`
 	PasteBlobURL   []string `json:"paste_blob_url"`
+	ToggleChrome   []string `json:"toggle_chrome"`
 
 	SSHConnect     []string `json:"ssh_connect"`
 	SFTPOpen       []string `json:"sftp_open"`
@@ -115,6 +116,7 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		LocalTerminal:  []string{"ctrl+shift+t"},
 		RenameTab:      []string{"ctrl+shift+r"},
 		PasteBlobURL:   []string{"ctrl+shift+i"},
+		ToggleChrome:   []string{"ctrl+shift+z"},
 
 		SSHConnect:     []string{"enter"},
 		SFTPOpen:       []string{"ctrl+f", "s"},
@@ -173,6 +175,7 @@ func defaultKeyBindingConfig(goos string) KeyBindingConfig {
 		cfg.LocalTerminal = []string{"alt+shift+t"}
 		cfg.RenameTab = []string{"alt+shift+r"}
 		cfg.PasteBlobURL = []string{"alt+shift+i"}
+		cfg.ToggleChrome = []string{"alt+shift+z"}
 		cfg.SnippetPicker = []string{"alt+shift+s"}
 		cfg.SessionHistory = []string{"alt+shift+h"}
 		cfg.BatchTag = []string{"alt+shift+g"}
@@ -375,6 +378,10 @@ func BuildKeyMap(cfg KeyBindingConfig) KeyMap {
 		PasteBlobURL: key.NewBinding(
 			key.WithKeys(cfg.PasteBlobURL...),
 			key.WithHelp(helpLabel(cfg.PasteBlobURL), "paste url"),
+		),
+		ToggleChrome: key.NewBinding(
+			key.WithKeys(cfg.ToggleChrome...),
+			key.WithHelp(helpLabel(cfg.ToggleChrome), "hide bars"),
 		),
 	}
 }

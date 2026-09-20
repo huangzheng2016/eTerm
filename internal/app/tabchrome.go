@@ -116,7 +116,7 @@ func (a App) activeReconnectLabel() string {
 }
 
 func (a App) mainTabChromeTopLines() int {
-	if len(a.tabs) == 0 {
+	if len(a.tabs) == 0 || a.chromeHidden {
 		return 0
 	}
 	tc := a.buildMainTabChrome(a.layoutWidth())

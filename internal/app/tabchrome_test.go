@@ -165,3 +165,56 @@ func TestAltShiftSDoesNotCycleSSHTabs(t *testing.T) {
 type errConnectionResetForTest struct{}
 
 func (errConnectionResetForTest) Error() string { return "read: connection reset by peer" }
+
+func TestChromeHiddenExpandsContentHeight(t *testing.T) {
+	a := App{
+		tabs:      []Tab{{Type: HomeTab, Title: "one"}},
+		activeTab: 0,
+		width:     80,
+		height:    20,
+		toast:     components.NewToast(),
+	}
+	visible := a.mainContentHeightForType(HomeTab)
+	if visible != 17 {
+		t.Fatalf("visible chrome content height = %d, want 17", visible)
+	}
+
+	a.chromeHidden = true
+	if got := a.mainContentHeightForType(HomeTab); got != 20 {
+		t.Fatalf("hidden chrome content height = %d, want 20", got)
+	}
+	if got := a.MainViewChromeTopLines(); got != 0 {
+		t.Fatalf("hidden chrome top lines = %d, want 0", got)
+	}
+}
+
+func TestToggleChromeKeyHidesAndRestoresBars(t *testing.T) {
+	cfg := DefaultKeyBindingConfig()
+	a := App{
+		viewState: MainView,
+		masterKey: security.NewMasterKeyManager(nil, nil, time.Minute),
+		tabs:      []Tab{{Type: HomeTab, Title: "one"}},
+		activeTab: 0,
+		width:     80,
+		height:    20,
+		toast:     components.NewToast(),
+		keyMap:    BuildKeyMap(cfg),
+		kbConfig:  cfg,
+	}
+
+	key := tea.KeyPressMsg(tea.Key{Code: 'z', Mod: tea.ModCtrl | tea.ModShift})
+	next, cmd := a.Update(key)
+	a = next.(App)
+	if !a.chromeHidden {
+		t.Fatal("ctrl+shift+z did not hide chrome")
+	}
+	if cmd == nil {
+		t.Fatal("toggle should return a reflow command")
+	}
+
+	next, _ = a.Update(key)
+	a = next.(App)
+	if a.chromeHidden {
+		t.Fatal("ctrl+shift+z did not restore chrome")
+	}
+}

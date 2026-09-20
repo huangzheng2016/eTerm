@@ -33,6 +33,13 @@ func TestDefaultPasteBlobURLKey(t *testing.T) {
 	}
 }
 
+func TestDefaultToggleChromeKey(t *testing.T) {
+	cfg := defaultKeyBindingConfig("linux")
+	if len(cfg.ToggleChrome) != 1 || cfg.ToggleChrome[0] != "ctrl+shift+z" {
+		t.Fatalf("ToggleChrome = %#v", cfg.ToggleChrome)
+	}
+}
+
 func TestWindowsDefaultsAvoidCtrlShiftLetters(t *testing.T) {
 	cfg := defaultKeyBindingConfig("windows")
 	bindings := [][]string{
@@ -44,6 +51,7 @@ func TestWindowsDefaultsAvoidCtrlShiftLetters(t *testing.T) {
 		cfg.LocalTerminal,
 		cfg.RenameTab,
 		cfg.PasteBlobURL,
+		cfg.ToggleChrome,
 		cfg.SnippetPicker,
 		cfg.SessionHistory,
 		cfg.BatchTag,
@@ -105,7 +113,7 @@ func TestDefaultAIAndPaletteKeys(t *testing.T) {
 			"command_palette": cfg.CommandPalette, "ai_overlay": cfg.AIOverlay,
 			"voice_input":    cfg.VoiceInput,
 			"local_terminal": cfg.LocalTerminal, "rename_tab": cfg.RenameTab,
-			"paste_blob_url": cfg.PasteBlobURL,
+			"paste_blob_url": cfg.PasteBlobURL, "toggle_chrome": cfg.ToggleChrome,
 		}
 		seen := map[string]string{}
 		for name, keys := range globals {
