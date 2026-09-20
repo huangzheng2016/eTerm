@@ -140,16 +140,6 @@ type Model struct {
 	cmdCount     int
 	lastExitCode int
 	hasExitCode  bool
-
-	wdMu         sync.Mutex
-	wdInputAt    time.Time
-	wdOutputAt   time.Time
-	wdBaseAt     time.Time
-	wdHits       int
-	wdStallAfter time.Duration
-	wdMaxHits    int
-	wdTickEvery  time.Duration
-	wdStarted    bool
 }
 
 func (m *Model) SetViewKeys(vk viewkeys.SSHKeys) { m.vk = vk }
@@ -202,19 +192,16 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 		return true
 	})
 	m := &Model{
-		sess:         is,
-		emu:          emu,
-		streamID:     streamIDGen.Add(1),
-		alias:        alias,
-		hostID:       hostID,
-		ch:           make(chan []byte, 128),
-		inputCh:      make(chan []byte, inputQueueSize),
-		resizeCh:     make(chan resizeRequest, resizeQueueSize),
-		doneClosed:   make(chan struct{}),
-		vk:           vk,
-		wdStallAfter: watchdogStallAfter,
-		wdMaxHits:    watchdogMaxHits,
-		wdTickEvery:  watchdogTickInterval,
+		sess:       is,
+		emu:        emu,
+		streamID:   streamIDGen.Add(1),
+		alias:      alias,
+		hostID:     hostID,
+		ch:         make(chan []byte, 128),
+		inputCh:    make(chan []byte, inputQueueSize),
+		resizeCh:   make(chan resizeRequest, resizeQueueSize),
+		doneClosed: make(chan struct{}),
+		vk:         vk,
 	}
 	m.startInputWriter()
 	m.startResizeWriter()
@@ -278,7 +265,7 @@ func New(is *internalssh.InteractiveSession, alias string, hostID uint, vk viewk
 			}
 			if n > 0 {
 				if sess := m.currentSession(); sess != nil && sess.Stdin != nil {
-					m.queueInputPassive(buf[:n])
+					m.queueInput(buf[:n])
 				}
 			}
 		}
@@ -315,14 +302,6 @@ func (m *Model) currentSession() *internalssh.InteractiveSession {
 }
 
 func (m *Model) queueInput(p []byte) bool {
-	return m.enqueueInput(p, true)
-}
-
-func (m *Model) queueInputPassive(p []byte) bool {
-	return m.enqueueInput(p, false)
-}
-
-func (m *Model) enqueueInput(p []byte, track bool) bool {
 	if len(p) == 0 {
 		return false
 	}
@@ -334,9 +313,6 @@ func (m *Model) enqueueInput(p []byte, track bool) bool {
 	}
 	select {
 	case m.inputCh <- b:
-		if track {
-			m.noteWatchdogInput(time.Now())
-		}
 		if m.recorder != nil {
 			m.recorder.Input(b)
 		}
@@ -494,7 +470,6 @@ drain:
 	m.reconnecting = false
 	m.reconnectTry = 0
 	m.reconnectMax = 0
-	m.resetWatchdog()
 	if m.width > 0 {
 		m.SetSize(m.width, m.height)
 	}
@@ -788,7 +763,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.StreamID != m.streamID {
 			return m, nil
 		}
-		m.noteWatchdogOutput(time.Now())
 		before := m.emu.ScrollbackLen()
 		m.writeEmulator(msg.Data)
 		clipCmds := m.takeOSC52ClipboardCommands()
@@ -867,7 +841,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if b := m.encodeKey(msg); len(b) > 0 && m.sess != nil && m.sess.Stdin != nil {
 			m.queueInput(b)
 		}
-		return m, m.ensureWatchdogTick()
+		return m, nil
 
 	case tea.PasteMsg:
 		if m.disconnected {
@@ -880,7 +854,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.queueInput(payload)
 		}
-		return m, m.ensureWatchdogTick()
+		return m, nil
 
 	case tea.MouseClickMsg:
 		if m.emu.IsAltScreen() && m.sendRemoteMouse(msg) {
@@ -1003,13 +977,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clearScrollIndicator()
 		}
 		return m, nil
-
-	case watchdogTickMsg:
-		if msg.StreamID != m.streamID {
-			return m, nil
-		}
-		m.checkWatchdog(time.Now())
-		return m, m.watchdogTick()
 
 	case selectionAutoScrollMsg:
 		if msg.StreamID != m.streamID {
