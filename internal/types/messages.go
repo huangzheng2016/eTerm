@@ -154,6 +154,16 @@ type RemoteTmuxRenameMsg struct {
 	Name      string
 }
 
+type RemotePeerRenameRequestMsg struct {
+	Peer        RemotePeer
+	CurrentName string
+}
+
+type RemotePeerRenameMsg struct {
+	Peer RemotePeer
+	Name string
+}
+
 type RemoteReconnect struct {
 	Peer       RemotePeer
 	Target     string

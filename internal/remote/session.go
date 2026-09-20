@@ -109,6 +109,11 @@ func RenameTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, in
 	return err
 }
 
+func RenamePeer(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, name string) error {
+	_, err := openControl(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: relay.TargetPeerRename, Name: name})
+	return err
+}
+
 func openControl(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, op relay.OpenRequest) ([]byte, error) {
 	conn, _, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, op, randomStreamID(), nil)
 	if err != nil {

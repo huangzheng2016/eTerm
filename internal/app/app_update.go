@@ -810,6 +810,21 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.renameRemoteTmuxTabs(msg.Peer.ID, msg.OldSessionID, msg.Name)
 		return a, a.loadRemoteTmuxSessions(msg.Peer)
 
+	case types.RemotePeerRenameRequestMsg:
+		a.renamePrompt = newRemotePeerRenamePrompt(msg)
+		a.renamePrompt.syncWidth(a.width)
+		return a, textinput.Blink
+
+	case types.RemotePeerRenameMsg:
+		return a.renameRemotePeer(msg)
+
+	case remotePeerRenameAppliedMsg:
+		if a.remoteMenu != nil && a.remoteMenu.Peer.ID == msg.Peer.ID {
+			a.remoteMenu.Peer.Name = msg.Name
+		}
+		a.renameRemotePeerTabs(msg.Peer.ID, msg.Peer.Name, msg.Name)
+		return a, func() tea.Msg { return types.RemoteDaemonRefreshMsg{} }
+
 	case tmuxRenameAppliedMsg:
 		a.renameTmuxTabs(msg.OldName, msg.NewName)
 		return a, a.loadTmuxSessions()
@@ -1048,6 +1063,13 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Port:     info.Port,
 					Username: info.Username,
 				}
+			})
+		}
+		if a.pendingTmuxAttach != "" {
+			name := a.pendingTmuxAttach
+			a.pendingTmuxAttach = ""
+			unlockCmds = append(unlockCmds, func() tea.Msg {
+				return types.TmuxOpenMsg{Name: name}
 			})
 		}
 		if a.forceUpdateCheck {

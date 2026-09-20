@@ -41,6 +41,8 @@ func main() {
 	versionJSONFlag := flag.Bool("version-json", false, "print version and commit as JSON and exit")
 	noUpdateCheckFlag := flag.Bool("no-update-check", false, "disable GitHub release check on unlock")
 	pprofFlag := flag.String("pprof", "", "enable pprof HTTP server on address (env: ETERM_PPROF_ADDR)")
+	tmuxFlag := flag.String("tmux", "", "attach to local tmux session on start")
+	hideTabsFlag := flag.Bool("hide-tabs", false, "start with tab bar and status bar hidden (toggle: ctrl+shift+z)")
 	forceUpdateCheck, cliArgs := splitUpgradeCommand(os.Args[1:])
 	flag.CommandLine.Parse(cliArgs)
 
@@ -143,6 +145,13 @@ func main() {
 			port = *portFlag
 		}
 		a = a.SetPendingCLIConnect(hostname, username, port)
+	}
+
+	if *tmuxFlag != "" {
+		a = a.SetPendingTmuxAttach(*tmuxFlag)
+	}
+	if *hideTabsFlag {
+		a = a.SetChromeHidden(true)
 	}
 
 	p := tea.NewProgram(a)

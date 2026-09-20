@@ -19,6 +19,8 @@ eterm [flags] [user@]host[:port]
 | `-v`                | 打印版本并退出                        |
 | `--version-json`    | 以 JSON 打印 version / commit 并退出 |
 | `--no-update-check` | 禁用解锁后的 GitHub 版本检查             |
+| `--tmux name`       | 启动后 attach 到本机指定 tmux 会话          |
+| `--hide-tabs`       | 启动时隐藏标签栏和状态栏（ctrl+shift+z 可切回） |
 | `-pprof addr`       | 开启主进程 pprof HTTP 服务（也可用环境变量 `ETERM_PPROF_ADDR`） |
 
 子命令：
@@ -31,7 +33,9 @@ eterm [flags] [user@]host[:port]
 
 ### eterm daemon
 
-子命令：`start`（默认，后台启动）/ `stop` / `status` / `run`（前台运行，`start` 实际以 `daemon run` 拉起子进程）。
+子命令：`start`（默认，后台启动）/ `stop` / `status` / `run`（前台运行，`start` 实际以 `daemon run` 拉起子进程）/ `rename <名称>`（在线改设备显示名，运行中的 daemon 几秒内生效，重连后保持）。
+
+设备显示名优先级：`-name` flag > `rename` 保存的名字 > 主机名。`-name` 非空时会同时落盘覆盖已保存的名字。
 
 | 参数              | 说明                             |
 | ----------------- | ------------------------------ |

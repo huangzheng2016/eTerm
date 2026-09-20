@@ -14,14 +14,16 @@ import (
 
 	"github.com/huangzheng2016/eTerm/internal/config"
 	"github.com/huangzheng2016/eTerm/internal/daemon"
+	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/debugpprof"
 )
 
 type daemonOptions struct {
-	DBPath    string
-	Password  string
-	Name      string
-	PProfAddr string
+	DBPath      string
+	Password    string
+	Name        string
+	PProfAddr   string
+	Positionals []string
 }
 
 type daemonController struct {
@@ -152,6 +154,8 @@ func runDaemon(args []string) {
 		_, detail := daemonServiceStatus()
 		fmt.Fprintf(os.Stdout, "service: %s\n", detail)
 		os.Exit(code)
+	case "rename":
+		os.Exit(renameDaemonPeer(os.Stdout, opts))
 	case "enable":
 		if err := daemonEnableGuard(daemonLockPath()); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -178,7 +182,7 @@ func parseDaemonArgs(args []string) (string, daemonOptions, error) {
 	cmd := "start"
 	if len(args) > 0 {
 		switch args[0] {
-		case "start", "stop", "status", "run", "enable", "disable":
+		case "start", "stop", "status", "run", "enable", "disable", "rename":
 			cmd = args[0]
 			args = args[1:]
 		case "-h", "--help":
@@ -198,7 +202,30 @@ func parseDaemonArgs(args []string) (string, daemonOptions, error) {
 	if err := fs.Parse(args); err != nil {
 		return "", daemonOptions{}, err
 	}
-	return cmd, daemonOptions{DBPath: *dbPath, Password: *password, Name: *name, PProfAddr: *pprofAddr}, nil
+	return cmd, daemonOptions{DBPath: *dbPath, Password: *password, Name: *name, PProfAddr: *pprofAddr, Positionals: fs.Args()}, nil
+}
+
+func renameDaemonPeer(out io.Writer, opts daemonOptions) int {
+	if len(opts.Positionals) != 1 || strings.TrimSpace(opts.Positionals[0]) == "" {
+		fmt.Fprintln(out, "usage: eterm daemon rename <name>")
+		return 2
+	}
+	name := strings.TrimSpace(opts.Positionals[0])
+	dbPath := opts.DBPath
+	if dbPath == "" {
+		dbPath = config.DBPath()
+	}
+	database, err := db.InitDB(dbPath)
+	if err != nil {
+		fmt.Fprintf(out, "rename failed: %v\n", err)
+		return 1
+	}
+	if err := db.SetSetting(database, "daemon_peer_name", name); err != nil {
+		fmt.Fprintf(out, "rename failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "peer name set to %q; a running daemon picks it up within a few seconds\n", name)
+	return 0
 }
 
 func newDaemonController() (daemonController, error) {

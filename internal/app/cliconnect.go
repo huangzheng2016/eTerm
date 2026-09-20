@@ -26,6 +26,11 @@ func (a App) SetPendingCLIConnect(hostname, username string, port int) App {
 	return a
 }
 
+func (a App) SetPendingTmuxAttach(name string) App {
+	a.pendingTmuxAttach = name
+	return a
+}
+
 func (a App) handleCLIConnect(msg types.CLIConnectMsg) (App, tea.Cmd) {
 	database := a.db
 	mk := a.masterKey

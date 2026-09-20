@@ -31,6 +31,7 @@ var (
 	remoteListTmuxSessions            = remote.ListTmuxSessions
 	remoteKillTmuxSession             = remote.KillTmuxSession
 	remoteRenameTmuxSession           = remote.RenameTmuxSession
+	remoteRenamePeer                  = remote.RenamePeer
 	syncshareCreate                   = syncshare.CreateShare
 )
 
@@ -356,6 +357,54 @@ func (a *App) renameRemoteTmuxTabs(peerID, sessionID, name string) {
 		sm.SetRemoteReconnect(spec)
 		a.tabs[i].Title = remoteTmuxTabTitle(spec.Peer.Name, name)
 		a.tabs[i].userRenamed = true
+	}
+	a.syncTabBar()
+	a.persistTmuxRestoreSnapshot()
+}
+
+func (a App) renameRemotePeer(msg types.RemotePeerRenameMsg) (App, tea.Cmd) {
+	name := strings.TrimSpace(msg.Name)
+	if name == "" {
+		return a, nil
+	}
+	cfg := esync.LoadConfig(a.db, a.masterKey)
+	peer := msg.Peer
+	return a, func() tea.Msg {
+		baseURL, tunnel, err := a.syncHTTPBase(cfg)
+		if err != nil {
+			return types.ErrorMsg{Err: err}
+		}
+		if tunnel != nil {
+			defer tunnel.Close()
+		}
+		if err := remoteRenamePeer(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, name); err != nil {
+			return types.ErrorMsg{Err: err}
+		}
+		return remotePeerRenameAppliedMsg{Peer: peer, Name: name}
+	}
+}
+
+func (a *App) renameRemotePeerTabs(peerID, oldName, newName string) {
+	for i := range a.tabs {
+		sm, ok := a.tabs[i].Model.(*sshview.Model)
+		if !ok {
+			continue
+		}
+		spec := sm.RemoteReconnect()
+		if spec == nil || spec.Peer.ID != peerID {
+			continue
+		}
+		spec.Peer.Name = newName
+		sm.SetRemoteReconnect(spec)
+		title := a.tabs[i].Title
+		switch {
+		case strings.HasPrefix(title, "[T]"+oldName+"-"):
+			a.tabs[i].Title = "[T]" + newName + "-" + strings.TrimPrefix(title, "[T]"+oldName+"-")
+		case strings.HasPrefix(title, "[R]"+oldName+"-"):
+			a.tabs[i].Title = "[R]" + newName + "-" + strings.TrimPrefix(title, "[R]"+oldName+"-")
+		case title == "[R]"+oldName:
+			a.tabs[i].Title = "[R]" + newName
+		}
 	}
 	a.syncTabBar()
 	a.persistTmuxRestoreSnapshot()

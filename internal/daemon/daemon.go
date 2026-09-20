@@ -47,12 +47,14 @@ type runtimeConfig struct {
 }
 
 const (
-	wsKeepaliveInterval = 25 * time.Second
-	wsKeepaliveTimeout  = 5 * time.Second
-	wsWriteTimeout      = 10 * time.Second
-	openRequestTimeout  = 30 * time.Second
-	sessionStartupGrace = 150 * time.Millisecond
-	maxOutputFrameBytes = 48 * 1024
+	wsKeepaliveInterval  = 25 * time.Second
+	wsKeepaliveTimeout   = 5 * time.Second
+	wsWriteTimeout       = 10 * time.Second
+	openRequestTimeout   = 30 * time.Second
+	sessionStartupGrace  = 150 * time.Millisecond
+	maxOutputFrameBytes  = 48 * 1024
+	peerNamePollInterval = 5 * time.Second
+	peerNameSettingKey   = "daemon_peer_name"
 )
 
 var errProtocolVersion = errors.New("relay protocol version mismatch")
@@ -121,6 +123,11 @@ func loadRuntime(database *gorm.DB, cfg Config) (*runtimeConfig, error) {
 		return nil, errors.New("sync passphrase is required")
 	}
 	name := strings.TrimSpace(cfg.Name)
+	if name != "" {
+		_ = db.SetSetting(database, peerNameSettingKey, name)
+	} else {
+		name, _ = db.GetSetting(database, peerNameSettingKey)
+	}
 	if name == "" {
 		name, _ = os.Hostname()
 	}
@@ -244,6 +251,9 @@ func runOnce(ctx context.Context, rt *runtimeConfig, mgr *sessionManager) error 
 	defer stopKeepalive()
 	wskeepalive.Start(keepaliveCtx, c, wsKeepaliveInterval, wsKeepaliveTimeout)
 
+	if saved, _ := db.GetSetting(rt.db, peerNameSettingKey); strings.TrimSpace(saved) != "" {
+		rt.name = strings.TrimSpace(saved)
+	}
 	hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: rt.name, Version: relay.ProtocolVersion})
 	if err := c.Write(ctx, websocket.MessageBinary, relay.Encode(relay.Frame{Type: relay.FrameHello, Payload: hello})); err != nil {
 		return err
@@ -256,6 +266,7 @@ func runOnce(ctx context.Context, rt *runtimeConfig, mgr *sessionManager) error 
 	mgr.setSender(sender)
 	defer mgr.clearSender(sender)
 	go sender.run(connCtx, c)
+	go pollPeerName(connCtx, rt, sender, rt.name)
 
 	for {
 		typ, data, err := c.Read(ctx)
@@ -281,6 +292,29 @@ func shortID(s string) string {
 		return s
 	}
 	return s[:12]
+}
+
+func pollPeerName(ctx context.Context, rt *runtimeConfig, sender *frameSender, current string) {
+	ticker := time.NewTicker(peerNamePollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		name, _ := db.GetSetting(rt.db, peerNameSettingKey)
+		name = strings.TrimSpace(name)
+		if name == "" || name == current {
+			continue
+		}
+		current = name
+		hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: name, Version: relay.ProtocolVersion})
+		if err := sender.send(relay.Frame{Type: relay.FrameHello, Payload: hello}); err != nil {
+			return
+		}
+		log.Printf("eterm daemon peer renamed to %q", name)
+	}
 }
 
 func handleFrame(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *frameSender, ctx context.Context) {
@@ -463,6 +497,22 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
 			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
+	case relay.TargetPeerRename:
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("empty peer name")})
+			return
+		}
+		if err := db.SetSetting(rt.db, peerNameSettingKey, name); err != nil {
+			openErr(err)
+			return
+		}
+		if err := sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}); err != nil {
+			return
+		}
+		hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: name, Version: relay.ProtocolVersion})
+		_ = sender.send(relay.Frame{Type: relay.FrameHello, Payload: hello})
+		_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 	default:
 		is, err := openTarget(rt, req, rows, cols)
 		if err != nil {

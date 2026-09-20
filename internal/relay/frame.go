@@ -29,6 +29,7 @@ const (
 	TargetTmuxAttach = "tmux-attach"
 	TargetTmuxKill   = "tmux-kill"
 	TargetTmuxRename = "tmux-rename"
+	TargetPeerRename = "peer-rename"
 )
 
 const CloseDaemonDisconnected = "daemon disconnected"

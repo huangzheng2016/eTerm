@@ -100,6 +100,7 @@ type App struct {
 	chromeHidden bool
 
 	pendingCLIConnect *CLIConnectInfo
+	pendingTmuxAttach string
 
 	forwardByHost map[uint]*hostForwardState
 
@@ -228,6 +229,11 @@ func (a App) SetNoUpdateCheck(v bool) App {
 
 func (a App) SetForceUpdateCheck(v bool) App {
 	a.forceUpdateCheck = v
+	return a
+}
+
+func (a App) SetChromeHidden(v bool) App {
+	a.chromeHidden = v
 	return a
 }
 

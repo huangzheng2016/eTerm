@@ -54,6 +54,11 @@ type remoteTmuxRenameAppliedMsg struct {
 	Name         string
 }
 
+type remotePeerRenameAppliedMsg struct {
+	Peer types.RemotePeer
+	Name string
+}
+
 type tmuxRenameAppliedMsg struct {
 	OldName string
 	NewName string

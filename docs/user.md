@@ -154,9 +154,12 @@ eterm daemon start    # 后台启动
 eterm daemon status
 eterm daemon stop
 eterm daemon run      # 前台运行（start 实际以 daemon run 拉起子进程）
+eterm daemon rename 工作站   # 在线改显示名，运行中的 daemon 几秒内生效，重连后保持
 ```
 
 daemon 子命令的可选参数：`-c path`（数据库路径）、`-password <主密码>`（也可用环境变量 `ETERM_MASTER_PASSWORD`）、`-name <显示名>`（默认主机名）、`-pprof <地址>`。
+
+也可以在 TUI 里改显示名：主机列表选中在线设备，Enter 打开远程菜单后按 `n` 输入新名字。与 `daemon rename` 等效，立即生效并持久化，已打开的标签页标题会同步更新。
 
 daemon 与 syncd 的 relay 协议版本不匹配时，daemon 会报错并以退出码 1 退出，不再自动重连。升级 syncd 或 eterm 后，需要用与 syncd 匹配的新版 eterm 重新 `eterm daemon start`。
 

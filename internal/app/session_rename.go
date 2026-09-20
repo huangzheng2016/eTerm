@@ -19,6 +19,7 @@ const (
 	renameRemoteTmux sessionRenameKind = iota
 	renameTmuxSession
 	renameTab
+	renameRemotePeer
 )
 
 type sessionRenameModel struct {
@@ -38,6 +39,12 @@ type tabRenameMsg struct {
 func newRemoteTmuxRenamePrompt(msg types.RemoteTmuxRenameRequestMsg) *sessionRenameModel {
 	ti := newSessionRenameInput(msg.CurrentName)
 	return &sessionRenameModel{kind: renameRemoteTmux, input: ti, peer: msg.Peer, session: msg.SessionID}
+}
+
+func newRemotePeerRenamePrompt(msg types.RemotePeerRenameRequestMsg) *sessionRenameModel {
+	ti := newSessionRenameInput(msg.CurrentName)
+	ti.Placeholder = "peer name"
+	return &sessionRenameModel{kind: renameRemotePeer, input: ti, peer: msg.Peer}
 }
 
 func newTmuxRenamePrompt(msg types.TmuxRenameRequestMsg) *sessionRenameModel {
@@ -86,6 +93,9 @@ func (m *sessionRenameModel) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			peer := m.peer
 			session := m.session
 			return true, func() tea.Msg { return types.RemoteTmuxRenameMsg{Peer: peer, SessionID: session, Name: name} }
+		case renameRemotePeer:
+			peer := m.peer
+			return true, func() tea.Msg { return types.RemotePeerRenameMsg{Peer: peer, Name: name} }
 		case renameTmuxSession:
 			oldName := m.oldName
 			return true, func() tea.Msg { return types.TmuxRenameMsg{OldName: oldName, NewName: name} }
@@ -107,6 +117,8 @@ func (m *sessionRenameModel) View() string {
 	title := "Rename session"
 	if m.kind == renameRemoteTmux {
 		title = "Rename tmux session"
+	} else if m.kind == renameRemotePeer {
+		title = "Rename peer"
 	} else if m.kind == renameTab {
 		title = "Rename tab"
 	}
