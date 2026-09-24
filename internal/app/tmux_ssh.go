@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/google/uuid"
 	"github.com/huangzheng2016/eTerm/internal/db"
 	"github.com/huangzheng2016/eTerm/internal/security"
 	internalssh "github.com/huangzheng2016/eTerm/internal/ssh"
@@ -29,7 +30,11 @@ var (
 	sshTmuxFingerprintGate = hostFingerprintDialBlock
 )
 
-const defaultSSHTmuxSessionName = "eterm"
+const defaultSSHTmuxSessionPrefix = "eterm"
+
+func newSSHTmuxSessionName() string {
+	return defaultSSHTmuxSessionPrefix + "-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+}
 
 type sshTmuxMenuReadyMsg struct {
 	hostID     uint
@@ -245,7 +250,7 @@ func openSSHTmuxSession(database *gorm.DB, mk *security.MasterKeyManager, msg ty
 	sessionName := msg.Name
 	var tmuxCmd string
 	if msg.New {
-		sessionName = defaultSSHTmuxSessionName
+		sessionName = newSSHTmuxSessionName()
 		tmuxCmd = tmux.RemoteNewCommand(configFile, sessionName)
 	} else {
 		tmuxCmd = tmux.RemoteAttachCommand(configFile, sessionName)

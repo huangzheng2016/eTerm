@@ -145,7 +145,7 @@ func TestOpenSSHTmuxSessionAttach(t *testing.T) {
 	if opened.tmuxSession != "work" {
 		t.Fatalf("tmuxSession = %q", opened.tmuxSession)
 	}
-	if len(opened.initialCommands) != 1 || opened.initialCommands[0] != "exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
+	if len(opened.initialCommands) != 1 || opened.initialCommands[0] != "tmux -f '/cfg/tmux.conf' source-file '/cfg/tmux.conf' && exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
 		t.Fatalf("initialCommands = %#v", opened.initialCommands)
 	}
 	if opened.alias != "[T]prod-work" {
@@ -166,10 +166,10 @@ func TestOpenSSHTmuxSessionNew(t *testing.T) {
 	if !ok {
 		t.Fatalf("got %T want openSSHUITabMsg", msg)
 	}
-	if opened.tmuxSession != defaultSSHTmuxSessionName {
+	if !strings.HasPrefix(opened.tmuxSession, defaultSSHTmuxSessionPrefix+"-") {
 		t.Fatalf("tmuxSession = %q", opened.tmuxSession)
 	}
-	if len(opened.initialCommands) != 1 || !strings.Contains(opened.initialCommands[0], "exec tmux") || !strings.Contains(opened.initialCommands[0], "new-session -A -s '"+defaultSSHTmuxSessionName+"'") {
+	if len(opened.initialCommands) != 1 || !strings.Contains(opened.initialCommands[0], "exec tmux") || !strings.Contains(opened.initialCommands[0], "new-session -A -s '"+opened.tmuxSession+"'") {
 		t.Fatalf("initialCommands = %#v", opened.initialCommands)
 	}
 }
@@ -201,7 +201,7 @@ func TestSSHReconnectInitialCommandsTmux(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(cmds) != 1 || cmds[0] != "exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
+	if len(cmds) != 1 || cmds[0] != "tmux -f '/cfg/tmux.conf' source-file '/cfg/tmux.conf' && exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
 		t.Fatalf("cmds = %#v", cmds)
 	}
 }

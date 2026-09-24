@@ -133,7 +133,7 @@ jobs:
         run: |
           current="${GITHUB_REF_NAME}"
           echo "Current tag (kept): $current"
-          tags=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' | grep -E '^v[0-9]' || true)
+          tags=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' | grep -E '^v[0-9]' | sort -Vu || true)
           echo "Existing release tags:"
           echo "$tags"
           highest=$(printf '%s\n%s\n' "$tags" "$current" | sort -V | tail -n1)
@@ -147,6 +147,6 @@ jobs:
               echo "Skip current tag: $tag"
             else
               echo "Delete old release and tag: $tag"
-              gh release delete "$tag" --cleanup-tag --yes
+              gh release delete "$tag" --cleanup-tag --yes || true
             fi
           done

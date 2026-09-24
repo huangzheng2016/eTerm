@@ -96,11 +96,25 @@ func remoteTempConfigCommand() string {
 }
 
 func RemoteAttachCommand(configFile, name string) string {
-	return "exec " + remoteTmuxCmd(configFile, "attach-session -t "+quoteShell(name))
+	return remoteLoadConfigCommand(configFile) + "exec " + remoteTmuxCmd(configFile, "attach-session -t "+quoteShell(name))
 }
 
 func RemoteNewCommand(configFile, name string) string {
-	return "exec " + remoteTmuxCmd(configFile, "new-session -A -s "+quoteShell(name))
+	return remoteLoadConfigCommand(configFile) + "exec " + remoteTmuxCmd(configFile, "new-session -A -s "+quoteShell(name))
+}
+
+func remoteLoadConfigCommand(configFile string) string {
+	if configFile == "" {
+		return ""
+	}
+	return remoteTmuxCmd(configFile, "source-file "+remoteConfigPath(configFile)) + " && "
+}
+
+func remoteConfigPath(configFile string) string {
+	if strings.HasPrefix(configFile, "~") || strings.HasPrefix(configFile, "$") {
+		return configFile
+	}
+	return quoteShell(configFile)
 }
 
 func remoteTmuxCmd(configFile, args string) string {
