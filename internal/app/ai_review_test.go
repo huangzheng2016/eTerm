@@ -15,6 +15,26 @@ type fakeAgent struct {
 	cancelledTasks []string
 }
 
+type trackingAgent struct {
+	fakeAgent
+	firstCancelled chan struct{}
+	runs           int
+}
+
+func (a *trackingAgent) Run(ctx context.Context, input string) <-chan ai.Event {
+	a.runs++
+	ch := make(chan ai.Event)
+	first := a.runs == 1
+	go func() {
+		<-ctx.Done()
+		if first {
+			close(a.firstCancelled)
+		}
+		close(ch)
+	}()
+	return ch
+}
+
 func (f *fakeAgent) Run(ctx context.Context, input string) <-chan ai.Event {
 	ch := make(chan ai.Event)
 	go func() {
@@ -61,6 +81,31 @@ func TestBridgeCancelRun(t *testing.T) {
 		t.Fatal("event pump did not stop after CancelRun")
 	}
 	bridge.CancelRun()
+}
+
+func TestBridgeRunCancelsPreviousRun(t *testing.T) {
+	bridge := aiTestActiveBridge(t)
+	agent := &trackingAgent{firstCancelled: make(chan struct{})}
+	bridge.agent = agent
+	bridge.agentKey = "p\x00m\x00false"
+	first, err := bridge.Run(context.Background(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := bridge.Run(context.Background(), "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-agent.firstCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("starting a new run did not cancel the previous run")
+	}
+	bridge.CancelRun()
+	for range first {
+	}
+	for range second {
+	}
 }
 
 func TestBridgeEnqueueRoutesToAgent(t *testing.T) {

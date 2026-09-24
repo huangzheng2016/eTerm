@@ -34,6 +34,18 @@ func openTarget0(target, sessionID string, streamID uint32) relay.Frame {
 	return relay.Frame{Type: relay.FrameOpen, StreamID: streamID, Payload: payload}
 }
 
+func readDaemonSessionInfo(t *testing.T, f relay.Frame) relay.TmuxSessionInfo {
+	t.Helper()
+	var info relay.TmuxSessionInfo
+	if err := json.Unmarshal(f.Payload, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Name == "" || info.SessionID == "" {
+		t.Fatalf("invalid session info: %+v", info)
+	}
+	return info
+}
+
 func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 	var fakes []*daemonFakeSession
 	stubLocalNewSession(t, &fakes)
@@ -45,9 +57,9 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
-	name := string(f.Payload)
-	if !strings.HasPrefix(name, "shell-") {
-		t.Fatalf("name = %q", name)
+	info := readDaemonSessionInfo(t, f)
+	if !strings.HasPrefix(info.Name, "shell-") {
+		t.Fatalf("name = %q", info.Name)
 	}
 
 	handleOpen(rt, openTarget0(relay.TargetTmuxList, "", 2), mgr, sender, ctx, ctx)
@@ -56,9 +68,10 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 	if err := json.Unmarshal(lf.Payload, &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].Name != name || !listed[0].Attached || !listed[0].Daemon {
+	if len(listed) != 1 || listed[0].Name != info.Name || listed[0].SessionID != info.SessionID || !listed[0].Attached || !listed[0].Daemon {
 		t.Fatalf("listed = %+v", listed)
 	}
+	sessionID := info.SessionID
 
 	go func() { _, _ = fakes[0].stdout.Write([]byte("hello")) }()
 	if _, data := waitDataBytes(t, out, 5); string(data) != "hello" {
@@ -73,7 +86,7 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 		t.Fatal("persistent session shell killed on tab close")
 	}
 
-	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, 9), mgr, sender, ctx, ctx)
+	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, sessionID, 9), mgr, sender, ctx, ctx)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
 	deadline := time.After(2 * time.Second)
 	var replay []byte
@@ -106,17 +119,17 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 	}
 
 	handleOpen(rt, func() relay.Frame {
-		payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: name, Name: "work"})
+		payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: sessionID, Name: "work"})
 		return relay.Frame{Type: relay.FrameOpen, StreamID: 10, Payload: payload}
 	}(), mgr, sender, ctx, ctx)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
-	if mgr.namedGet("work") == nil || mgr.namedGet(name) != nil {
+	if mgr.namedGet(sessionID) == nil || mgr.namedGet(sessionID).name != "work" {
 		t.Fatal("rename did not retitle the session")
 	}
 
-	handleOpen(rt, openTarget0(relay.TargetTmuxKill, "work", 11), mgr, sender, ctx, ctx)
+	handleOpen(rt, openTarget0(relay.TargetTmuxKill, sessionID, 11), mgr, sender, ctx, ctx)
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
-	if mgr.namedGet("work") != nil || mgr.get(9) != nil {
+	if mgr.namedGet(sessionID) != nil || mgr.get(9) != nil {
 		t.Fatal("session still registered after kill")
 	}
 	if !fakes[0].stdin.isClosed() {
@@ -134,9 +147,9 @@ func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 	ctx := context.Background()
 
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
-	name := string(waitDaemonFrame(t, out, relay.FrameOpenOK).Payload)
+	info := readDaemonSessionInfo(t, waitDaemonFrame(t, out, relay.FrameOpenOK))
 
-	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, 9), mgr, sender, ctx, ctx)
+	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, info.SessionID, 9), mgr, sender, ctx, ctx)
 	f := waitDaemonFrame(t, out, relay.FrameClose)
 	if f.StreamID != 1 || string(f.Payload) != relay.CloseSessionTakenOver {
 		t.Fatalf("close = stream %d payload %q", f.StreamID, f.Payload)
@@ -148,7 +161,7 @@ func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 		t.Fatal("stream not re-keyed after takeover")
 	}
 
-	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, 10), mgr, sender, ctx, ctx)
+	handleOpen(rt, openTarget0(relay.TargetTmuxAttach, info.SessionID, 10), mgr, sender, ctx, ctx)
 	f = waitDaemonFrame(t, out, relay.FrameClose)
 	if f.StreamID != 9 || string(f.Payload) != relay.CloseSessionTakenOver {
 		t.Fatalf("close = stream %d payload %q", f.StreamID, f.Payload)
@@ -156,6 +169,34 @@ func TestDaemonSessionAttachClosesOldStream(t *testing.T) {
 	if f := waitDaemonFrame(t, out, relay.FrameOpenOK); f.StreamID != 10 {
 		t.Fatalf("open ok stream = %d", f.StreamID)
 	}
+}
+
+func TestDaemonSessionAttachResumeUnavailableKeepsExistingStream(t *testing.T) {
+	var fakes []*daemonFakeSession
+	stubLocalNewSession(t, &fakes)
+	rt := testLocalRuntime(t)
+	mgr := newSessionManager()
+	sender, out := newTestSender()
+	mgr.setSender(sender)
+	ctx := context.Background()
+
+	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
+	info := readDaemonSessionInfo(t, waitDaemonFrame(t, out, relay.FrameOpenOK))
+
+	handleOpen(rt, func() relay.Frame {
+		payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxAttach, SessionID: info.SessionID, ResumeFromSeq: 100})
+		return relay.Frame{Type: relay.FrameOpen, StreamID: 9, Payload: payload}
+	}(), mgr, sender, ctx, ctx)
+	if got := waitDaemonFrame(t, out, relay.FrameOpenErr); string(got.Payload) != resumeUnavailableErr {
+		t.Fatalf("open err = %q", got.Payload)
+	}
+	if mgr.get(1) == nil || mgr.get(9) != nil {
+		t.Fatal("failed attach changed stream registration")
+	}
+	if ns := mgr.namedGet(info.SessionID); ns == nil || ns.streamID != 1 {
+		t.Fatalf("named stream = %+v, want stream 1", ns)
+	}
+	_ = fakes[0].stdout.Close()
 }
 
 func TestDaemonSessionAttachUnknownName(t *testing.T) {
@@ -168,12 +209,36 @@ func TestDaemonSessionAttachUnknownName(t *testing.T) {
 	}
 }
 
+func TestDaemonSessionKillUnknownName(t *testing.T) {
+	rt := testLocalRuntime(t)
+	sender, out := newTestSender()
+	handleOpen(rt, openTarget0(relay.TargetTmuxKill, "nope", 4), newSessionManager(), sender, context.Background(), context.Background())
+	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
+	if !strings.Contains(string(f.Payload), "no such session") {
+		t.Fatalf("payload = %q", f.Payload)
+	}
+}
+
+func TestDaemonSessionRenameRejectsEmptyName(t *testing.T) {
+	mgr := newSessionManager()
+	mgr.namedAdd("id-old", "old", 1, time.Now())
+	sender, out := newTestSender()
+	daemonSessionRename(mgr, sender, 4, "old", "   ")
+	f := waitDaemonFrame(t, out, relay.FrameOpenErr)
+	if string(f.Payload) != "empty session name" {
+		t.Fatalf("payload = %q", f.Payload)
+	}
+	if mgr.namedGet("id-old") == nil {
+		t.Fatal("empty rename removed the existing session")
+	}
+}
+
 func TestReapSkipsDaemonSessions(t *testing.T) {
 	mgr := newSessionManager()
 	fake := newDaemonFakeSession()
 	sr := newStreamRelay(fake.is)
 	mgr.add(5, sr)
-	mgr.namedAdd("shell-x", 5, time.Now().Add(-time.Hour))
+	mgr.namedAdd("id-shell-x", "shell-x", 5, time.Now().Add(-time.Hour))
 	mgr.reapDetached(time.Now())
 	if mgr.get(5) == nil {
 		t.Fatal("persistent session reaped")
@@ -189,7 +254,8 @@ func TestDaemonSessionNewLimit(t *testing.T) {
 	rt := testLocalRuntime(t)
 	mgr := newSessionManager()
 	for i := 0; i < maxDaemonSessions; i++ {
-		mgr.namedAdd(fmt.Sprintf("shell-%d", i), uint32(100+i), time.Now())
+		id := fmt.Sprintf("id-%d", i)
+		mgr.namedAdd(id, fmt.Sprintf("shell-%d", i), uint32(100+i), time.Now())
 	}
 	sender, out := newTestSender()
 	mgr.setSender(sender)
@@ -215,14 +281,14 @@ func TestDaemonSessionShellExitRemovesNamedEntry(t *testing.T) {
 	ctx := context.Background()
 
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
-	name := string(waitDaemonFrame(t, out, relay.FrameOpenOK).Payload)
+	info := readDaemonSessionInfo(t, waitDaemonFrame(t, out, relay.FrameOpenOK))
 
 	_ = fakes[0].stdout.Close()
 	if f := waitDaemonFrame(t, out, relay.FrameClose); f.StreamID != 1 {
 		t.Fatalf("close stream = %d", f.StreamID)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for mgr.get(1) != nil || mgr.namedGet(name) != nil {
+	for mgr.get(1) != nil || mgr.namedGet(info.SessionID) != nil {
 		if time.Now().After(deadline) {
 			t.Fatal("stream or named entry left after shell exit")
 		}
@@ -245,14 +311,14 @@ func TestDaemonSessionConcurrentAttachKeepsSingleRegistration(t *testing.T) {
 	ctx := context.Background()
 
 	handleOpen(rt, openTarget0(relay.TargetTmuxNew, "", 1), mgr, sender, ctx, ctx)
-	name := string(waitDaemonFrame(t, out, relay.FrameOpenOK).Payload)
+	info := readDaemonSessionInfo(t, waitDaemonFrame(t, out, relay.FrameOpenOK))
 
 	var wg sync.WaitGroup
 	for _, id := range []uint32{9, 10} {
 		wg.Add(1)
 		go func(id uint32) {
 			defer wg.Done()
-			handleOpen(rt, openTarget0(relay.TargetTmuxAttach, name, id), mgr, sender, ctx, ctx)
+			handleOpen(rt, openTarget0(relay.TargetTmuxAttach, info.SessionID, id), mgr, sender, ctx, ctx)
 		}(id)
 	}
 	wg.Wait()
@@ -262,7 +328,7 @@ func TestDaemonSessionConcurrentAttachKeepsSingleRegistration(t *testing.T) {
 	for id := range mgr.streams {
 		registered = append(registered, id)
 	}
-	ns := mgr.named[name]
+	ns := mgr.named[info.SessionID]
 	mgr.mu.Unlock()
 	if len(registered) != 1 {
 		t.Fatalf("streams registered = %v, want exactly 1", registered)

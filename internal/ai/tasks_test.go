@@ -18,6 +18,18 @@ type gatedModel struct {
 	once    sync.Once
 }
 
+type largeResultModel struct{}
+
+func (largeResultModel) BindTools(tools []*schema.ToolInfo) error { return nil }
+
+func (largeResultModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return nil, nil
+}
+
+func (largeResultModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return schema.StreamReaderFromArray([]*schema.Message{{Role: schema.Assistant, Content: strings.Repeat("x", taskResultMaxRunes*2)}}), nil
+}
+
 func (m *gatedModel) BindTools(tools []*schema.ToolInfo) error { return nil }
 
 func (m *gatedModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
@@ -130,7 +142,7 @@ func TestTaskManagerRejectsBeyondMaxConcurrent(t *testing.T) {
 	}
 }
 
-func TestTaskManagerCancelAllOnClose(t *testing.T) {
+func TestTaskManagerCloseCancelsRunningTasks(t *testing.T) {
 	m := &gatedModel{release: make(chan struct{})}
 	tm := NewTaskManager(testFactory(m))
 	a := &Agent{tasks: tm}
@@ -153,6 +165,51 @@ func TestTaskManagerCancelAllOnClose(t *testing.T) {
 	listOut, _ := tm.list(context.Background(), &ListAgentsInput{})
 	if len(listOut.Agents) != 1 || listOut.Agents[0].Status != string(TaskCancelled) {
 		t.Fatalf("list after Close: got %+v", listOut.Agents)
+	}
+}
+
+func TestTaskManagerRejectsSpawnAfterClose(t *testing.T) {
+	tm := NewTaskManager(testFactory(&fakeModel{}))
+	tm.Close()
+	out, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "late task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != "" || out.Error == "" {
+		t.Fatalf("spawn after close: %+v", out)
+	}
+}
+
+func TestTaskManagerBoundsFinishedHistory(t *testing.T) {
+	tm := NewTaskManager(testFactory(&fakeModel{}))
+	for i := 0; i < maxTaskHistory+1; i++ {
+		out, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "short task"})
+		if err != nil || out.ID == "" {
+			t.Fatalf("spawn %d: %+v, %v", i, out, err)
+		}
+		waitOut, err := tm.wait(context.Background(), &WaitAgentInput{ID: out.ID, TimeoutSeconds: 5})
+		if err != nil || waitOut.Status != string(TaskDone) {
+			t.Fatalf("wait %d: %+v, %v", i, waitOut, err)
+		}
+	}
+	if got := len(tm.Snapshots()); got != maxTaskHistory {
+		t.Fatalf("finished task history: got %d, want %d", got, maxTaskHistory)
+	}
+}
+
+func TestTaskManagerBoundsResult(t *testing.T) {
+	tm := NewTaskManager(testFactory(largeResultModel{}))
+	out, err := tm.spawn(context.Background(), &SpawnAgentInput{Task: "large result"})
+	if err != nil || out.ID == "" {
+		t.Fatalf("spawn: %+v, %v", out, err)
+	}
+	if waitOut, err := tm.wait(context.Background(), &WaitAgentInput{ID: out.ID, TimeoutSeconds: 5}); err != nil || waitOut.Status != string(TaskDone) {
+		t.Fatalf("wait: %+v, %v", waitOut, err)
+	}
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if got := len([]rune(tm.tasks[0].result)); got > taskResultMaxRunes+3 {
+		t.Fatalf("stored result: got %d runes, want <= %d", got, taskResultMaxRunes+3)
 	}
 }
 

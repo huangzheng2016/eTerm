@@ -28,6 +28,7 @@ type sessionRenameModel struct {
 	peer    types.RemotePeer
 	session string
 	oldName string
+	hostID  uint
 	tab     int
 }
 
@@ -49,7 +50,7 @@ func newRemotePeerRenamePrompt(msg types.RemotePeerRenameRequestMsg) *sessionRen
 
 func newTmuxRenamePrompt(msg types.TmuxRenameRequestMsg) *sessionRenameModel {
 	ti := newSessionRenameInput(msg.Name)
-	return &sessionRenameModel{kind: renameTmuxSession, input: ti, oldName: msg.Name}
+	return &sessionRenameModel{kind: renameTmuxSession, input: ti, oldName: msg.Name, hostID: msg.HostID}
 }
 
 func newTabRenamePrompt(index int, title string) *sessionRenameModel {
@@ -98,7 +99,8 @@ func (m *sessionRenameModel) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, func() tea.Msg { return types.RemotePeerRenameMsg{Peer: peer, Name: name} }
 		case renameTmuxSession:
 			oldName := m.oldName
-			return true, func() tea.Msg { return types.TmuxRenameMsg{OldName: oldName, NewName: name} }
+			hostID := m.hostID
+			return true, func() tea.Msg { return types.TmuxRenameMsg{HostID: hostID, OldName: oldName, NewName: name} }
 		case renameTab:
 			idx := m.tab
 			return true, func() tea.Msg { return tabRenameMsg{Index: idx, Title: name} }
@@ -141,7 +143,7 @@ func (a App) openActiveTabRenamePrompt() (App, tea.Cmd) {
 			a.renamePrompt = newRemoteTmuxRenamePrompt(types.RemoteTmuxRenameRequestMsg{
 				Peer:        spec.Peer,
 				SessionID:   spec.SessionID,
-				CurrentName: remoteTmuxPromptName(tab.Title, spec.Peer.Name, spec.SessionID),
+				CurrentName: spec.SessionName,
 			})
 			a.renamePrompt.syncWidth(a.width)
 			return a, textinput.Blink
@@ -156,16 +158,6 @@ func (a App) openActiveTabRenamePrompt() (App, tea.Cmd) {
 	a.renamePrompt = newTabRenamePrompt(a.activeTab, tab.Title)
 	a.renamePrompt.syncWidth(a.width)
 	return a, textinput.Blink
-}
-
-func remoteTmuxPromptName(title, peerName, sessionID string) string {
-	prefix := "[T]" + peerName + "-"
-	if strings.HasPrefix(title, prefix) {
-		if name := strings.TrimSpace(strings.TrimPrefix(title, prefix)); name != "" {
-			return name
-		}
-	}
-	return sessionID
 }
 
 func (a App) renameTab(msg tabRenameMsg) (App, tea.Cmd) {

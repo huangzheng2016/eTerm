@@ -21,18 +21,20 @@ import (
 )
 
 const (
-	tmuxRestoreLocal  = "local"
-	tmuxRestoreRemote = "remote"
+	tmuxRestoreLocal   = "local"
+	tmuxRestoreRemote  = "remote"
+	tmuxRestoreVersion = 2
 )
 
 var appAttachTmuxSession = tmux.AttachSession
 
 type tmuxRestoreEntry struct {
-	Kind     string `json:"kind"`
-	Session  string `json:"session"`
-	Title    string `json:"title,omitempty"`
-	PeerID   string `json:"peer_id,omitempty"`
-	PeerName string `json:"peer_name,omitempty"`
+	Kind        string `json:"kind"`
+	Session     string `json:"session"`
+	Title       string `json:"title,omitempty"`
+	PeerID      string `json:"peer_id,omitempty"`
+	PeerName    string `json:"peer_name,omitempty"`
+	SessionName string `json:"session_name,omitempty"`
 }
 
 type tmuxRestoreFile struct {
@@ -63,6 +65,9 @@ func readTmuxRestoreFile(path string) ([]tmuxRestoreEntry, error) {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
+	if f.Version != tmuxRestoreVersion {
+		return nil, nil
+	}
 	return validTmuxRestoreEntries(f.Tabs), nil
 }
 
@@ -77,7 +82,7 @@ func writeTmuxRestoreFile(path string, entries []tmuxRestoreEntry) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(tmuxRestoreFile{Version: 1, Tabs: entries}, "", "  ")
+	b, err := json.MarshalIndent(tmuxRestoreFile{Version: tmuxRestoreVersion, Tabs: entries}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -93,7 +98,7 @@ func validTmuxRestoreEntries(entries []tmuxRestoreEntry) []tmuxRestoreEntry {
 				continue
 			}
 		case tmuxRestoreRemote:
-			if entry.Session == "" || entry.PeerID == "" {
+			if entry.Session == "" || entry.PeerID == "" || entry.SessionName == "" {
 				continue
 			}
 		default:
@@ -124,11 +129,12 @@ func (a App) tmuxRestoreEntries() []tmuxRestoreEntry {
 			continue
 		}
 		entries = append(entries, tmuxRestoreEntry{
-			Kind:     tmuxRestoreRemote,
-			Session:  spec.SessionID,
-			Title:    tab.Title,
-			PeerID:   spec.Peer.ID,
-			PeerName: spec.Peer.Name,
+			Kind:        tmuxRestoreRemote,
+			Session:     spec.SessionID,
+			Title:       tab.Title,
+			PeerID:      spec.Peer.ID,
+			PeerName:    spec.Peer.Name,
+			SessionName: spec.SessionName,
 		})
 	}
 	return entries
@@ -300,10 +306,10 @@ func (a App) applyTmuxRestoreOpened(msg tmuxRestoreOpenedMsg) (App, tea.Cmd) {
 		a.tabs[idx] = Tab{Type: LocalTab, Title: title, Model: sv, TmuxSession: msg.entry.Session}
 	case tmuxRestoreRemote:
 		peer := types.RemotePeer{ID: msg.entry.PeerID, Name: msg.entry.PeerName}
-		spec := &types.RemoteReconnect{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: msg.entry.Session}
+		spec := &types.RemoteReconnect{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: msg.entry.Session, SessionName: msg.entry.SessionName}
 		title := msg.entry.Title
 		if title == "" {
-			title = remoteTmuxTabTitle(peer.Name, msg.entry.Session)
+			title = remoteTmuxTabTitle(peer.Name, msg.entry.SessionName)
 		}
 		sv = sshview.New(msg.is, title, 0, BuildSSHKeys(a.kbConfig))
 		sv.SetHistoryID(createLocalSessionHistory(a.db, title, "remote-tmux"))

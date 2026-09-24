@@ -15,6 +15,7 @@ import (
 
 const (
 	maxConcurrentTasks = 4
+	maxTaskHistory     = 128
 	defaultWaitSeconds = 120
 	maxWaitSeconds     = 600
 	taskResultMaxRunes = 4000
@@ -62,6 +63,7 @@ type TaskManager struct {
 	tasks   []*agentTask
 	counter int
 	factory agentFactory
+	closed  bool
 }
 
 func NewTaskManager(factory agentFactory) *TaskManager {
@@ -120,6 +122,10 @@ func (tm *TaskManager) Tools() ([]tool.BaseTool, error) {
 
 func (tm *TaskManager) spawn(ctx context.Context, in *SpawnAgentInput) (*SpawnAgentOutput, error) {
 	tm.mu.Lock()
+	if tm.closed {
+		tm.mu.Unlock()
+		return &SpawnAgentOutput{Error: "agent is closed"}, nil
+	}
 	running := 0
 	for _, t := range tm.tasks {
 		if t.status == TaskRunning {
@@ -129,6 +135,21 @@ func (tm *TaskManager) spawn(ctx context.Context, in *SpawnAgentInput) (*SpawnAg
 	if running >= maxConcurrentTasks {
 		tm.mu.Unlock()
 		return &SpawnAgentOutput{Error: fmt.Sprintf("%d background agents already running (max %d); wait for one to finish", running, maxConcurrentTasks)}, nil
+	}
+	for len(tm.tasks) >= maxTaskHistory {
+		idx := -1
+		for i, task := range tm.tasks {
+			if task.status != TaskRunning {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			break
+		}
+		copy(tm.tasks[idx:], tm.tasks[idx+1:])
+		tm.tasks[len(tm.tasks)-1] = nil
+		tm.tasks = tm.tasks[:len(tm.tasks)-1]
 	}
 	tm.counter++
 	ctx, cancel := context.WithCancel(context.Background())
@@ -148,9 +169,13 @@ func (tm *TaskManager) spawn(ctx context.Context, in *SpawnAgentInput) (*SpawnAg
 	return &SpawnAgentOutput{ID: t.id}, nil
 }
 
-func (tm *TaskManager) CancelAll() {
+func (tm *TaskManager) Close() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	if tm.closed {
+		return
+	}
+	tm.closed = true
 	for _, t := range tm.tasks {
 		if t.status == TaskRunning {
 			t.cancel()
@@ -268,7 +293,7 @@ func (tm *TaskManager) runTask(ctx context.Context, t *agentTask, taskCtx string
 	default:
 		t.status = TaskDone
 	}
-	t.result = result
+	t.result = truncateRunes(result, taskResultMaxRunes)
 	status := t.status
 	tm.mu.Unlock()
 	text := string(status)
@@ -317,7 +342,11 @@ func (tm *TaskManager) runAgent(ctx context.Context, t *agentTask, taskCtx strin
 		mo := event.Output.MessageOutput
 		var msg *schema.Message
 		if mo.IsStreaming {
-			msg = consumeStream(mo, send)
+			var err error
+			msg, err = consumeStreamWithError(mo, send)
+			if err != nil {
+				return lastText, err
+			}
 		} else {
 			msg = mo.Message
 		}

@@ -94,7 +94,7 @@ func TestRenameRemoteTmuxUpdatesOpenTabTitle(t *testing.T) {
 		t.Fatal("remote tmux rename did not set userRenamed")
 	}
 	spec := tab.RemoteReconnect()
-	if spec == nil || spec.SessionID != "ops" || spec.Target != relay.TargetTmuxAttach {
+	if spec == nil || spec.SessionID != "work" || spec.SessionName != "ops" || spec.Target != relay.TargetTmuxAttach {
 		t.Fatalf("spec = %+v", spec)
 	}
 }
@@ -251,10 +251,10 @@ func TestRemotePeerRenameAppliedUpdatesMenuAndRefreshes(t *testing.T) {
 
 func TestOpenRemoteTmuxNewUsesReturnedSessionID(t *testing.T) {
 	var gotTarget, gotSession string
-	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 		gotTarget = target
 		gotSession = sessionID
-		return &internalssh.InteractiveSession{}, "tmux-newid", nil
+		return &internalssh.InteractiveSession{}, relay.TmuxSessionInfo{Name: "tmux-newid", SessionID: "tmux-newid"}, nil
 	})
 	a := remoteHTTPTestApp(t)
 
@@ -279,10 +279,10 @@ func TestOpenRemoteTmuxNewUsesReturnedSessionID(t *testing.T) {
 
 func TestOpenRemoteTmuxAttachPreservesSessionID(t *testing.T) {
 	var gotTarget, gotSession string
-	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 		gotTarget = target
 		gotSession = sessionID
-		return &internalssh.InteractiveSession{}, "", nil
+		return &internalssh.InteractiveSession{}, relay.TmuxSessionInfo{Name: "work", SessionID: "work"}, nil
 	})
 	a := remoteHTTPTestApp(t)
 
@@ -308,10 +308,10 @@ func TestOpenRemoteTmuxAttachPreservesSessionID(t *testing.T) {
 
 func TestApplyRemoteTmuxReconnectReopensTmuxSession(t *testing.T) {
 	var gotTarget, gotSession string
-	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, target, sessionID string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 		gotTarget = target
 		gotSession = sessionID
-		return &internalssh.InteractiveSession{}, "", nil
+		return &internalssh.InteractiveSession{}, relay.TmuxSessionInfo{Name: "work", SessionID: "work"}, nil
 	})
 	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
@@ -342,8 +342,8 @@ func TestApplyRemoteTmuxReconnectReopensTmuxSession(t *testing.T) {
 }
 
 func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
-	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
-		return nil, "", errors.New("dial failed")
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
+		return nil, relay.TmuxSessionInfo{}, errors.New("dial failed")
 	})
 	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
@@ -386,8 +386,8 @@ func TestApplyRemoteTmuxAutoReconnectRetriesBeforeConnError(t *testing.T) {
 }
 
 func TestRemoteTmuxAutoReconnectDoesNotStealActiveTab(t *testing.T) {
-	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
-		return &internalssh.InteractiveSession{}, "", nil
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
+		return &internalssh.InteractiveSession{}, relay.TmuxSessionInfo{Name: "work", SessionID: "work"}, nil
 	})
 	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
@@ -581,11 +581,11 @@ func remoteHTTPTestApp(t *testing.T) App {
 	}
 }
 
-func remoteTestStubOpenTmux(t *testing.T, fn func(peerID, target, sessionID string) (*internalssh.InteractiveSession, string, error)) {
+func remoteTestStubOpenTmux(t *testing.T, fn func(peerID, target, sessionID string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error)) {
 	t.Helper()
 	old := remoteOpenTmuxSessionWithProgress
 	t.Cleanup(func() { remoteOpenTmuxSessionWithProgress = old })
-	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+	remoteOpenTmuxSessionWithProgress = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress remote.ProgressFunc) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 		return fn(peerID, target, sessionID)
 	}
 }
@@ -593,9 +593,10 @@ func remoteTestStubOpenTmux(t *testing.T, fn func(peerID, target, sessionID stri
 func remoteTestTmuxTab() *sshview.Model {
 	tab := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-work", 0, viewkeys.SSHKeys{})
 	tab.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Tmux:      true,
-		SessionID: "work",
+		Peer:        types.RemotePeer{ID: "p1", Name: "peer"},
+		Tmux:        true,
+		SessionID:   "work",
+		SessionName: "work",
 	})
 	return tab
 }
@@ -850,8 +851,8 @@ func ctrlShiftR() tea.KeyPressMsg {
 }
 
 func TestRemoteTmuxAutoReconnectExhaustedSurfacesOpenError(t *testing.T) {
-	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
-		return nil, "", errors.New("no such session")
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
+		return nil, relay.TmuxSessionInfo{}, errors.New("no such session")
 	})
 	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
@@ -886,9 +887,9 @@ func (c closeTracker) Close() error                { *c.closed = true; return ni
 
 func TestApplyRemoteShellReconnectDropsDuplicateWhileInFlight(t *testing.T) {
 	opens := 0
-	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 		opens++
-		return &internalssh.InteractiveSession{}, "", nil
+		return &internalssh.InteractiveSession{}, relay.TmuxSessionInfo{Name: "work", SessionID: "work"}, nil
 	})
 	tab := remoteTestReconnectingTmuxTab(&internalssh.InteractiveSession{})
 	a := remoteHTTPTestApp(t)
@@ -998,8 +999,8 @@ func TestUnlockResetClosesTerminalSessions(t *testing.T) {
 
 func TestUnlockResetDropsInFlightReconnectDelivery(t *testing.T) {
 	deliveredClosed := false
-	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, string, error) {
-		return &internalssh.InteractiveSession{Stdin: closeTracker{closed: &deliveredClosed}}, "", nil
+	remoteTestStubOpenTmux(t, func(_, _, _ string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
+		return &internalssh.InteractiveSession{Stdin: closeTracker{closed: &deliveredClosed}}, relay.TmuxSessionInfo{Name: "work", SessionID: "work"}, nil
 	})
 	a := tickTestApp(t)
 	if err := db.SetSetting(a.db, "sync_mode", "http"); err != nil {

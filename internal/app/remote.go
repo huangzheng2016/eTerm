@@ -71,7 +71,7 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 			if err != nil {
 				return types.ConnErrorMsg{Err: err, Target: "[T]" + peer.Name}
 			}
-			is, newID, err := remoteOpenTmuxSessionWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, sessionID, rows, cols, func(stage remote.OpenStage) {
+			is, sessionInfo, err := remoteOpenTmuxSessionWithProgress(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, target, sessionID, rows, cols, func(stage remote.OpenStage) {
 				progress(connectStageText(prefix, string(stage)))
 			})
 			if err != nil {
@@ -84,11 +84,18 @@ func (a App) openRemoteShell(msg types.RemoteShellOpenMsg) (App, tea.Cmd) {
 				is.AddCloser(tunnel)
 			}
 			reSessionID := sessionID
+			titleSession := sessionInfo.Name
 			if target == relay.TargetTmuxNew {
-				reSessionID = newID
+				reSessionID = sessionInfo.SessionID
 			}
-			title := remoteTmuxTabTitle(peer.Name, reSessionID)
-			spec := &types.RemoteReconnect{Peer: peer, Tmux: true, Target: relay.TargetTmuxAttach, SessionID: reSessionID}
+			if titleSession == "" {
+				titleSession = msg.HostLabel
+			}
+			if titleSession == "" {
+				titleSession = reSessionID
+			}
+			title := remoteTmuxTabTitle(peer.Name, titleSession)
+			spec := &types.RemoteReconnect{Peer: peer, Tmux: true, Target: relay.TargetTmuxAttach, SessionID: reSessionID, SessionName: titleSession}
 			return remoteTerminalOpenedMsg{is: is, title: title, tabType: SSHTab, replaceTabAt: -1, reconnect: spec}
 		})
 	}
@@ -352,8 +359,8 @@ func (a *App) renameRemoteTmuxTabs(peerID, sessionID, name string) {
 		if spec == nil || !spec.Tmux || spec.Peer.ID != peerID || spec.SessionID != sessionID {
 			continue
 		}
-		spec.SessionID = name
 		spec.Target = relay.TargetTmuxAttach
+		spec.SessionName = name
 		sm.SetRemoteReconnect(spec)
 		a.tabs[i].Title = remoteTmuxTabTitle(spec.Peer.Name, name)
 		a.tabs[i].userRenamed = true

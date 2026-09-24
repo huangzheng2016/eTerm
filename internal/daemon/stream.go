@@ -211,6 +211,12 @@ type streamRelay struct {
 	stallReap     time.Duration
 }
 
+func (s *streamRelay) canAttach(fromSeq uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fromSeq <= s.ring.End()
+}
+
 func newStreamRelay(is *internalssh.InteractiveSession) *streamRelay {
 	s := &streamRelay{
 		is:            is,

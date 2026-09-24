@@ -155,6 +155,9 @@ func (b *aiBridge) Run(ctx context.Context, prompt string) (<-chan aiview.AgentE
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	b.mu.Lock()
+	if b.running && b.cancel != nil {
+		b.cancel()
+	}
 	b.cancel = cancel
 	b.runGen++
 	b.running = true

@@ -223,7 +223,7 @@ func (a *Agent) Usage() (usedTokens, maxTokens int) {
 
 func (a *Agent) Close() {
 	if a.tasks != nil {
-		a.tasks.CancelAll()
+		a.tasks.Close()
 	}
 }
 
@@ -307,7 +307,11 @@ func (a *Agent) runTurn(ctx context.Context, input string, send func(Event)) boo
 		mo := event.Output.MessageOutput
 		var msg *schema.Message
 		if mo.IsStreaming {
-			msg = consumeStream(mo, send)
+			var err error
+			msg, err = consumeStreamWithError(mo, send)
+			if err != nil {
+				return false
+			}
 		} else {
 			msg = mo.Message
 		}
@@ -333,7 +337,7 @@ func (a *Agent) runTurn(ctx context.Context, input string, send func(Event)) boo
 	return true
 }
 
-func consumeStream(mo *adk.MessageVariant, send func(Event)) *schema.Message {
+func consumeStreamWithError(mo *adk.MessageVariant, send func(Event)) (*schema.Message, error) {
 	defer mo.MessageStream.Close()
 	var frames []*schema.Message
 	for {
@@ -343,7 +347,7 @@ func consumeStream(mo *adk.MessageVariant, send func(Event)) *schema.Message {
 		}
 		if err != nil {
 			send(Event{Type: EventError, Err: err})
-			return nil
+			return nil, err
 		}
 		if frame == nil {
 			continue
@@ -357,13 +361,14 @@ func consumeStream(mo *adk.MessageVariant, send func(Event)) *schema.Message {
 		}
 	}
 	if len(frames) == 0 {
-		return nil
+		return nil, nil
 	}
 	msg, err := schema.ConcatMessages(frames)
 	if err != nil {
-		return nil
+		send(Event{Type: EventError, Err: err})
+		return nil, err
 	}
-	return msg
+	return msg, nil
 }
 
 func trimHistory(msgs []*schema.Message, budget int64) []*schema.Message {

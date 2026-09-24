@@ -456,7 +456,8 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 			openErr(err)
 			return
 		}
-		startStream(is, []byte(name))
+		payload, _ := json.Marshal(relay.TmuxSessionInfo{Name: name, SessionID: name, Attached: true})
+		startStream(is, payload)
 	case relay.TargetTmuxAttach:
 		if !rt.hasTmux {
 			daemonSessionAttach(mgr, sender, f.StreamID, req.SessionID, req.ResumeFromSeq)

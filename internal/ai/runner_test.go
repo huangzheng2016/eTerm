@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -181,7 +182,7 @@ func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		consumeStream(mo, send)
+		_, _ = consumeStreamWithError(mo, send)
 		close(done)
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -190,6 +191,42 @@ func TestConsumeStreamSendHonorsCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("consumeStream blocked on send after cancel with a full event buffer")
+	}
+}
+
+type streamErrorModel struct{}
+
+func (streamErrorModel) BindTools(tools []*schema.ToolInfo) error { return nil }
+
+func (streamErrorModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return nil, nil
+}
+
+func (streamErrorModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	sr, sw := schema.Pipe[*schema.Message](1)
+	go func() {
+		sw.Send(nil, errors.New("stream failed"))
+		sw.Close()
+	}()
+	return sr, nil
+}
+
+func TestAgentRunDoesNotEmitDoneAfterStreamError(t *testing.T) {
+	a := newTestAgent(t, streamErrorModel{}, nil)
+	var sawErr, sawDone bool
+	for ev := range a.Run(context.Background(), "question") {
+		switch ev.Type {
+		case EventError:
+			sawErr = true
+		case EventDone:
+			sawDone = true
+		}
+	}
+	if !sawErr {
+		t.Fatal("stream error was not reported")
+	}
+	if sawDone {
+		t.Fatal("run emitted done after stream error")
 	}
 }
 

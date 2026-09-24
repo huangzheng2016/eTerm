@@ -42,6 +42,22 @@ func ListRemoteSessions(client *ssh.Client, configFile string) ([]types.TmuxSess
 	return parseSessions(out), nil
 }
 
+func KillRemoteSession(client *ssh.Client, configFile, name string) error {
+	out, err := internalssh.RunCommand(client, remoteTmuxCmd(configFile, "kill-session -t "+quoteShell(name)), "")
+	if err != nil {
+		return tmuxCommandError("kill-session", err, out)
+	}
+	return nil
+}
+
+func RenameRemoteSession(client *ssh.Client, configFile, oldName, newName string) error {
+	out, err := internalssh.RunCommand(client, remoteTmuxCmd(configFile, "rename-session -t "+quoteShell(oldName)+" "+quoteShell(newName)), "")
+	if err != nil {
+		return tmuxCommandError("rename-session", err, out)
+	}
+	return nil
+}
+
 func EnsureRemoteConfig(client *ssh.Client, configured string) (string, error) {
 	configured = strings.TrimSpace(configured)
 	if configured != "" {

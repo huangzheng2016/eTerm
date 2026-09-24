@@ -72,14 +72,16 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		name := m.sessions[m.cursor-1].Name
 		return true, func() tea.Msg { return types.TmuxOpenMsg{HostID: m.hostID, Name: name} }
 	case "r":
-		if m.hostID == 0 && m.cursor > 0 {
+		if m.cursor > 0 {
 			name := m.sessions[m.cursor-1].Name
-			return false, func() tea.Msg { return types.TmuxRenameRequestMsg{Name: name} }
+			hostID := m.hostID
+			return false, func() tea.Msg { return types.TmuxRenameRequestMsg{HostID: hostID, Name: name} }
 		}
 	case "d", "delete":
-		if m.hostID == 0 && m.cursor > 0 {
+		if m.cursor > 0 {
 			name := m.sessions[m.cursor-1].Name
-			return false, func() tea.Msg { return types.TmuxKillRequestMsg{Name: name} }
+			hostID := m.hostID
+			return false, func() tea.Msg { return types.TmuxKillRequestMsg{HostID: hostID, Name: name} }
 		}
 	case "esc", "escape":
 		return true, nil
@@ -98,7 +100,7 @@ func (m *Model) View() string {
 	if m.hostID != 0 {
 		title = "tmux @ " + m.hostLabel
 		newDesc = "start a remote tmux session"
-		hints = "up/down navigate · enter open · R refresh · esc close"
+		hints = "up/down navigate · enter open · r rename · d kill · R refresh · esc close"
 	}
 	rows := []string{ui.TitleStyle.Render(title), ""}
 	rows = append(rows, m.row(0, "+ New session", newDesc))

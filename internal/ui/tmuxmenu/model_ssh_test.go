@@ -17,9 +17,9 @@ func TestTmuxMenuSSHModeView(t *testing.T) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
 	}
-	for _, unwanted := range []string{"rename", "kill"} {
-		if strings.Contains(view, unwanted) {
-			t.Fatalf("ssh mode view must not show %q:\n%s", unwanted, view)
+	for _, want := range []string{"rename", "kill"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("ssh mode view missing %q:\n%s", want, view)
 		}
 	}
 }
@@ -67,15 +67,33 @@ func TestTmuxMenuSSHModeRefreshCarriesHostID(t *testing.T) {
 	}
 }
 
-func TestTmuxMenuSSHModeIgnoresKillRename(t *testing.T) {
+func TestTmuxMenuSSHModeSupportsKillRename(t *testing.T) {
 	m := NewSSH(7, "prod")
 	m.SetSessions([]types.TmuxSession{{Name: "work"}})
 	m.cursor = 1
 
-	for _, key := range []string{"d", "r"} {
+	done, cmd := m.Update(keyText("d"))
+	if done || cmd == nil {
+		t.Fatal("kill should keep menu open and emit a command")
+	}
+	kill := cmd().(types.TmuxKillRequestMsg)
+	if kill.HostID != 7 || kill.Name != "work" {
+		t.Fatalf("kill msg = %+v", kill)
+	}
+
+	done, cmd = m.Update(keyText("r"))
+	if done || cmd == nil {
+		t.Fatal("rename should keep menu open and emit a command")
+	}
+	rename := cmd().(types.TmuxRenameRequestMsg)
+	if rename.HostID != 7 || rename.Name != "work" {
+		t.Fatalf("rename msg = %+v", rename)
+	}
+
+	for _, key := range []string{"x"} {
 		done, cmd := m.Update(keyText(key))
 		if done || cmd != nil {
-			t.Fatalf("%q must be inert in ssh mode (done=%v cmd=%v)", key, done, cmd)
+			t.Fatalf("%q must be inert (done=%v cmd=%v)", key, done, cmd)
 		}
 	}
 }

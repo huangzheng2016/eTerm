@@ -247,7 +247,7 @@ func restoreTmuxStubs(t *testing.T) {
 func TestHandleOpenTmuxList(t *testing.T) {
 	restoreTmuxStubs(t)
 	tmuxListSessions = func(context.Context, string) ([]types.TmuxSession, error) {
-		return []types.TmuxSession{{Name: "work", CreatedUnix: 7, Attached: true}}, nil
+		return []types.TmuxSession{{Name: "work", SessionID: "work", CreatedUnix: 7, Attached: true}}, nil
 	}
 	sender, out := newTestSender()
 
@@ -258,7 +258,7 @@ func TestHandleOpenTmuxList(t *testing.T) {
 	if err := json.Unmarshal(f.Payload, &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "work" || got[0].CreatedUnix != 7 || !got[0].Attached {
+	if len(got) != 1 || got[0].Name != "work" || got[0].SessionID != "work" || got[0].CreatedUnix != 7 || !got[0].Attached {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -278,8 +278,12 @@ func TestHandleOpenTmuxNewStartsStream(t *testing.T) {
 	callOpen(t, 2, relay.OpenRequest{Target: relay.TargetTmuxNew, Rows: 11, Cols: 90}, mgr, sender)
 
 	f := waitDaemonFrame(t, out, relay.FrameOpenOK)
-	if string(f.Payload) != "tmux-abc123" {
-		t.Fatalf("payload = %q", f.Payload)
+	var info relay.TmuxSessionInfo
+	if err := json.Unmarshal(f.Payload, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != "tmux-abc123" || info.SessionID != "tmux-abc123" || !info.Attached {
+		t.Fatalf("payload = %+v", info)
 	}
 	if gotRows != 11 || gotCols != 90 {
 		t.Fatalf("pty = %dx%d", gotRows, gotCols)

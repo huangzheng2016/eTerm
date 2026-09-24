@@ -898,12 +898,19 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.openTmux(msg)
 
 	case types.TmuxKillRequestMsg:
-		kill := types.TmuxKillMsg{Name: msg.Name}
+		kill := types.TmuxKillMsg{HostID: msg.HostID, Name: msg.Name}
 		a.pendingTmuxKill = &kill
-		a.confirm = components.NewConfirm("Kill tmux session", fmt.Sprintf("Kill tmux session %s?", msg.Name)).Show()
+		target := "tmux session " + msg.Name
+		if msg.HostID != 0 {
+			target += " on remote host"
+		}
+		a.confirm = components.NewConfirm("Kill tmux session", "Kill "+target+"?").Show()
 		return a, nil
 
 	case types.TmuxKillMsg:
+		if msg.HostID != 0 {
+			return a, a.killSSHTmuxSession(msg)
+		}
 		return a, a.killTmuxSession(msg)
 
 	case types.TmuxRenameRequestMsg:
@@ -912,6 +919,9 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, textinput.Blink
 
 	case types.TmuxRenameMsg:
+		if msg.HostID != 0 {
+			return a, a.renameSSHTmuxSession(msg)
+		}
 		return a.renameTmuxSession(msg)
 
 	case tabRenameMsg:

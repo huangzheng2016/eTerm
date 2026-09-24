@@ -22,6 +22,8 @@ func stubSSHTmux(t *testing.T) {
 	oldProbe := sshTmuxProbe
 	oldEnsure := sshTmuxEnsureConfig
 	oldList := sshTmuxListSessions
+	oldKill := sshTmuxKillSession
+	oldRename := sshTmuxRenameSession
 	oldInteractive := sshTmuxInteractive
 	oldGate := sshTmuxFingerprintGate
 	t.Cleanup(func() {
@@ -29,6 +31,8 @@ func stubSSHTmux(t *testing.T) {
 		sshTmuxProbe = oldProbe
 		sshTmuxEnsureConfig = oldEnsure
 		sshTmuxListSessions = oldList
+		sshTmuxKillSession = oldKill
+		sshTmuxRenameSession = oldRename
 		sshTmuxInteractive = oldInteractive
 		sshTmuxFingerprintGate = oldGate
 	})
@@ -45,6 +49,8 @@ func stubSSHTmux(t *testing.T) {
 	sshTmuxListSessions = func(*ssh.Client, string) ([]types.TmuxSession, error) {
 		return []types.TmuxSession{{Name: "work"}}, nil
 	}
+	sshTmuxKillSession = func(*ssh.Client, string, string) error { return nil }
+	sshTmuxRenameSession = func(*ssh.Client, string, string, string) error { return nil }
 	sshTmuxInteractive = func(*ssh.Client, int, int, bool) (*internalssh.InteractiveSession, error) {
 		return &internalssh.InteractiveSession{}, nil
 	}

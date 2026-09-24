@@ -97,7 +97,7 @@ func (m *Model) Update(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		if m.tab == tabTmux && m.cursor > 0 && m.cursor <= len(m.sessions) {
 			session := m.sessions[m.cursor-1]
 			share.Target = relay.TargetTmuxAttach
-			share.SessionID = session.Name
+			share.SessionID = tmuxSessionKey(session)
 			share.Label = session.Name
 		}
 		return true, func() tea.Msg {
@@ -140,20 +140,20 @@ func (m *Model) updateTmux(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		session := m.sessions[m.cursor-1]
 		return true, func() tea.Msg {
-			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: session.Name, HostLabel: session.Name}
+			return types.RemoteShellOpenMsg{Peer: peer, Target: relay.TargetTmuxAttach, Tmux: true, SessionID: tmuxSessionKey(session), HostLabel: session.Name}
 		}
 	case "d", "delete":
 		if m.cursor > 0 {
 			session := m.sessions[m.cursor-1]
 			return false, func() tea.Msg {
-				return types.RemoteTmuxKillRequestMsg{Peer: m.Peer, SessionID: session.Name}
+				return types.RemoteTmuxKillRequestMsg{Peer: m.Peer, SessionID: tmuxSessionKey(session)}
 			}
 		}
 	case "r":
 		if m.cursor > 0 {
 			session := m.sessions[m.cursor-1]
 			return false, func() tea.Msg {
-				return types.RemoteTmuxRenameRequestMsg{Peer: m.Peer, SessionID: session.Name, CurrentName: session.Name}
+				return types.RemoteTmuxRenameRequestMsg{Peer: m.Peer, SessionID: tmuxSessionKey(session), CurrentName: session.Name}
 			}
 		}
 	case "pgup", "left":
@@ -294,6 +294,13 @@ func (m *Model) tabHeader() string {
 }
 
 func tmuxLabel(session relay.TmuxSessionInfo) string {
+	return session.Name
+}
+
+func tmuxSessionKey(session relay.TmuxSessionInfo) string {
+	if session.Daemon {
+		return session.SessionID
+	}
 	return session.Name
 }
 

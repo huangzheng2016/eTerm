@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/huangzheng2016/eTerm/internal/config"
@@ -18,6 +19,12 @@ type tmuxTerminalOpenedMsg struct {
 	is      *internalssh.InteractiveSession
 	title   string
 	session string
+}
+
+const tmuxCommandTimeout = 15 * time.Second
+
+func tmuxCommandContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), tmuxCommandTimeout)
 }
 
 func (a App) resolveTmuxConfig() (string, error) {
@@ -34,7 +41,9 @@ func (a App) loadTmuxSessions() tea.Cmd {
 		if err != nil {
 			return types.TmuxSessionsLoadedMsg{Err: err}
 		}
-		sessions, err := tmux.ListSessions(context.Background(), configFile)
+		ctx, cancel := tmuxCommandContext()
+		defer cancel()
+		sessions, err := tmux.ListSessions(ctx, configFile)
 		return types.TmuxSessionsLoadedMsg{Sessions: sessions, Err: err}
 	}
 }
@@ -45,12 +54,14 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 	}
 	cols, rows := ptyFromAppSizeForTab(a, LocalTab)
 	return a, func() tea.Msg {
+		ctx, cancel := tmuxCommandContext()
+		defer cancel()
 		configFile, err := a.resolveTmuxConfig()
 		if err != nil {
 			return types.ErrorMsg{Err: err}
 		}
 		if msg.New {
-			is, name, err := tmux.NewSession(context.Background(), configFile, rows, cols)
+			is, name, err := tmux.NewSession(ctx, configFile, rows, cols)
 			if err != nil {
 				appDebugf("tmux NewSession failed: %v", err)
 				return types.ErrorMsg{Err: fmt.Errorf("tmux new-session: %w", err)}
@@ -58,7 +69,7 @@ func (a App) openTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 			appDebugf("tmux NewSession ok: %s", name)
 			return tmuxTerminalOpenedMsg{is: is, title: tmuxTabTitle(name), session: name}
 		}
-		is, err := appAttachTmuxSession(context.Background(), configFile, msg.Name, rows, cols)
+		is, err := appAttachTmuxSession(ctx, configFile, msg.Name, rows, cols)
 		if err != nil {
 			return types.ErrorMsg{Err: fmt.Errorf("tmux attach-session: %w", err)}
 		}
@@ -85,14 +96,16 @@ func (a App) applyTmuxTerminalOpened(msg tmuxTerminalOpenedMsg) (App, tea.Cmd) {
 func (a App) killTmuxSession(msg types.TmuxKillMsg) tea.Cmd {
 	name := msg.Name
 	return func() tea.Msg {
+		ctx, cancel := tmuxCommandContext()
+		defer cancel()
 		configFile, err := a.resolveTmuxConfig()
 		if err != nil {
 			return types.TmuxSessionsLoadedMsg{Err: err}
 		}
-		if err := tmux.KillSession(context.Background(), configFile, name); err != nil {
+		if err := tmux.KillSession(ctx, configFile, name); err != nil {
 			return types.TmuxSessionsLoadedMsg{Err: err}
 		}
-		sessions, err := tmux.ListSessions(context.Background(), configFile)
+		sessions, err := tmux.ListSessions(ctx, configFile)
 		return types.TmuxSessionsLoadedMsg{Sessions: sessions, Err: err}
 	}
 }
@@ -104,11 +117,13 @@ func (a App) renameTmuxSession(msg types.TmuxRenameMsg) (App, tea.Cmd) {
 		return a, nil
 	}
 	return a, func() tea.Msg {
+		ctx, cancel := tmuxCommandContext()
+		defer cancel()
 		configFile, err := a.resolveTmuxConfig()
 		if err != nil {
 			return types.TmuxSessionsLoadedMsg{Err: err}
 		}
-		if err := tmux.RenameSession(context.Background(), configFile, oldName, newName); err != nil {
+		if err := tmux.RenameSession(ctx, configFile, oldName, newName); err != nil {
 			return types.TmuxSessionsLoadedMsg{Err: err}
 		}
 		return tmuxRenameAppliedMsg{OldName: oldName, NewName: newName}

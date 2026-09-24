@@ -16,6 +16,7 @@ body { display: flex; flex-direction: column; }
 .btn.on { background: #3a4a5a; color: #fff; }
 .btn:disabled { opacity: .5; cursor: default; }
 #term { flex: 1; min-height: 0; padding: 4px; box-sizing: border-box; }
+#term, #term .xterm, #term .xterm-viewport { touch-action: none; }
 #keys { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 6px; padding: 6px; background: #111; border-top: 1px solid #333; overflow-x: auto; z-index: 20; }
 #keys .btn { min-width: 40px; padding: 8px 10px; flex: none; }
 #lockoverlay { position: fixed; left: 0; right: 0; bottom: 0; display: none; z-index: 25; background: transparent; touch-action: none; }
@@ -221,7 +222,11 @@ body { display: flex; flex-direction: column; }
     { label: "↑", data: "\x1b[A" },
     { label: "↓", data: "\x1b[B" },
     { label: "→", data: "\x1b[C" },
-    { label: "Enter", data: "\r" }
+    { label: "Enter", data: "\r" },
+    { label: "PgUp", scroll: -1 },
+    { label: "PgDn", scroll: 1 },
+    { label: "Top", scrollTop: true },
+    { label: "Bottom", scrollBottom: true }
   ];
   keyDefs.forEach(function (def) {
     var b = document.createElement("button");
@@ -240,7 +245,10 @@ body { display: flex; flex-direction: column; }
         if (altLatch) ctrlLatch = false;
         updateKeyButtons();
       } else {
-        sendRaw(def.data);
+        if (def.scroll) term.scrollPages(def.scroll);
+        else if (def.scrollTop) term.scrollToTop();
+        else if (def.scrollBottom) term.scrollToBottom();
+        else sendRaw(def.data);
       }
     });
     keyButtons[def.label] = b;
@@ -329,13 +337,18 @@ body { display: flex; flex-direction: column; }
     e.preventDefault();
   });
   var touchY = null;
+  var lockSwipeRem = 0;
   lockEl.addEventListener("touchstart", function (e) {
     touchY = e.touches[0].clientY;
+    lockSwipeRem = 0;
     e.preventDefault();
   }, { passive: false });
   lockEl.addEventListener("touchmove", function (e) {
     var y = e.touches[0].clientY;
-    term.scrollLines(Math.round((touchY - y) / 20));
+    var px = touchY - y + lockSwipeRem;
+    var lines = Math.trunc(px / 20);
+    if (lines !== 0) term.scrollLines(-lines);
+    lockSwipeRem = px - lines * 20;
     touchY = y;
     e.preventDefault();
   }, { passive: false });
@@ -376,7 +389,7 @@ body { display: flex; flex-direction: column; }
     }
     var px = swipeY - y + swipeRem;
     var lines = Math.trunc(px / 20);
-    if (lines !== 0) term.scrollLines(lines);
+    if (lines !== 0) term.scrollLines(-lines);
     swipeRem = px - lines * 20;
     swipeY = y;
     e.preventDefault();

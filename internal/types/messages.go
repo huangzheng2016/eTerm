@@ -165,11 +165,12 @@ type RemotePeerRenameMsg struct {
 }
 
 type RemoteReconnect struct {
-	Peer       RemotePeer
-	Target     string
-	HostSyncID string
-	SessionID  string
-	Tmux       bool
+	Peer        RemotePeer
+	Target      string
+	HostSyncID  string
+	SessionID   string
+	SessionName string
+	Tmux        bool
 }
 
 type RemoteShellReconnectMsg struct {
@@ -229,18 +230,22 @@ type TmuxOpenMsg struct {
 }
 
 type TmuxKillRequestMsg struct {
-	Name string
+	HostID uint
+	Name   string
 }
 
 type TmuxKillMsg struct {
-	Name string
+	HostID uint
+	Name   string
 }
 
 type TmuxRenameRequestMsg struct {
-	Name string
+	HostID uint
+	Name   string
 }
 
 type TmuxRenameMsg struct {
+	HostID  uint
 	OldName string
 	NewName string
 }

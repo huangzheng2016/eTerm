@@ -295,6 +295,26 @@ func TestShareKeyOnTmuxSessionEmitsAttachShare(t *testing.T) {
 	}
 }
 
+func TestDaemonTmuxUsesStableSessionIDForActions(t *testing.T) {
+	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work", SessionID: "session-uuid", Daemon: true}})
+	m.cursor = 1
+	_, cmd := m.Update(keyText("s"))
+	share := cmd().(types.RemoteShareMsg)
+	if share.SessionID != "session-uuid" {
+		t.Fatalf("share session id = %q", share.SessionID)
+	}
+
+	m = New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
+	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work", SessionID: "session-uuid", Daemon: true}})
+	m.cursor = 1
+	_, cmd = m.Update(keyText("enter"))
+	open := cmd().(types.RemoteShellOpenMsg)
+	if open.SessionID != "session-uuid" || open.HostLabel != "work" {
+		t.Fatalf("open = %+v", open)
+	}
+}
+
 func TestShareKeyOnNewSessionEmitsLocalShare(t *testing.T) {
 	m := New(types.RemotePeer{ID: "p1", Name: "peer"}, nil)
 	m.SetTmuxSessions([]relay.TmuxSessionInfo{{Name: "work"}})

@@ -79,16 +79,30 @@ func ResumeInfo(is *internalssh.InteractiveSession) (streamID uint32, nextSeq ui
 	return w.streamID, w.nextSeq.Load(), true
 }
 
-func OpenTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int) (*internalssh.InteractiveSession, string, error) {
+func OpenTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 	return OpenTmuxSessionWithProgress(ctx, serverURL, apiKey, tenant, insecureTLS, peerID, target, sessionID, rows, cols, nil)
 }
 
-func OpenTmuxSessionWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, string, error) {
+func OpenTmuxSessionWithProgress(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, target, sessionID string, rows, cols int, progress ProgressFunc) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 	conn, streamID, okPayload, err := openStream(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: target, SessionID: sessionID, Rows: rows, Cols: cols}, randomStreamID(), progress)
 	if err != nil {
-		return nil, "", err
+		return nil, relay.TmuxSessionInfo{}, err
 	}
-	return sessionFromConn(ctx, conn, streamID, rows, cols, 0), string(okPayload), nil
+	var info relay.TmuxSessionInfo
+	if len(okPayload) != 0 {
+		if err := json.Unmarshal(okPayload, &info); err != nil {
+			_ = conn.Close(websocket.StatusProtocolError, "invalid tmux session")
+			return nil, relay.TmuxSessionInfo{}, fmt.Errorf("decode tmux session: %w", err)
+		}
+	}
+	if target == relay.TargetTmuxNew && (info.Name == "" || info.SessionID == "") {
+		_ = conn.Close(websocket.StatusProtocolError, "missing tmux session identity")
+		return nil, relay.TmuxSessionInfo{}, errors.New("tmux-new response missing session identity")
+	}
+	if info.SessionID == "" {
+		info.SessionID = sessionID
+	}
+	return sessionFromConn(ctx, conn, streamID, rows, cols, 0), info, nil
 }
 
 func ListTmuxSessions(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.TmuxSessionInfo, error) {

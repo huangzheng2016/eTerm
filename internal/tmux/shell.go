@@ -126,6 +126,7 @@ func parseSessions(out []byte) []types.TmuxSession {
 		created, _ := strconv.ParseInt(parts[1], 10, 64)
 		sessions = append(sessions, types.TmuxSession{
 			Name:        parts[0],
+			SessionID:   parts[0],
 			CreatedUnix: created,
 			Attached:    parts[2] != "0",
 		})

@@ -19,10 +19,10 @@ func TestParseSessions(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d", len(got))
 	}
-	if got[0].Name != "work" || got[0].CreatedUnix != 1710000000 || !got[0].Attached {
+	if got[0].Name != "work" || got[0].SessionID != "work" || got[0].CreatedUnix != 1710000000 || !got[0].Attached {
 		t.Fatalf("first = %+v", got[0])
 	}
-	if got[1].Name != "logs" || got[1].CreatedUnix != 1710000010 || got[1].Attached {
+	if got[1].Name != "logs" || got[1].SessionID != "logs" || got[1].CreatedUnix != 1710000010 || got[1].Attached {
 		t.Fatalf("second = %+v", got[1])
 	}
 }

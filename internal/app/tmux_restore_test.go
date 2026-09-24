@@ -22,7 +22,7 @@ func TestTmuxRestoreFileRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tmux_restore.json")
 	want := []tmuxRestoreEntry{
 		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
-		{Kind: tmuxRestoreRemote, Session: "ops", Title: "[T]peer-ops", PeerID: "p1", PeerName: "peer"},
+		{Kind: tmuxRestoreRemote, Session: "uuid-1", Title: "[T]peer-ops", PeerID: "p1", PeerName: "peer", SessionName: "ops"},
 	}
 
 	if err := writeTmuxRestoreFile(path, want); err != nil {
@@ -63,10 +63,11 @@ func TestTmuxRestoreSnapshotOnlyIncludesTmuxTabsInOrder(t *testing.T) {
 	plainLocal := sshview.New(&internalssh.InteractiveSession{}, "[T]plain", 0, viewkeys.SSHKeys{})
 	remoteTmux := sshview.New(&internalssh.InteractiveSession{}, "[T]peer-ops", 0, viewkeys.SSHKeys{})
 	remoteTmux.SetRemoteReconnect(&types.RemoteReconnect{
-		Peer:      types.RemotePeer{ID: "p1", Name: "peer"},
-		Target:    relay.TargetTmuxAttach,
-		Tmux:      true,
-		SessionID: "ops",
+		Peer:        types.RemotePeer{ID: "p1", Name: "peer"},
+		Target:      relay.TargetTmuxAttach,
+		Tmux:        true,
+		SessionID:   "uuid-1",
+		SessionName: "ops",
 	})
 	plainSSH := sshview.New(&internalssh.InteractiveSession{}, "ssh", 0, viewkeys.SSHKeys{})
 	t.Cleanup(func() {
@@ -89,7 +90,7 @@ func TestTmuxRestoreSnapshotOnlyIncludesTmuxTabsInOrder(t *testing.T) {
 
 	want := []tmuxRestoreEntry{
 		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
-		{Kind: tmuxRestoreRemote, Session: "ops", Title: "[T]peer-ops", PeerID: "p1", PeerName: "peer"},
+		{Kind: tmuxRestoreRemote, Session: "uuid-1", Title: "[T]peer-ops", PeerID: "p1", PeerName: "peer", SessionName: "ops"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("entries = %#v, want %#v", got, want)
@@ -178,9 +179,9 @@ func TestConfirmingTmuxRestoreCreatesTabsBeforeOpeningInSavedOrder(t *testing.T)
 		opened = append(opened, "local:"+name)
 		return &internalssh.InteractiveSession{}, nil
 	}
-	remoteTestStubOpenTmux(t, func(peerID, _, sessionID string) (*internalssh.InteractiveSession, string, error) {
+	remoteTestStubOpenTmux(t, func(peerID, _, sessionID string) (*internalssh.InteractiveSession, relay.TmuxSessionInfo, error) {
 		opened = append(opened, "remote:"+peerID+":"+sessionID)
-		return &internalssh.InteractiveSession{}, "", nil
+		return &internalssh.InteractiveSession{}, relay.TmuxSessionInfo{Name: "work", SessionID: "work"}, nil
 	})
 	a := restoreTestApp(t)
 	a.viewState = MainView
@@ -188,7 +189,7 @@ func TestConfirmingTmuxRestoreCreatesTabsBeforeOpeningInSavedOrder(t *testing.T)
 	a.tmuxRestorePath = filepath.Join(t.TempDir(), "tmux_restore.json")
 	a.pendingTmuxRestore = []tmuxRestoreEntry{
 		{Kind: tmuxRestoreLocal, Session: "work", Title: "[T]work"},
-		{Kind: tmuxRestoreRemote, Session: "ops", Title: "[T]peer-ops", PeerID: "p1", PeerName: "peer"},
+		{Kind: tmuxRestoreRemote, Session: "uuid-1", Title: "[T]peer-ops", PeerID: "p1", PeerName: "peer", SessionName: "ops"},
 		{Kind: tmuxRestoreLocal, Session: "logs", Title: "[T]logs"},
 	}
 	a.confirm = a.confirm.Show()
@@ -220,7 +221,7 @@ func TestConfirmingTmuxRestoreCreatesTabsBeforeOpeningInSavedOrder(t *testing.T)
 		a = next.(App)
 	}
 
-	wantOpened := []string{"local:logs", "remote:p1:ops", "local:work"}
+	wantOpened := []string{"local:logs", "remote:p1:uuid-1", "local:work"}
 	if len(opened) != len(wantOpened) {
 		t.Fatalf("opened = %#v, want %#v", opened, wantOpened)
 	}
@@ -250,7 +251,7 @@ func TestTmuxRestoreMissingSessionClosesOnlyPlaceholder(t *testing.T) {
 		err   string
 	}{
 		{name: "local", entry: tmuxRestoreEntry{Kind: tmuxRestoreLocal, Session: "gone", Title: "[T]gone"}, err: "tmux attach-session: exit status 1: can't find session: gone"},
-		{name: "daemon", entry: tmuxRestoreEntry{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer"}, err: "no such session: gone"},
+		{name: "daemon", entry: tmuxRestoreEntry{Kind: tmuxRestoreRemote, Session: "gone", Title: "[T]peer-gone", PeerID: "p1", PeerName: "peer", SessionName: "gone"}, err: "no such session: gone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := restoreTestApp(t)

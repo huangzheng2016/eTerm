@@ -14,6 +14,7 @@ import (
 	"github.com/huangzheng2016/eTerm/internal/types"
 	"github.com/huangzheng2016/eTerm/internal/ui/components"
 	"github.com/huangzheng2016/eTerm/internal/ui/tmuxmenu"
+	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
@@ -22,6 +23,8 @@ var (
 	sshTmuxProbe           = tmux.ProbeRemote
 	sshTmuxEnsureConfig    = tmux.EnsureRemoteConfig
 	sshTmuxListSessions    = tmux.ListRemoteSessions
+	sshTmuxKillSession     = tmux.KillRemoteSession
+	sshTmuxRenameSession   = tmux.RenameRemoteSession
 	sshTmuxInteractive     = internalssh.NewInteractiveSession
 	sshTmuxFingerprintGate = hostFingerprintDialBlock
 )
@@ -177,6 +180,49 @@ func (a App) openSSHTmux(msg types.TmuxOpenMsg) (App, tea.Cmd) {
 		return openSSHTmuxSession(database, mk, msg, prefix, progress, ptyRows, ptyCols)
 	}
 	return a, tea.Batch(progressCmd, open)
+}
+
+func (a App) killSSHTmuxSession(msg types.TmuxKillMsg) tea.Cmd {
+	database, mk, hostID, name := a.db, a.masterKey, msg.HostID, msg.Name
+	return func() tea.Msg {
+		return controlSSHTmuxSession(database, mk, hostID, func(client *ssh.Client, configFile string) error {
+			return sshTmuxKillSession(client, configFile, name)
+		})
+	}
+}
+
+func (a App) renameSSHTmuxSession(msg types.TmuxRenameMsg) tea.Cmd {
+	database, mk, hostID, oldName, newName := a.db, a.masterKey, msg.HostID, msg.OldName, msg.NewName
+	return func() tea.Msg {
+		return controlSSHTmuxSession(database, mk, hostID, func(client *ssh.Client, configFile string) error {
+			return sshTmuxRenameSession(client, configFile, oldName, newName)
+		})
+	}
+}
+
+func controlSSHTmuxSession(database *gorm.DB, mk *security.MasterKeyManager, hostID uint, action func(*ssh.Client, string) error) tea.Msg {
+	res := dialSSHTmuxHost(database, mk, hostID, "Remote tmux", func(string) {}, types.TmuxMenuMsg{HostID: hostID})
+	if res.msg != nil {
+		switch msg := res.msg.(type) {
+		case types.ConnErrorMsg:
+			return sshTmuxMenuReadyMsg{hostID: hostID, err: msg.Err}
+		case types.ErrorMsg:
+			return sshTmuxMenuReadyMsg{hostID: hostID, err: msg.Err}
+		default:
+			return res.msg
+		}
+	}
+	defer res.client.Close()
+	label := hostDisplayName(res.host)
+	configFile, cfgErr := sshTmuxEnsureConfig(res.client.Client, tmuxConfiguredPath(database))
+	if err := action(res.client.Client, configFile); err != nil {
+		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: %w", label, err)}
+	}
+	sessions, err := sshTmuxListSessions(res.client.Client, configFile)
+	if err != nil {
+		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: %w", label, err)}
+	}
+	return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, sessions: sessions, configWarn: cfgErr != nil}
 }
 
 func openSSHTmuxSession(database *gorm.DB, mk *security.MasterKeyManager, msg types.TmuxOpenMsg, prefix string, progress func(string), ptyRows, ptyCols int) tea.Msg {

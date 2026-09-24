@@ -40,6 +40,7 @@ const CloseSessionTakenOver = "session taken over"
 
 type TmuxSessionInfo struct {
 	Name        string `json:"name"`
+	SessionID   string `json:"session_id,omitempty"`
 	CreatedUnix int64  `json:"created_unix"`
 	Attached    bool   `json:"attached"`
 	Daemon      bool   `json:"daemon,omitempty"`

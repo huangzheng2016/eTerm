@@ -715,12 +715,12 @@ func TestOpenTmuxSession(t *testing.T) {
 		name       string
 		target     string
 		sessionID  string
-		okPayload  string
+		okPayload  relay.TmuxSessionInfo
 		wantTarget string
 		wantID     string
 	}{
-		{name: "new", target: relay.TargetTmuxNew, okPayload: "tmux-abc123", wantTarget: relay.TargetTmuxNew},
-		{name: "attach", target: relay.TargetTmuxAttach, sessionID: "work", wantTarget: relay.TargetTmuxAttach, wantID: "work"},
+		{name: "new", target: relay.TargetTmuxNew, okPayload: relay.TmuxSessionInfo{Name: "work", SessionID: "uuid-1"}, wantTarget: relay.TargetTmuxNew},
+		{name: "attach", target: relay.TargetTmuxAttach, sessionID: "work", okPayload: relay.TmuxSessionInfo{SessionID: "work", Name: "work"}, wantTarget: relay.TargetTmuxAttach, wantID: "work"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -729,19 +729,20 @@ func TestOpenTmuxSession(t *testing.T) {
 				if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != tt.wantTarget || op.SessionID != tt.wantID || op.Rows != 31 || op.Cols != 111 {
 					t.Errorf("bad open request: %+v err=%v", op, err)
 				}
-				sendFrame(c, ctx, relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: []byte(tt.okPayload)})
+				payload, _ := json.Marshal(tt.okPayload)
+				sendFrame(c, ctx, relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: payload})
 			})
 			defer server.Close()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			is, sessionID, err := OpenTmuxSession(ctx, server.URL, "", "", false, "peer-a", tt.target, tt.sessionID, 31, 111)
+			is, sessionInfo, err := OpenTmuxSession(ctx, server.URL, "", "", false, "peer-a", tt.target, tt.sessionID, 31, 111)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer is.Close()
-			if sessionID != tt.okPayload {
-				t.Fatalf("sessionID = %q", sessionID)
+			if sessionInfo != tt.okPayload {
+				t.Fatalf("sessionInfo = %+v", sessionInfo)
 			}
 		})
 	}
