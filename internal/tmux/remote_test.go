@@ -43,3 +43,27 @@ func TestRemoteConfigArgTildeUnquoted(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestEnsureRemoteConfigUsesConfiguredPath(t *testing.T) {
+	got, err := EnsureRemoteConfig(nil, "  /tmp/custom-tmux.conf  ")
+	if err != nil {
+		t.Fatalf("EnsureRemoteConfig returned error: %v", err)
+	}
+	if got != "/tmp/custom-tmux.conf" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRemoteTempConfigCommand(t *testing.T) {
+	got := remoteTempConfigCommand()
+	for _, want := range []string{
+		"mktemp /tmp/eterm-tmux.XXXXXXXX",
+		`chmod 600 "$tmp"`,
+		`cat > "$tmp"`,
+		`printf '%s\n' "$tmp"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("command %q does not contain %q", got, want)
+		}
+	}
+}

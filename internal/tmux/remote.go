@@ -63,15 +63,36 @@ func EnsureRemoteConfig(client *ssh.Client, configured string) (string, error) {
 	if configured != "" {
 		return configured, nil
 	}
-	out, err := internalssh.RunCommand(client, "cat "+RemoteConfigPath+" 2>/dev/null", "")
-	if err == nil && string(out) == ManagedConfig {
+	out, readErr := internalssh.RunCommand(client, "cat "+RemoteConfigPath+" 2>/dev/null", "")
+	if readErr == nil && string(out) == ManagedConfig {
 		return RemoteConfigPath, nil
 	}
 	cmd := fmt.Sprintf("umask 077 && mkdir -p %s && cat > %s", remoteConfigDir, RemoteConfigPath)
-	if _, err := internalssh.RunCommand(client, cmd, ManagedConfig); err != nil {
+	_, writeErr := internalssh.RunCommand(client, cmd, ManagedConfig)
+	if writeErr == nil {
+		return RemoteConfigPath, nil
+	}
+	tmpPath, tmpErr := writeRemoteTempConfig(client)
+	if tmpErr != nil {
+		return "", fmt.Errorf("write %s: %w; temporary fallback: %v", RemoteConfigPath, writeErr, tmpErr)
+	}
+	return tmpPath, nil
+}
+
+func writeRemoteTempConfig(client *ssh.Client) (string, error) {
+	out, err := internalssh.RunCommand(client, remoteTempConfigCommand(), ManagedConfig)
+	if err != nil {
 		return "", err
 	}
-	return RemoteConfigPath, nil
+	path := strings.TrimSpace(string(out))
+	if path == "" {
+		return "", errors.New("remote temporary tmux config path is empty")
+	}
+	return path, nil
+}
+
+func remoteTempConfigCommand() string {
+	return `tmp=$(mktemp /tmp/eterm-tmux.XXXXXXXX) && chmod 600 "$tmp" && cat > "$tmp" && printf '%s\n' "$tmp"`
 }
 
 func RemoteAttachCommand(configFile, name string) string {
