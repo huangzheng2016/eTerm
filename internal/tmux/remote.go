@@ -75,11 +75,11 @@ func EnsureRemoteConfig(client *ssh.Client, configured string) (string, error) {
 }
 
 func RemoteAttachCommand(configFile, name string) string {
-	return remoteTmuxCmd(configFile, "attach-session -t "+quoteShell(name))
+	return "exec " + remoteTmuxCmd(configFile, "attach-session -t "+quoteShell(name))
 }
 
 func RemoteNewCommand(configFile, name string) string {
-	return remoteTmuxCmd(configFile, "new-session -A -s "+quoteShell(name))
+	return "exec " + remoteTmuxCmd(configFile, "new-session -A -s "+quoteShell(name))
 }
 
 func remoteTmuxCmd(configFile, args string) string {

@@ -145,7 +145,7 @@ func TestOpenSSHTmuxSessionAttach(t *testing.T) {
 	if opened.tmuxSession != "work" {
 		t.Fatalf("tmuxSession = %q", opened.tmuxSession)
 	}
-	if len(opened.initialCommands) != 1 || opened.initialCommands[0] != "tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
+	if len(opened.initialCommands) != 1 || opened.initialCommands[0] != "exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
 		t.Fatalf("initialCommands = %#v", opened.initialCommands)
 	}
 	if opened.alias != "[T]prod-work" {
@@ -169,12 +169,12 @@ func TestOpenSSHTmuxSessionNew(t *testing.T) {
 	if opened.tmuxSession != defaultSSHTmuxSessionName {
 		t.Fatalf("tmuxSession = %q", opened.tmuxSession)
 	}
-	if len(opened.initialCommands) != 1 || !strings.Contains(opened.initialCommands[0], "new-session -A -s '"+defaultSSHTmuxSessionName+"'") {
+	if len(opened.initialCommands) != 1 || !strings.Contains(opened.initialCommands[0], "exec tmux") || !strings.Contains(opened.initialCommands[0], "new-session -A -s '"+defaultSSHTmuxSessionName+"'") {
 		t.Fatalf("initialCommands = %#v", opened.initialCommands)
 	}
 }
 
-func TestOpenSSHTmuxSessionConfigWarn(t *testing.T) {
+func TestOpenSSHTmuxSessionConfigError(t *testing.T) {
 	database, host := sshTmuxTestDB(t)
 	stubSSHTmux(t)
 	sshTmuxEnsureConfig = func(*ssh.Client, string) (string, error) {
@@ -183,15 +183,12 @@ func TestOpenSSHTmuxSessionConfigWarn(t *testing.T) {
 
 	msg := openSSHTmuxSession(database, nil, types.TmuxOpenMsg{HostID: host.ID, Name: "work"}, "Open remote tmux", func(string) {}, 24, 80)
 
-	opened, ok := msg.(openSSHUITabMsg)
+	opened, ok := msg.(types.ConnErrorMsg)
 	if !ok {
-		t.Fatalf("got %T want openSSHUITabMsg", msg)
+		t.Fatalf("got %T want ConnErrorMsg", msg)
 	}
-	if !opened.configWarn {
-		t.Fatal("configWarn = false, want true")
-	}
-	if len(opened.initialCommands) != 1 || !strings.HasPrefix(opened.initialCommands[0], "tmux attach-session") {
-		t.Fatalf("initialCommands = %#v, want fallback without -f", opened.initialCommands)
+	if opened.Err == nil || !strings.Contains(opened.Err.Error(), "prepare tmux config") {
+		t.Fatalf("err = %v", opened.Err)
 	}
 }
 
@@ -199,9 +196,12 @@ func TestSSHReconnectInitialCommandsTmux(t *testing.T) {
 	database, _ := sshTmuxTestDB(t)
 	stubSSHTmux(t)
 
-	cmds := sshReconnectInitialCommands(database, &internalssh.ConnectResult{}, &db.Host{}, "work")
+	cmds, err := sshReconnectInitialCommands(database, &internalssh.ConnectResult{}, &db.Host{}, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if len(cmds) != 1 || cmds[0] != "tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
+	if len(cmds) != 1 || cmds[0] != "exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
 		t.Fatalf("cmds = %#v", cmds)
 	}
 }
@@ -209,7 +209,10 @@ func TestSSHReconnectInitialCommandsTmux(t *testing.T) {
 func TestSSHReconnectInitialCommandsPlain(t *testing.T) {
 	database, _ := sshTmuxTestDB(t)
 
-	cmds := sshReconnectInitialCommands(database, &internalssh.ConnectResult{}, &db.Host{RemoteCommand: "uptime"}, "")
+	cmds, err := sshReconnectInitialCommands(database, &internalssh.ConnectResult{}, &db.Host{RemoteCommand: "uptime"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(cmds) != 1 || cmds[0] != "uptime" {
 		t.Fatalf("cmds = %#v", cmds)

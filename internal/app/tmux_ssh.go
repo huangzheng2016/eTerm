@@ -138,6 +138,9 @@ func probeSSHTmuxHost(database *gorm.DB, mk *security.MasterKeyManager, hostID u
 		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: tmux probe failed: %w", label, err)}
 	}
 	configFile, cfgErr := sshTmuxEnsureConfig(res.client.Client, tmuxConfiguredPath(database))
+	if cfgErr != nil {
+		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: prepare tmux config: %w", label, cfgErr)}
+	}
 	sessions, err := sshTmuxListSessions(res.client.Client, configFile)
 	if err != nil {
 		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: %w", label, err)}
@@ -215,6 +218,9 @@ func controlSSHTmuxSession(database *gorm.DB, mk *security.MasterKeyManager, hos
 	defer res.client.Close()
 	label := hostDisplayName(res.host)
 	configFile, cfgErr := sshTmuxEnsureConfig(res.client.Client, tmuxConfiguredPath(database))
+	if cfgErr != nil {
+		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: prepare tmux config: %w", label, cfgErr)}
+	}
 	if err := action(res.client.Client, configFile); err != nil {
 		return sshTmuxMenuReadyMsg{hostID: hostID, hostLabel: label, err: fmt.Errorf("%s: %w", label, err)}
 	}
@@ -232,6 +238,10 @@ func openSSHTmuxSession(database *gorm.DB, mk *security.MasterKeyManager, msg ty
 		return res.msg
 	}
 	configFile, cfgErr := sshTmuxEnsureConfig(res.client.Client, tmuxConfiguredPath(database))
+	if cfgErr != nil {
+		res.client.Close()
+		return types.ConnErrorMsg{Err: fmt.Errorf("prepare tmux config: %w", cfgErr), Target: hostDisplayName(res.host)}
+	}
 	sessionName := msg.Name
 	var tmuxCmd string
 	if msg.New {

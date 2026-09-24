@@ -213,7 +213,11 @@ func (a App) applySSHReconnect(msg types.SSHReconnectMsg) (App, tea.Cmd) {
 		startPortForwards(database, client.Client, hostID, is)
 
 		alias := sshReconnectAlias(a.tabs[idx].Title, hostDisplayName(host), tmuxSession)
-		initialCommands := sshReconnectInitialCommands(database, client, &host, tmuxSession)
+		initialCommands, configErr := sshReconnectInitialCommands(database, client, &host, tmuxSession)
+		if configErr != nil {
+			_ = is.Close()
+			return types.ConnErrorMsg{Err: fmt.Errorf("prepare tmux config: %w", configErr), Target: hostDisplayName(host), Retry: types.SSHReconnectMsg{HostID: hostID, StreamID: msg.StreamID}}
+		}
 		return openSSHUITabMsg{is: is, alias: alias, hostID: hostID, historyID: history.ID, replaceTabAt: idx, initialCommands: initialCommands, tmuxSession: tmuxSession}
 	}
 	return a, tea.Batch(progressCmd, dial)
@@ -226,15 +230,15 @@ func sshReconnectAlias(tabTitle, hostAlias, tmuxSession string) string {
 	return hostAlias
 }
 
-func sshReconnectInitialCommands(database *gorm.DB, client *internalssh.ConnectResult, host *db.Host, tmuxSession string) []string {
+func sshReconnectInitialCommands(database *gorm.DB, client *internalssh.ConnectResult, host *db.Host, tmuxSession string) ([]string, error) {
 	if tmuxSession == "" {
-		return initialSSHCommandsForHost(host, "")
+		return initialSSHCommandsForHost(host, ""), nil
 	}
 	configFile, cfgErr := sshTmuxEnsureConfig(client.Client, tmuxConfiguredPath(database))
 	if cfgErr != nil {
-		configFile = ""
+		return nil, cfgErr
 	}
-	return []string{tmux.RemoteAttachCommand(configFile, tmuxSession)}
+	return []string{tmux.RemoteAttachCommand(configFile, tmuxSession)}, nil
 }
 
 func (a App) applyOpenSSHUITab(msg openSSHUITabMsg) (App, tea.Cmd) {

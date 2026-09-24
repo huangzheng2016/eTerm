@@ -7,21 +7,21 @@ import (
 
 func TestRemoteAttachCommand(t *testing.T) {
 	got := RemoteAttachCommand("/cfg/tmux.conf", "work")
-	if got != "tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
+	if got != "exec tmux -f '/cfg/tmux.conf' attach-session -t 'work'" {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestRemoteAttachCommandNoConfig(t *testing.T) {
 	got := RemoteAttachCommand("", "work")
-	if got != "tmux attach-session -t 'work'" {
+	if got != "exec tmux attach-session -t 'work'" {
 		t.Fatalf("got %q", got)
 	}
 }
 
 func TestRemoteNewCommand(t *testing.T) {
 	got := RemoteNewCommand(RemoteConfigPath, "eterm")
-	if !strings.HasPrefix(got, "tmux -f $HOME/.config/eterm/tmux.conf new-session -A -s 'eterm'") {
+	if !strings.HasPrefix(got, "exec tmux -f $HOME/.config/eterm/tmux.conf new-session -A -s 'eterm'") {
 		t.Fatalf("got %q", got)
 	}
 }
