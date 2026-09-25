@@ -245,7 +245,8 @@ func daemonSessionRename(mgr *sessionManager, sender *frameSender, streamID uint
 		return
 	}
 	log.Printf("eterm daemon session rename id=%q new=%q", id, newName)
-	if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID}) == nil {
+	payload, _ := json.Marshal(relay.TmuxSessionInfo{Name: newName, SessionID: id, Daemon: true})
+	if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: streamID, Payload: payload}) == nil {
 		_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: streamID})
 	}
 }

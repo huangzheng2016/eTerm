@@ -117,9 +117,10 @@ type aiToolSendKeysDoneMsg struct {
 	deadline time.Time
 }
 type aiToolRenameDoneMsg struct {
-	req  aiToolRequest
-	peer types.RemotePeer
-	err  error
+	req          aiToolRequest
+	peer         types.RemotePeer
+	newSessionID string
+	err          error
 }
 
 func waitAIToolRequest(ch <-chan aiToolRequest) tea.Cmd {
@@ -419,13 +420,14 @@ func (a App) handleAIToolRequest(req aiToolRequest) (App, tea.Cmd) {
 		return a, func() tea.Msg {
 			cfg := esync.LoadConfig(database, mk)
 			base, tunnel, err := syncHTTPBaseFor(database, mk, cfg)
+			var newID string
 			if err == nil {
 				if tunnel != nil {
 					defer tunnel.Close()
 				}
-				err = remoteRenameTmuxSession(req.ctx, base, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, req.arg, req.arg2)
+				newID, err = remoteRenameTmuxSession(req.ctx, base, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, req.arg, req.arg2)
 			}
-			return aiToolRenameDoneMsg{req: req, peer: peer, err: err}
+			return aiToolRenameDoneMsg{req: req, peer: peer, newSessionID: newID, err: err}
 		}
 	case aiToolOpenLocal:
 		before := a.aiTabInfos()

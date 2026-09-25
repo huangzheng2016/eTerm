@@ -771,14 +771,36 @@ func TestRenameTmuxSession(t *testing.T) {
 		if err := json.Unmarshal(f.Payload, &op); err != nil || op.Target != relay.TargetTmuxRename || op.SessionID != "x1" || op.Name != "work" {
 			t.Errorf("bad rename request: %+v err=%v", op, err)
 		}
+		payload, _ := json.Marshal(relay.TmuxSessionInfo{Name: "work", SessionID: "work"})
+		sendFrame(c, ctx, relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: payload})
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	newID, err := RenameTmuxSession(ctx, server.URL, "", "", false, "peer-a", "x1", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newID != "work" {
+		t.Fatalf("newID = %q, want %q", newID, "work")
+	}
+}
+
+func TestRenameTmuxSessionWithoutIdentityKeepsSessionID(t *testing.T) {
+	server := openServer(t, func(ctx context.Context, c *websocket.Conn, f relay.Frame) {
 		sendFrame(c, ctx, relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID})
 	})
 	defer server.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := RenameTmuxSession(ctx, server.URL, "", "", false, "peer-a", "x1", "work"); err != nil {
+	newID, err := RenameTmuxSession(ctx, server.URL, "", "", false, "peer-a", "x1", "work")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if newID != "x1" {
+		t.Fatalf("newID = %q, want %q", newID, "x1")
 	}
 }
 

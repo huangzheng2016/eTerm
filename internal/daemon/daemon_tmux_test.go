@@ -669,12 +669,19 @@ func TestHandleOpenTmuxKillAndRename(t *testing.T) {
 	callOpen(t, 6, relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: "work", Name: "ops"}, mgr, sender)
 
 	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
-	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
+	renameOK := waitDaemonFrame(t, out, relay.FrameOpenOK)
 	if killed != "work" {
 		t.Fatalf("killed = %q", killed)
 	}
 	if renamedFrom != "work" || renamedTo != "ops" {
 		t.Fatalf("rename = %q -> %q", renamedFrom, renamedTo)
+	}
+	var info relay.TmuxSessionInfo
+	if err := json.Unmarshal(renameOK.Payload, &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != "ops" || info.SessionID != "ops" || info.Daemon {
+		t.Fatalf("rename identity = %+v", info)
 	}
 }
 
