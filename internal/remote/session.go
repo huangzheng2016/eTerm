@@ -118,9 +118,21 @@ func KillTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, inse
 	return err
 }
 
-func RenameTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) error {
-	_, err := openControl(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: relay.TargetTmuxRename, SessionID: sessionID, Name: name})
-	return err
+func RenameTmuxSession(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) (string, error) {
+	okPayload, err := openControl(ctx, serverURL, apiKey, tenant, insecureTLS, relay.OpenRequest{PeerID: peerID, Target: relay.TargetTmuxRename, SessionID: sessionID, Name: name})
+	if err != nil {
+		return "", err
+	}
+	var info relay.TmuxSessionInfo
+	if len(okPayload) != 0 {
+		if err := json.Unmarshal(okPayload, &info); err != nil {
+			return "", fmt.Errorf("decode renamed tmux session: %w", err)
+		}
+	}
+	if info.SessionID == "" {
+		info.SessionID = sessionID
+	}
+	return info.SessionID, nil
 }
 
 func RenamePeer(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, name string) error {

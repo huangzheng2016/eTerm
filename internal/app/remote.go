@@ -342,24 +342,26 @@ func (a App) renameRemoteTmuxSession(msg types.RemoteTmuxRenameMsg) (App, tea.Cm
 		if tunnel != nil {
 			defer tunnel.Close()
 		}
-		if err := remoteRenameTmuxSession(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID, name); err != nil {
+		newID, err := remoteRenameTmuxSession(context.Background(), baseURL, cfg.APIKey, cfg.TenantID(), cfg.InsecureTLS, peer.ID, sessionID, name)
+		if err != nil {
 			return types.RemoteTmuxSessionsLoadedMsg{Peer: peer, Err: err}
 		}
-		return remoteTmuxRenameAppliedMsg{Peer: peer, OldSessionID: sessionID, Name: name}
+		return remoteTmuxRenameAppliedMsg{Peer: peer, OldSessionID: sessionID, NewSessionID: newID, Name: name}
 	}
 }
 
-func (a *App) renameRemoteTmuxTabs(peerID, sessionID, name string) {
+func (a *App) renameRemoteTmuxTabs(peerID, oldSessionID, newSessionID, name string) {
 	for i := range a.tabs {
 		sm, ok := a.tabs[i].Model.(*sshview.Model)
 		if !ok {
 			continue
 		}
 		spec := sm.RemoteReconnect()
-		if spec == nil || !spec.Tmux || spec.Peer.ID != peerID || spec.SessionID != sessionID {
+		if spec == nil || !spec.Tmux || spec.Peer.ID != peerID || spec.SessionID != oldSessionID {
 			continue
 		}
 		spec.Target = relay.TargetTmuxAttach
+		spec.SessionID = newSessionID
 		spec.SessionName = name
 		sm.SetRemoteReconnect(spec)
 		a.tabs[i].Title = remoteTmuxTabTitle(spec.Peer.Name, name)

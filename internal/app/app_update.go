@@ -807,7 +807,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.renameRemoteTmuxSession(msg)
 
 	case remoteTmuxRenameAppliedMsg:
-		a.renameRemoteTmuxTabs(msg.Peer.ID, msg.OldSessionID, msg.Name)
+		a.renameRemoteTmuxTabs(msg.Peer.ID, msg.OldSessionID, msg.NewSessionID, msg.Name)
 		return a, a.loadRemoteTmuxSessions(msg.Peer)
 
 	case types.RemotePeerRenameRequestMsg:
@@ -1186,7 +1186,7 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case aiToolRenameDoneMsg:
 		if msg.err == nil {
-			a.renameRemoteTmuxTabs(msg.peer.ID, msg.req.arg, msg.req.arg2)
+			a.renameRemoteTmuxTabs(msg.peer.ID, msg.req.arg, msg.newSessionID, msg.req.arg2)
 		}
 		msg.req.respond(aiToolResult{err: msg.err})
 		return a, nil

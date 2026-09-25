@@ -122,7 +122,10 @@ func TestDaemonSessionLifecycleWithoutTmux(t *testing.T) {
 		payload, _ := json.Marshal(relay.OpenRequest{Target: relay.TargetTmuxRename, SessionID: sessionID, Name: "work"})
 		return relay.Frame{Type: relay.FrameOpen, StreamID: 10, Payload: payload}
 	}(), mgr, sender, ctx, ctx)
-	_ = waitDaemonFrame(t, out, relay.FrameOpenOK)
+	renameInfo := readDaemonSessionInfo(t, waitDaemonFrame(t, out, relay.FrameOpenOK))
+	if renameInfo.Name != "work" || renameInfo.SessionID != sessionID || !renameInfo.Daemon {
+		t.Fatalf("rename identity = %+v", renameInfo)
+	}
 	if mgr.namedGet(sessionID) == nil || mgr.namedGet(sessionID).name != "work" {
 		t.Fatal("rename did not retitle the session")
 	}

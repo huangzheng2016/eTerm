@@ -495,7 +495,8 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 			openErr(err)
 			return
 		}
-		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
+		payload, _ := json.Marshal(relay.TmuxSessionInfo{Name: req.Name, SessionID: req.Name})
+		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID, Payload: payload}) == nil {
 			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
 		}
 	case relay.TargetPeerRename:

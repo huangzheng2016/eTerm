@@ -51,6 +51,7 @@ type remoteReconnectRetryMsg struct {
 type remoteTmuxRenameAppliedMsg struct {
 	Peer         types.RemotePeer
 	OldSessionID string
+	NewSessionID string
 	Name         string
 }
 

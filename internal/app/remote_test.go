@@ -85,7 +85,7 @@ func TestRenameRemoteTmuxUpdatesOpenTabTitle(t *testing.T) {
 		tabs:      []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}},
 	}
 
-	a.renameRemoteTmuxTabs("p1", "work", "ops")
+	a.renameRemoteTmuxTabs("p1", "work", "ops", "ops")
 
 	if a.tabs[0].Title != "[T]peer-ops" {
 		t.Fatalf("title = %q", a.tabs[0].Title)
@@ -94,7 +94,7 @@ func TestRenameRemoteTmuxUpdatesOpenTabTitle(t *testing.T) {
 		t.Fatal("remote tmux rename did not set userRenamed")
 	}
 	spec := tab.RemoteReconnect()
-	if spec == nil || spec.SessionID != "work" || spec.SessionName != "ops" || spec.Target != relay.TargetTmuxAttach {
+	if spec == nil || spec.SessionID != "ops" || spec.SessionName != "ops" || spec.Target != relay.TargetTmuxAttach {
 		t.Fatalf("spec = %+v", spec)
 	}
 }
@@ -102,8 +102,8 @@ func TestRenameRemoteTmuxUpdatesOpenTabTitle(t *testing.T) {
 func TestRenameRemoteTmuxDoesNotUpdateTabWhenRemoteRenameFails(t *testing.T) {
 	oldRename := remoteRenameTmuxSession
 	t.Cleanup(func() { remoteRenameTmuxSession = oldRename })
-	remoteRenameTmuxSession = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) error {
-		return errors.New("rename failed")
+	remoteRenameTmuxSession = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) (string, error) {
+		return "", errors.New("rename failed")
 	}
 	tab := remoteTestTmuxTab()
 	a := remoteHTTPTestApp(t)
@@ -126,6 +126,58 @@ func TestRenameRemoteTmuxDoesNotUpdateTabWhenRemoteRenameFails(t *testing.T) {
 	spec := tab.RemoteReconnect()
 	if spec == nil || spec.SessionID != "work" {
 		t.Fatalf("spec = %+v", spec)
+	}
+}
+
+func TestRenameRemoteTmuxTwiceUsesLatestSessionID(t *testing.T) {
+	oldRename := remoteRenameTmuxSession
+	oldList := remoteListTmuxSessions
+	t.Cleanup(func() {
+		remoteRenameTmuxSession = oldRename
+		remoteListTmuxSessions = oldList
+	})
+	var renameTargets []string
+	remoteRenameTmuxSession = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID, sessionID, name string) (string, error) {
+		renameTargets = append(renameTargets, sessionID)
+		return name, nil
+	}
+	remoteListTmuxSessions = func(ctx context.Context, serverURL, apiKey, tenant string, insecureTLS bool, peerID string) ([]relay.TmuxSessionInfo, error) {
+		return nil, nil
+	}
+
+	tab := remoteTestTmuxTab()
+	tab.SetRemoteReconnect(&types.RemoteReconnect{
+		Peer:        types.RemotePeer{ID: "p1", Name: "peer"},
+		Tmux:        true,
+		Target:      relay.TargetTmuxAttach,
+		SessionID:   "tmux-a8d4e3",
+		SessionName: "tmux-a8d4e3",
+	})
+	a := remoteHTTPTestApp(t)
+	a.viewState = MainView
+	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-tmux-a8d4e3", Model: tab}}
+	peer := types.RemotePeer{ID: "p1", Name: "peer"}
+
+	rename := func(sessionID, name string) {
+		next, cmd := a.renameRemoteTmuxSession(types.RemoteTmuxRenameMsg{Peer: peer, SessionID: sessionID, Name: name})
+		a = next
+		applied, ok := cmd().(remoteTmuxRenameAppliedMsg)
+		if !ok {
+			t.Fatalf("got %T want remoteTmuxRenameAppliedMsg", cmd())
+		}
+		next2, _ := a.Update(applied)
+		a = next2.(App)
+	}
+
+	rename("tmux-a8d4e3", "ops")
+	spec := tab.RemoteReconnect()
+	if spec.SessionID != "ops" {
+		t.Fatalf("spec.SessionID = %q, want %q", spec.SessionID, "ops")
+	}
+
+	rename(spec.SessionID, "final")
+	if len(renameTargets) != 2 || renameTargets[0] != "tmux-a8d4e3" || renameTargets[1] != "ops" {
+		t.Fatalf("rename targets = %v", renameTargets)
 	}
 }
 
@@ -463,7 +515,7 @@ func TestRemoteTmuxRenameAppliedUpdatesTabAndRefreshesList(t *testing.T) {
 	a := remoteHTTPTestApp(t)
 	a.tabs = []Tab{{Type: SSHTab, Title: "[T]peer-work", Model: tab}}
 
-	next, cmd := a.Update(remoteTmuxRenameAppliedMsg{Peer: types.RemotePeer{ID: "p1", Name: "peer"}, OldSessionID: "work", Name: "ops"})
+	next, cmd := a.Update(remoteTmuxRenameAppliedMsg{Peer: types.RemotePeer{ID: "p1", Name: "peer"}, OldSessionID: "work", NewSessionID: "ops", Name: "ops"})
 	a = next.(App)
 
 	if a.tabs[0].Title != "[T]peer-ops" {
