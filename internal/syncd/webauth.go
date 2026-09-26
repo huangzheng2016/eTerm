@@ -18,12 +18,14 @@ import (
 const webCookieName = "eterm_web"
 
 var (
-	webSessionSlideTTL  = 12 * time.Hour
-	webSessionMaxTTL    = 7 * 24 * time.Hour
-	webLoginRateWindow  = time.Minute
-	webLoginRateCount   = 5
-	webLoginBackoffBase = 30 * time.Second
-	webLoginBackoffMax  = time.Hour
+	webSessionSlideTTL        = 12 * time.Hour
+	webSessionMaxTTL          = 7 * 24 * time.Hour
+	webSessionPersistInterval = time.Minute
+	webLoginRateWindow        = time.Minute
+	webLoginRateCount         = 5
+	webLoginBackoffBase       = 30 * time.Second
+	webLoginBackoffMax        = time.Hour
+	webLoginSweepThreshold    = 1024
 )
 
 type WebSession struct {
@@ -52,9 +54,11 @@ func hashWebToken(token string) string {
 }
 
 type webSessionCache struct {
-	tenant    string
-	createdAt time.Time
-	expiresAt time.Time
+	tenant      string
+	createdAt   time.Time
+	expiresAt   time.Time
+	persistedAt time.Time
+	revoked     bool
 }
 
 type loginLimiterEntry struct {
@@ -115,7 +119,7 @@ func (a *WebAuth) createSession(tenant string) (string, time.Time, error) {
 		return "", time.Time{}, err
 	}
 	a.mu.Lock()
-	a.cache[entry.TokenHash] = &webSessionCache{tenant: tenant, createdAt: now, expiresAt: entry.ExpiresAt}
+	a.cache[entry.TokenHash] = &webSessionCache{tenant: tenant, createdAt: now, expiresAt: entry.ExpiresAt, persistedAt: now}
 	a.mu.Unlock()
 	return token, entry.ExpiresAt, nil
 }
@@ -134,17 +138,27 @@ func (a *WebAuth) validateToken(token string) (string, bool) {
 
 	a.mu.Lock()
 	if c, ok := a.cache[hash]; ok {
+		if c.revoked {
+			a.mu.Unlock()
+			return "", false
+		}
 		if !c.expiresAt.After(now) {
 			delete(a.cache, hash)
 			a.mu.Unlock()
 			a.deleteSession(hash)
 			return "", false
 		}
-		expires := a.touchExpiry(c.createdAt, now)
-		c.expiresAt = expires
+		c.expiresAt = a.touchExpiry(c.createdAt, now)
 		tenant := c.tenant
+		expires := c.expiresAt
+		persist := now.Sub(c.persistedAt) >= webSessionPersistInterval
+		if persist {
+			c.persistedAt = now
+		}
 		a.mu.Unlock()
-		a.touchSession(hash, now, expires)
+		if persist {
+			a.touchSession(hash, now, expires)
+		}
 		return tenant, true
 	}
 	a.mu.Unlock()
@@ -158,10 +172,17 @@ func (a *WebAuth) validateToken(token string) (string, bool) {
 		return "", false
 	}
 	expires := a.touchExpiry(entry.CreatedAt, now)
+	persist := now.Sub(entry.TouchedAt) >= webSessionPersistInterval
+	c := &webSessionCache{tenant: entry.Tenant, createdAt: entry.CreatedAt, expiresAt: expires, persistedAt: entry.TouchedAt}
+	if persist {
+		c.persistedAt = now
+	}
 	a.mu.Lock()
-	a.cache[hash] = &webSessionCache{tenant: entry.Tenant, createdAt: entry.CreatedAt, expiresAt: expires}
+	a.cache[hash] = c
 	a.mu.Unlock()
-	a.touchSession(hash, now, expires)
+	if persist {
+		a.touchSession(hash, now, expires)
+	}
 	return entry.Tenant, true
 }
 
@@ -171,18 +192,40 @@ func (a *WebAuth) touchSession(hash string, now, expires time.Time) {
 }
 
 func (a *WebAuth) deleteSession(hash string) {
-	_ = a.engine.DB.Where("token_hash = ?", hash).Delete(&WebSession{}).Error
+	if err := a.engine.DB.Where("token_hash = ?", hash).Delete(&WebSession{}).Error; err != nil {
+		log.Printf("syncd web session delete failed token=%s: %v", shortID(hash), err)
+	}
 }
 
-func (a *WebAuth) revokeToken(token string) {
+func (a *WebAuth) revokeToken(token string) error {
 	hash := hashWebToken(token)
+	if err := a.engine.DB.Where("token_hash = ?", hash).Delete(&WebSession{}).Error; err != nil {
+		log.Printf("syncd web session revoke failed token=%s: %v", shortID(hash), err)
+		a.mu.Lock()
+		if c := a.cache[hash]; c != nil {
+			c.revoked = true
+		}
+		a.mu.Unlock()
+		return err
+	}
 	a.mu.Lock()
 	delete(a.cache, hash)
 	a.mu.Unlock()
-	a.deleteSession(hash)
+	return nil
 }
 
-func (a *WebAuth) revokeTenant(tenant string) {
+func (a *WebAuth) revokeTenant(tenant string) error {
+	if err := a.engine.DB.Where("tenant = ?", tenant).Delete(&WebSession{}).Error; err != nil {
+		log.Printf("syncd web session revoke-all failed tenant=%s: %v", shortID(tenant), err)
+		a.mu.Lock()
+		for _, c := range a.cache {
+			if c.tenant == tenant {
+				c.revoked = true
+			}
+		}
+		a.mu.Unlock()
+		return err
+	}
 	a.mu.Lock()
 	for h, c := range a.cache {
 		if c.tenant == tenant {
@@ -190,7 +233,20 @@ func (a *WebAuth) revokeTenant(tenant string) {
 		}
 	}
 	a.mu.Unlock()
-	_ = a.engine.DB.Where("tenant = ?", tenant).Delete(&WebSession{}).Error
+	return nil
+}
+
+func (a *WebAuth) sweepExpiredLocked(now time.Time) {
+	for k, e := range a.limits {
+		if now.Sub(e.windowStart) >= webLoginRateWindow && !now.Before(e.lockedUntil) {
+			delete(a.limits, k)
+		}
+	}
+	for h, c := range a.cache {
+		if !c.expiresAt.After(now) {
+			delete(a.cache, h)
+		}
+	}
 }
 
 func (a *WebAuth) tenantKnown(tenant string) bool {
@@ -227,6 +283,9 @@ func (a *WebAuth) allowLogin(keys ...string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if len(a.limits) > webLoginSweepThreshold {
+		a.sweepExpiredLocked(now)
+	}
 	for _, k := range keys {
 		e := a.limits[k]
 		if e == nil {
@@ -329,14 +388,20 @@ func (a *WebAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (a *WebAuth) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(webCookieName); err == nil && c.Value != "" {
-		a.revokeToken(c.Value)
+		if err := a.revokeToken(c.Value); err != nil {
+			http.Error(w, "logout failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	a.clearCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *WebAuth) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
-	a.revokeTenant(tenantFromContext(r))
+	if err := a.revokeTenant(tenantFromContext(r)); err != nil {
+		http.Error(w, "logout failed", http.StatusInternalServerError)
+		return
+	}
 	a.clearCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }

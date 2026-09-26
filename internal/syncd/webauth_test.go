@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -402,4 +403,144 @@ func TestWebCookieAuthWSClient(t *testing.T) {
 	open, _ := json.Marshal(relay.OpenRequest{PeerID: "peer-ws", Target: "local"})
 	writeFrame(t, ctx, client, relay.Frame{Type: relay.FrameOpen, StreamID: 7, Payload: open})
 	expectFrame(t, ctx, daemon, relay.FrameOpen, 7)
+}
+
+func TestWebLoginLimiterSweep(t *testing.T) {
+	old := webLoginSweepThreshold
+	webLoginSweepThreshold = 4
+	t.Cleanup(func() { webLoginSweepThreshold = old })
+	web := NewWebAuth(testEngine(t), NewPeerRegistry(), true)
+
+	now := time.Now()
+	web.mu.Lock()
+	for i := 0; i < 5; i++ {
+		web.limits[fmt.Sprintf("tenant:stale%d", i)] = &loginLimiterEntry{windowStart: now.Add(-2 * time.Minute)}
+	}
+	web.limits["ip:fresh"] = &loginLimiterEntry{windowStart: now, attempts: 1}
+	web.limits["ip:locked"] = &loginLimiterEntry{windowStart: now, lockedUntil: now.Add(time.Hour)}
+	web.cache["stalehash"] = &webSessionCache{tenant: "t", expiresAt: now.Add(-time.Hour)}
+	web.cache["livehash"] = &webSessionCache{tenant: "t", expiresAt: now.Add(time.Hour)}
+	web.mu.Unlock()
+
+	if !web.allowLogin("ip:new") {
+		t.Fatal("fresh key rejected")
+	}
+	web.mu.Lock()
+	defer web.mu.Unlock()
+	if len(web.limits) != 3 {
+		t.Fatalf("limits = %d, want 3 (fresh + locked + new)", len(web.limits))
+	}
+	if _, ok := web.limits["tenant:stale0"]; ok {
+		t.Fatal("stale limiter entry not swept")
+	}
+	if _, ok := web.limits["ip:locked"]; !ok {
+		t.Fatal("locked limiter entry swept")
+	}
+	if _, ok := web.cache["stalehash"]; ok {
+		t.Fatal("expired cache entry not swept")
+	}
+	if _, ok := web.cache["livehash"]; !ok {
+		t.Fatal("live cache entry swept")
+	}
+}
+
+func TestWebSessionTouchThrottled(t *testing.T) {
+	srv, engine, peers, web := webServer(t, "secret", true)
+	tenant := etersync.TenantIDFromPassphrase("pw")
+	webRegisterPeer(peers, tenant, "peer-a")
+	cookie := webSessionCookie(t, webPostLogin(t, srv.URL, "pw"))
+
+	var entry WebSession
+	if err := engine.DB.Where("tenant = ?", tenant).First(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	t0 := entry.TouchedAt
+	if status, _ := webMe(t, srv.URL, cookie); status != 200 {
+		t.Fatalf("me status = %d", status)
+	}
+	if err := engine.DB.Where("tenant = ?", tenant).First(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !entry.TouchedAt.Equal(t0) {
+		t.Fatal("touch persisted within persist interval")
+	}
+
+	engine.DB.Model(&WebSession{}).Where("tenant = ?", tenant).
+		Update("touched_at", time.Now().UTC().Add(-10*time.Minute))
+	if err := engine.DB.Where("tenant = ?", tenant).First(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	stale := entry.TouchedAt
+	web.mu.Lock()
+	web.cache[hashWebToken(cookie.Value)].persistedAt = time.Now().Add(-2 * time.Minute)
+	web.mu.Unlock()
+	if status, _ := webMe(t, srv.URL, cookie); status != 200 {
+		t.Fatalf("me status = %d", status)
+	}
+	if err := engine.DB.Where("tenant = ?", tenant).First(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !entry.TouchedAt.After(stale) {
+		t.Fatal("stale touch not persisted after interval")
+	}
+}
+
+func TestWebRevokeFailureTombstonesSession(t *testing.T) {
+	srv, engine, peers, _ := webServer(t, "secret", true)
+	tenant := etersync.TenantIDFromPassphrase("pw")
+	webRegisterPeer(peers, tenant, "peer-a")
+	cookie := webSessionCookie(t, webPostLogin(t, srv.URL, "pw"))
+	logs := captureSyncdLog(t)
+
+	if err := engine.DB.Exec(`CREATE TRIGGER web_sessions_no_del BEFORE DELETE ON web_sessions BEGIN SELECT RAISE(ABORT, 'blocked'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	resp := webDo(t, "POST", srv.URL+"/api/v1/web/logout", cookie, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("logout status = %d, want 500 on revoke failure", resp.StatusCode)
+	}
+	var count int64
+	engine.DB.Model(&WebSession{}).Where("tenant = ?", tenant).Count(&count)
+	if count != 1 {
+		t.Fatalf("row deleted despite failing trigger: count = %d", count)
+	}
+	if status, _ := webMe(t, srv.URL, cookie); status != http.StatusUnauthorized {
+		t.Fatalf("me status = %d, revoked session resurrected", status)
+	}
+	if out := logs.String(); !strings.Contains(out, "revoke failed") {
+		t.Fatalf("revoke failure not logged: %q", out)
+	}
+}
+
+func TestWebRevokeAllFailureTombstonesSessions(t *testing.T) {
+	srv, engine, peers, _ := webServer(t, "secret", true)
+	tenant := etersync.TenantIDFromPassphrase("pw")
+	webRegisterPeer(peers, tenant, "peer-a")
+	c1 := webSessionCookie(t, webPostLogin(t, srv.URL, "pw"))
+	c2 := webSessionCookie(t, webPostLogin(t, srv.URL, "pw"))
+	logs := captureSyncdLog(t)
+
+	if err := engine.DB.Exec(`CREATE TRIGGER web_sessions_no_del BEFORE DELETE ON web_sessions BEGIN SELECT RAISE(ABORT, 'blocked'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	resp := webDo(t, "POST", srv.URL+"/api/v1/web/logout-all", c1, nil)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("logout-all status = %d, want 500 on revoke failure", resp.StatusCode)
+	}
+	if status, _ := webMe(t, srv.URL, c1); status != http.StatusUnauthorized {
+		t.Fatalf("me c1 status = %d", status)
+	}
+	if status, _ := webMe(t, srv.URL, c2); status != http.StatusUnauthorized {
+		t.Fatalf("me c2 status = %d, revoked session resurrected", status)
+	}
+	var count int64
+	engine.DB.Model(&WebSession{}).Where("tenant = ?", tenant).Count(&count)
+	if count != 2 {
+		t.Fatalf("rows deleted despite failing trigger: count = %d", count)
+	}
+	if out := logs.String(); !strings.Contains(out, "revoke-all failed") {
+		t.Fatalf("revoke-all failure not logged: %q", out)
+	}
 }
