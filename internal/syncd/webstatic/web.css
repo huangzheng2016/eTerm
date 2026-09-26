@@ -39,11 +39,9 @@ body { display: flex; flex-direction: column; }
 .devhead .spacer { flex: 1; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .card { background: #161616; border: 1px solid #333; border-radius: 6px; padding: 10px 12px; }
-.card.off { opacity: .45; }
 .card .title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card .title .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .badge { color: #6c6; font-size: 12px; white-space: nowrap; }
-.card .badge.off { color: #888; }
 .card .sub { color: #888; font-size: 12px; margin: 4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .card .panel { margin-top: 8px; border-top: 1px solid #2a2a2a; padding-top: 8px; display: none; }
@@ -51,7 +49,6 @@ body { display: flex; flex-direction: column; }
 .card .panel .empty { color: #777; font-size: 12px; }
 .card .panel .item { display: block; width: 100%; text-align: left; background: none; border: none; color: #ccc; padding: 6px 4px; font: inherit; cursor: pointer; border-radius: 3px; }
 .card .panel .item:hover { background: #222; }
-.card .panel .item .m { color: #888; font-size: 12px; }
 
 /* Fingerprint dialog. */
 .fpb { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 40; padding: 16px; }

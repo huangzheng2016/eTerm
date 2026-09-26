@@ -181,6 +181,7 @@
     this.lastAck = 0;
     this.opened = false;
     this.degraded = false;
+    this.accepting = false;
     this.closed = false;
     this.retries = 0;
     this.ws = null;
@@ -237,6 +238,19 @@
     if (f.streamID !== this.streamID) return;
     var h = this.h;
     if (f.type === F_OPEN_OK) {
+      if (this.accepting) {
+        // The accept only stores the trusted key: the daemon answers
+        // OpenOK+Close with no stream. Reopen the original target on a
+        // fresh stream to enter the real session; the accept's Close for
+        // the old streamID is filtered out below.
+        this.accepting = false;
+        this.streamID = newStreamID();
+        this.acked = 0;
+        this.lastAck = 0;
+        h.onstatus("connecting");
+        this.sendOpen(0);
+        return;
+      }
       this.opened = true;
       this.retries = 0;
       h.onstatus("connected");
@@ -266,6 +280,7 @@
         return;
       }
       this.fatal = true;
+      this.accepting = false;
       h.onexit(text || "open failed");
     } else if (f.type === F_DATA) {
       var dv = new DataView(f.payload.buffer, f.payload.byteOffset, f.payload.byteLength);
@@ -286,6 +301,7 @@
         this.sendFrame(F_ACK, new Uint8Array(ack));
       }
     } else if (f.type === F_CLOSE) {
+      if (this.accepting) return; // expected tail of the accept exchange
       this.fatal = true;
       h.onexit(decoder.decode(f.payload) || "session closed");
     }
@@ -325,6 +341,7 @@
     this.sendFrame(F_RESIZE, new Uint8Array(buf));
   };
   RelaySession.prototype.confirmFingerprint = function (info) {
+    this.accepting = true;
     var payload = jsonBytes({
       peer_id: this.o.peerID,
       target: "host-fingerprint-accept",
@@ -525,7 +542,10 @@
           if (def.scroll) term.scrollPages(def.scroll);
           else if (def.scrollTop) term.scrollToTop();
           else if (def.scrollBottom) term.scrollToBottom();
-          else sendInput(def.data);
+          // Data keys bypass the Ctrl/Alt latch (sharepage behavior):
+          // tapping Esc while Alt is latched sends a plain ESC and keeps
+          // the latch armed.
+          else transport.sendInput(def.data);
         }
       });
       keyButtons[def.label] = b;
@@ -827,9 +847,7 @@
     var card = el("div", "card");
     var title = el("div", "title");
     title.appendChild(el("span", "nm", p.name || p.id));
-    var online = p.online !== false;
-    var badge = el("span", "badge" + (online ? "" : " off"), online ? "● online" : "○ offline");
-    title.appendChild(badge);
+    title.appendChild(el("span", "badge", "● online"));
     card.appendChild(title);
     var sub = el("div", "sub", p.id + (p.last_seen ? " · seen " + p.last_seen : ""));
     card.appendChild(sub);
