@@ -128,9 +128,24 @@ func TestWebAppShellAndContractMarkers(t *testing.T) {
 		"tmux-list",
 		"tmux-attach",
 		"resume_from_seq",
+		"#/device/",
 	} {
 		if !strings.Contains(src, marker) {
 			t.Fatalf("web.js missing contract marker %q", marker)
+		}
+	}
+	css, err := webStaticFS.ReadFile("webstatic/web.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{
+		"(pointer: coarse)",
+		"safe-area-inset-bottom",
+		".biglist",
+		".listpage",
+	} {
+		if !strings.Contains(string(css), marker) {
+			t.Fatalf("web.css missing contract marker %q", marker)
 		}
 	}
 }
