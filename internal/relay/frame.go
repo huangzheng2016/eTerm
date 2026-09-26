@@ -22,15 +22,29 @@ const (
 const ProtocolVersion = 2
 
 const (
-	TargetLocal      = "local"
-	TargetHost       = "host"
-	TargetTmuxList   = "tmux-list"
-	TargetTmuxNew    = "tmux-new"
-	TargetTmuxAttach = "tmux-attach"
-	TargetTmuxKill   = "tmux-kill"
-	TargetTmuxRename = "tmux-rename"
-	TargetPeerRename = "peer-rename"
+	TargetLocal                 = "local"
+	TargetHost                  = "host"
+	TargetTmuxList              = "tmux-list"
+	TargetTmuxNew               = "tmux-new"
+	TargetTmuxAttach            = "tmux-attach"
+	TargetTmuxKill              = "tmux-kill"
+	TargetTmuxRename            = "tmux-rename"
+	TargetPeerRename            = "peer-rename"
+	TargetHostFingerprintAccept = "host-fingerprint-accept"
 )
+
+const CodeFingerprintUnconfirmed = "fingerprint_unconfirmed"
+
+type OpenErrPayload struct {
+	Code        string `json:"code,omitempty"`
+	Message     string `json:"message"`
+	HostSyncID  string `json:"host_sync_id,omitempty"`
+	Alias       string `json:"alias,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	Port        int    `json:"port,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Alg         string `json:"alg,omitempty"`
+}
 
 const CloseDaemonDisconnected = "daemon disconnected"
 
@@ -58,8 +72,12 @@ type OpenRequest struct {
 	PeerID        string `json:"peer_id"`
 	Target        string `json:"target"`
 	HostSyncID    string `json:"host_sync_id,omitempty"`
+	Hostname      string `json:"hostname,omitempty"`
+	Port          int    `json:"port,omitempty"`
 	SessionID     string `json:"session_id,omitempty"`
 	Name          string `json:"name,omitempty"`
+	Fingerprint   string `json:"fingerprint,omitempty"`
+	Alg           string `json:"alg,omitempty"`
 	Rows          int    `json:"rows,omitempty"`
 	Cols          int    `json:"cols,omitempty"`
 	ResumeFromSeq uint64 `json:"resume_from_seq,omitempty"`

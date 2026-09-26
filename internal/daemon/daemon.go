@@ -515,9 +515,32 @@ func handleOpen(rt *runtimeConfig, f relay.Frame, mgr *sessionManager, sender *f
 		hello, _ := json.Marshal(relay.HelloPayload{Role: "daemon", Tenant: rt.tenantID, PeerID: rt.peerID, Name: name, Version: relay.ProtocolVersion})
 		_ = sender.send(relay.Frame{Type: relay.FrameHello, Payload: hello})
 		_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
+	case relay.TargetHostFingerprintAccept:
+		if err := acceptHostFingerprint(rt, req); err != nil {
+			openErr(err)
+			return
+		}
+		if sender.send(relay.Frame{Type: relay.FrameOpenOK, StreamID: f.StreamID}) == nil {
+			_ = sender.send(relay.Frame{Type: relay.FrameClose, StreamID: f.StreamID})
+		}
 	default:
 		is, err := openTarget(rt, req, rows, cols)
 		if err != nil {
+			var fpErr *fingerprintUnconfirmedError
+			if errors.As(err, &fpErr) {
+				payload, _ := json.Marshal(relay.OpenErrPayload{
+					Code:        relay.CodeFingerprintUnconfirmed,
+					Message:     fpErr.Error(),
+					HostSyncID:  fpErr.hostSyncID,
+					Alias:       fpErr.alias,
+					Hostname:    fpErr.hostname,
+					Port:        fpErr.port,
+					Fingerprint: fpErr.fingerprint,
+					Alg:         fpErr.alg,
+				})
+				_ = sender.send(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: payload})
+				return
+			}
 			openErr(err)
 			return
 		}
@@ -574,7 +597,7 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 			}
 		}
 	}
-	unknownFingerprint := false
+	var fpErr *fingerprintUnconfirmedError
 	res, err := internalssh.Connect(internalssh.ConnectConfig{
 		Host:      &host,
 		Key:       hostKey,
@@ -582,14 +605,21 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 		JumpKey:   jumpKey,
 		MasterKey: rt.mk,
 		DB:        rt.db,
-		FingerprintCallback: func(string, int, string, string) bool {
-			unknownFingerprint = true
+		FingerprintCallback: func(hostname string, port int, algorithm, fingerprint string) bool {
+			fpErr = &fingerprintUnconfirmedError{
+				hostSyncID:  host.SyncID,
+				alias:       host.Alias,
+				hostname:    hostname,
+				port:        port,
+				alg:         algorithm,
+				fingerprint: fingerprint,
+			}
 			return false
 		},
 	})
 	if err != nil {
-		if unknownFingerprint {
-			return nil, errors.New("host key not trusted; connect directly from the TUI once to confirm the fingerprint")
+		if fpErr != nil {
+			return nil, fpErr
 		}
 		return nil, err
 	}
@@ -600,6 +630,72 @@ func openHost(rt *runtimeConfig, syncID string, rows, cols int) (*internalssh.In
 	}
 	is.SetClosers(res.Closers)
 	return is, nil
+}
+
+type fingerprintUnconfirmedError struct {
+	hostSyncID  string
+	alias       string
+	hostname    string
+	port        int
+	alg         string
+	fingerprint string
+}
+
+func (e *fingerprintUnconfirmedError) Error() string {
+	return "host key not trusted; connect directly from the TUI once to confirm the fingerprint"
+}
+
+const hostKeyProbeTimeout = 10 * time.Second
+
+func acceptHostFingerprint(rt *runtimeConfig, req relay.OpenRequest) error {
+	if req.Hostname == "" || req.Port == 0 || req.Fingerprint == "" || req.Alg == "" {
+		return errors.New("hostname, port, fingerprint and alg are required")
+	}
+	var host db.Host
+	if err := rt.db.Where("sync_id = ?", req.HostSyncID).First(&host).Error; err != nil {
+		return errors.New("unknown host_sync_id")
+	}
+	if !fingerprintPeerMatchesHost(rt, &host, req.Hostname, req.Port) {
+		return errors.New("hostname/port does not match the host or its jump host")
+	}
+	algo, fp, err := internalssh.ProbeHostKey(req.Hostname, req.Port, hostKeyProbeTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to probe host key: %w", err)
+	}
+	if algo != req.Alg || fp != req.Fingerprint {
+		return errors.New("fingerprint does not match the host's current key")
+	}
+	var existing db.HostFingerprint
+	result := rt.db.Where("hostname = ? AND port = ?", req.Hostname, req.Port).First(&existing)
+	if result.Error == gorm.ErrRecordNotFound {
+		return rt.db.Create(&db.HostFingerprint{
+			Hostname:    req.Hostname,
+			Port:        req.Port,
+			Algorithm:   algo,
+			Fingerprint: fp,
+			TrustedAt:   time.Now(),
+		}).Error
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+	existing.Algorithm = algo
+	existing.Fingerprint = fp
+	existing.TrustedAt = time.Now()
+	return rt.db.Save(&existing).Error
+}
+
+func fingerprintPeerMatchesHost(rt *runtimeConfig, host *db.Host, hostname string, port int) bool {
+	if host.Hostname == hostname && host.Port == port {
+		return true
+	}
+	if host.JumpHostID != nil {
+		var jh db.Host
+		if rt.db.First(&jh, *host.JumpHostID).Error == nil && jh.Hostname == hostname && jh.Port == port {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionDoneErr(readErr error, sessionDone <-chan error) error {
