@@ -224,6 +224,10 @@ func openStreamOnce(ctx context.Context, serverURL, apiKey, tenant string, insec
 		}
 		if f.Type == relay.FrameOpenErr {
 			conn.CloseNow()
+			var oe relay.OpenErrPayload
+			if err := json.Unmarshal(f.Payload, &oe); err == nil && oe.Code == relay.CodeFingerprintUnconfirmed && oe.Message != "" {
+				return nil, nil, errors.New(oe.Message)
+			}
 			return nil, nil, errors.New(string(f.Payload))
 		}
 		if f.Type == relay.FrameOpenOK {
