@@ -123,6 +123,8 @@ func TestWebAppShellAndContractMarkers(t *testing.T) {
 		"/api/v1/ws/client",
 		"fingerprint_unconfirmed",
 		"host-fingerprint-accept",
+		"hostname: info.hostname",
+		"port: info.port",
 		"tmux-list",
 		"tmux-attach",
 		"resume_from_seq",

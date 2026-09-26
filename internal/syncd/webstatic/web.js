@@ -329,6 +329,8 @@
       peer_id: this.o.peerID,
       target: "host-fingerprint-accept",
       host_sync_id: info.host_sync_id,
+      hostname: info.hostname,
+      port: info.port,
       fingerprint: info.fingerprint,
       alg: info.alg,
       rows: this.rows,
