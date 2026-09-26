@@ -807,11 +807,140 @@
       return r.json();
     }).then(function (me) {
       if (!me) return;
-      devicesView(root, me);
+      routeDevices(root, me);
     }).catch(function () {
       root.textContent = "";
       root.appendChild(el("div", "devwrap", "failed to load devices"));
     });
+  }
+
+  // Hash routes: #/device/<peer>/hosts and #/device/<peer>/tmux render the
+  // full-screen list pages used on phones/tablets; anything else shows the
+  // device grid. A system back button only needs to pop the hash.
+  var overlayTerm = null;
+  var lastView = null;
+
+  function routeDevices(root, me) {
+    if (overlayTerm) {
+      overlayTerm.destroy();
+      overlayTerm = null;
+    }
+    var m = location.hash.match(/^#\/device\/([^\/]+)\/(hosts|tmux)$/);
+    if (m) {
+      var peer = null;
+      (me.peers || []).forEach(function (p) {
+        if (p.id === decodeURIComponent(m[1])) peer = p;
+      });
+      if (peer) {
+        deviceListPage(root, me, peer, m[2], lastView === "devices");
+        lastView = "list";
+        return;
+      }
+    }
+    devicesView(root, me);
+    lastView = "devices";
+  }
+
+  function mobileUI() {
+    return matchMedia("(pointer: coarse)").matches || window.innerWidth <= 820;
+  }
+
+  function hostItem(h, onPick, twoLine) {
+    var item = el("button", "item");
+    var main = h.alias || h.hostname;
+    var sub = (h.username ? h.username + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : "");
+    if (twoLine) {
+      item.appendChild(el("span", "it-nm", main));
+      if (sub !== main) item.appendChild(el("span", "it-sub", sub));
+    } else {
+      item.textContent = main + "  " + sub;
+    }
+    item.addEventListener("click", onPick);
+    return item;
+  }
+
+  function tmuxItem(s, onPick, twoLine) {
+    var item = el("button", "item");
+    if (twoLine) {
+      item.appendChild(el("span", "it-nm", s.name));
+      if (s.attached) item.appendChild(el("span", "it-sub", "attached"));
+    } else {
+      item.textContent = s.name + (s.attached ? "  (attached)" : "");
+    }
+    item.addEventListener("click", onPick);
+    return item;
+  }
+
+  // Shared by the desktop card panel and the mobile full-screen page.
+  function fillHostList(container, root, wrap, p, hosts, twoLine) {
+    container.textContent = "";
+    if (!hosts.length) {
+      container.appendChild(el("div", "empty", "no synced hosts"));
+      return;
+    }
+    hosts.forEach(function (h) {
+      container.appendChild(hostItem(h, function () {
+        openTerminal(root, wrap, {
+          peerID: p.id, target: "host", hostSyncID: h.sync_id,
+          title: (p.name || p.id) + " — " + (h.alias || h.hostname)
+        });
+      }, twoLine));
+    });
+  }
+
+  function fillTmuxList(container, root, wrap, p, twoLine) {
+    container.textContent = "";
+    container.appendChild(el("div", "empty", "loading..."));
+    fetchTmuxList(p.id, function (err, sessions) {
+      if (!container.isConnected) return;
+      container.textContent = "";
+      var addBtn = el("button", "item", "+ New tmux session");
+      addBtn.addEventListener("click", function () {
+        openTerminal(root, wrap, {
+          peerID: p.id, target: "tmux-new",
+          title: (p.name || p.id) + " — tmux"
+        });
+      });
+      container.appendChild(addBtn);
+      if (err) {
+        container.appendChild(el("div", "empty", "tmux unavailable: " + err.message));
+        return;
+      }
+      if (!sessions.length) {
+        container.appendChild(el("div", "empty", "no tmux sessions"));
+      }
+      sessions.forEach(function (s) {
+        container.appendChild(tmuxItem(s, function () {
+          openTerminal(root, wrap, {
+            peerID: p.id, target: "tmux-attach", sessionID: s.session_id || s.name,
+            title: (p.name || p.id) + " — tmux: " + s.name
+          });
+        }, twoLine));
+      });
+    });
+  }
+
+  function deviceListPage(root, me, p, kind, fromDevices) {
+    root.textContent = "";
+    var wrap = el("div", "devwrap listpage");
+    var head = el("div", "listhead");
+    var back = el("button", "btn", "‹ Back");
+    head.appendChild(back);
+    head.appendChild(el("h1", null, p.name || p.id));
+    head.appendChild(el("span", "meta", kind === "hosts" ? "hosts" : "tmux"));
+    wrap.appendChild(head);
+    var list = el("div", "biglist");
+    wrap.appendChild(list);
+    root.appendChild(wrap);
+    back.addEventListener("click", function () {
+      if (fromDevices) history.back();
+      else location.hash = "#/";
+    });
+    if (kind === "hosts") {
+      fillHostList(list, root, wrap, p, me.hosts || [], true);
+    } else {
+      fillTmuxList(list, root, wrap, p, true);
+    }
   }
 
   function devicesView(root, me) {
@@ -873,31 +1002,26 @@
       });
     });
     btnHosts.addEventListener("click", function () {
+      if (mobileUI()) {
+        location.hash = "#/device/" + encodeURIComponent(p.id) + "/hosts";
+        return;
+      }
       tmuxPanel.classList.remove("open");
       btnTmux.classList.remove("on");
       if (hostsPanel.classList.toggle("open")) {
         btnHosts.classList.add("on");
         if (!hostsPanel.childNodes.length) {
-          if (!hosts.length) {
-            hostsPanel.appendChild(el("div", "empty", "no synced hosts"));
-          }
-          hosts.forEach(function (h) {
-            var label = (h.alias || h.hostname) + "  " + (h.username ? h.username + "@" : "") + h.hostname + (h.port && h.port !== 22 ? ":" + h.port : "");
-            var item = el("button", "item", label);
-            item.addEventListener("click", function () {
-              openTerminal(root, wrap, {
-                peerID: p.id, target: "host", hostSyncID: h.sync_id,
-                title: (p.name || p.id) + " — " + (h.alias || h.hostname)
-              });
-            });
-            hostsPanel.appendChild(item);
-          });
+          fillHostList(hostsPanel, root, wrap, p, hosts, false);
         }
       } else {
         btnHosts.classList.remove("on");
       }
     });
     btnTmux.addEventListener("click", function () {
+      if (mobileUI()) {
+        location.hash = "#/device/" + encodeURIComponent(p.id) + "/tmux";
+        return;
+      }
       hostsPanel.classList.remove("open");
       btnHosts.classList.remove("on");
       if (!tmuxPanel.classList.toggle("open")) {
@@ -905,37 +1029,7 @@
         return;
       }
       btnTmux.classList.add("on");
-      tmuxPanel.textContent = "";
-      tmuxPanel.appendChild(el("div", "empty", "loading..."));
-      fetchTmuxList(p.id, function (err, list) {
-        tmuxPanel.textContent = "";
-        var addBtn = el("button", "item", "+ New tmux session");
-        addBtn.addEventListener("click", function () {
-          openTerminal(root, wrap, {
-            peerID: p.id, target: "tmux-new",
-            title: (p.name || p.id) + " — tmux"
-          });
-        });
-        tmuxPanel.appendChild(addBtn);
-        if (err) {
-          tmuxPanel.appendChild(el("div", "empty", "tmux unavailable: " + err.message));
-          return;
-        }
-        if (!list.length) {
-          tmuxPanel.appendChild(el("div", "empty", "no tmux sessions"));
-        }
-        list.forEach(function (s) {
-          var item = el("button", "item");
-          item.appendChild(document.createTextNode(s.name + (s.attached ? "  (attached)" : "")));
-          item.addEventListener("click", function () {
-            openTerminal(root, wrap, {
-              peerID: p.id, target: "tmux-attach", sessionID: s.session_id || s.name,
-              title: (p.name || p.id) + " — tmux: " + s.name
-            });
-          });
-          tmuxPanel.appendChild(item);
-        });
-      });
+      fillTmuxList(tmuxPanel, root, wrap, p, false);
     });
     return card;
   }
@@ -954,6 +1048,7 @@
       title: opts.title,
       transport: session,
       onBack: function () {
+        overlayTerm = null;
         screen.destroy();
         holder.remove();
         wrap.style.display = "";
@@ -968,6 +1063,7 @@
         });
       }
     });
+    overlayTerm = screen;
   }
 
   // ---------- share view ----------
@@ -995,5 +1091,6 @@
     renderLogin(app);
     return;
   }
+  window.addEventListener("hashchange", function () { renderDevices(app); });
   renderDevices(app);
 })();
