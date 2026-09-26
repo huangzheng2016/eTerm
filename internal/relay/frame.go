@@ -72,6 +72,8 @@ type OpenRequest struct {
 	PeerID        string `json:"peer_id"`
 	Target        string `json:"target"`
 	HostSyncID    string `json:"host_sync_id,omitempty"`
+	Hostname      string `json:"hostname,omitempty"`
+	Port          int    `json:"port,omitempty"`
 	SessionID     string `json:"session_id,omitempty"`
 	Name          string `json:"name,omitempty"`
 	Fingerprint   string `json:"fingerprint,omitempty"`

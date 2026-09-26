@@ -648,14 +648,17 @@ func (e *fingerprintUnconfirmedError) Error() string {
 const hostKeyProbeTimeout = 10 * time.Second
 
 func acceptHostFingerprint(rt *runtimeConfig, req relay.OpenRequest) error {
-	if req.Fingerprint == "" || req.Alg == "" {
-		return errors.New("fingerprint and alg are required")
+	if req.Hostname == "" || req.Port == 0 || req.Fingerprint == "" || req.Alg == "" {
+		return errors.New("hostname, port, fingerprint and alg are required")
 	}
 	var host db.Host
 	if err := rt.db.Where("sync_id = ?", req.HostSyncID).First(&host).Error; err != nil {
 		return errors.New("unknown host_sync_id")
 	}
-	algo, fp, err := internalssh.ProbeHostKey(host.Hostname, host.Port, hostKeyProbeTimeout)
+	if !fingerprintPeerMatchesHost(rt, &host, req.Hostname, req.Port) {
+		return errors.New("hostname/port does not match the host or its jump host")
+	}
+	algo, fp, err := internalssh.ProbeHostKey(req.Hostname, req.Port, hostKeyProbeTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to probe host key: %w", err)
 	}
@@ -663,11 +666,11 @@ func acceptHostFingerprint(rt *runtimeConfig, req relay.OpenRequest) error {
 		return errors.New("fingerprint does not match the host's current key")
 	}
 	var existing db.HostFingerprint
-	result := rt.db.Where("hostname = ? AND port = ?", host.Hostname, host.Port).First(&existing)
+	result := rt.db.Where("hostname = ? AND port = ?", req.Hostname, req.Port).First(&existing)
 	if result.Error == gorm.ErrRecordNotFound {
 		return rt.db.Create(&db.HostFingerprint{
-			Hostname:    host.Hostname,
-			Port:        host.Port,
+			Hostname:    req.Hostname,
+			Port:        req.Port,
 			Algorithm:   algo,
 			Fingerprint: fp,
 			TrustedAt:   time.Now(),
@@ -680,6 +683,19 @@ func acceptHostFingerprint(rt *runtimeConfig, req relay.OpenRequest) error {
 	existing.Fingerprint = fp
 	existing.TrustedAt = time.Now()
 	return rt.db.Save(&existing).Error
+}
+
+func fingerprintPeerMatchesHost(rt *runtimeConfig, host *db.Host, hostname string, port int) bool {
+	if host.Hostname == hostname && host.Port == port {
+		return true
+	}
+	if host.JumpHostID != nil {
+		var jh db.Host
+		if rt.db.First(&jh, *host.JumpHostID).Error == nil && jh.Hostname == hostname && jh.Port == port {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionDoneErr(readErr error, sessionDone <-chan error) error {
