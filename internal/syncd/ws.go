@@ -249,7 +249,8 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 
 	send := newLaneQueue()
 	send.closeConn = func() { c.CloseNow() }
-	send.label = fmt.Sprintf("client tenant=%s addr=%s", shortID(r.Header.Get("X-ETerm-Tenant")), r.RemoteAddr)
+	tenant := tenantFromContext(r)
+	send.label = fmt.Sprintf("client tenant=%s addr=%s", shortID(tenant), r.RemoteAddr)
 	ctx := r.Context()
 	done := make(chan struct{})
 	stop := make(chan struct{})
@@ -287,7 +288,6 @@ func (h *RelayHub) clientWS(w http.ResponseWriter, r *http.Request) {
 				send.sendCtl(relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: []byte("bad open payload")})
 				continue
 			}
-			tenant := r.Header.Get("X-ETerm-Tenant")
 			peer, ok := h.peers.Get(tenant, open.PeerID)
 			if !ok {
 				log.Printf("syncd relay peer offline tenant=%s peer=%s available=%v", shortID(tenant), open.PeerID, h.peers.IDs(tenant))

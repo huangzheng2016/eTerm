@@ -1,6 +1,7 @@
 package syncd
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"io"
@@ -28,35 +29,63 @@ func NewHTTPHandler(engine *Engine, apiKey string) http.Handler {
 }
 
 func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry) http.Handler {
+	return NewHTTPHandlerWithTLS(engine, apiKey, peers, false)
+}
+
+func NewHTTPHandlerWithTLS(engine *Engine, apiKey string, peers *PeerRegistry, tlsEnabled bool) http.Handler {
+	return newHTTPHandler(engine, apiKey, peers, NewWebAuth(engine, peers, tlsEnabled))
+}
+
+func newHTTPHandler(engine *Engine, apiKey string, peers *PeerRegistry, web *WebAuth) http.Handler {
 	mux := http.NewServeMux()
 	relayHub := NewRelayHub(peers)
 
 	auth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			tenant := ""
+			authed := false
 			if apiKey != "" {
 				h := r.Header.Get("Authorization")
-				if !strings.HasPrefix(h, "Bearer ") || subtle.ConstantTimeCompare([]byte(h[7:]), []byte(apiKey)) != 1 {
-					http.Error(w, "unauthorized", http.StatusUnauthorized)
-					return
+				if strings.HasPrefix(h, "Bearer ") && subtle.ConstantTimeCompare([]byte(h[7:]), []byte(apiKey)) == 1 {
+					authed = true
+					tenant = r.Header.Get("X-ETerm-Tenant")
 				}
 			}
-			next(w, r)
+			if !authed {
+				if t, ok := web.sessionTenant(r); ok {
+					authed = true
+					tenant = t
+				}
+			}
+			if apiKey != "" && !authed {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if !authed {
+				tenant = r.Header.Get("X-ETerm-Tenant")
+			}
+			next(w, r.WithContext(context.WithValue(r.Context(), tenantCtxKey{}, tenant)))
 		}
 	}
+
+	mux.HandleFunc("POST /api/v1/web/login", web.handleLogin)
+	mux.HandleFunc("POST /api/v1/web/logout", auth(web.handleLogout))
+	mux.HandleFunc("POST /api/v1/web/logout-all", auth(web.handleLogoutAll))
+	mux.HandleFunc("GET /api/v1/web/me", auth(web.handleMe))
 
 	mux.HandleFunc("GET /api/v1/ping", auth(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	}))
 
 	mux.HandleFunc("GET /api/v1/peers", auth(func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-ETerm-Tenant")
+		tenant := tenantFromContext(r)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"peers": peers.List(tenant),
 		})
 	}))
 
 	mux.HandleFunc("GET /api/v1/hosts", auth(func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-ETerm-Tenant")
+		tenant := tenantFromContext(r)
 		hosts, err := engine.HostMetas(tenant)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -77,7 +106,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 
 	mux.HandleFunc("GET /api/v1/records", auth(func(w http.ResponseWriter, r *http.Request) {
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
-		tenant := r.Header.Get("X-ETerm-Tenant")
+		tenant := tenantFromContext(r)
 		entries, rev, err := engine.Pull(tenant, since)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
@@ -104,7 +133,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 			http.Error(w, err.Error(), 400)
 			return
 		}
-		tenant := r.Header.Get("X-ETerm-Tenant")
+		tenant := tenantFromContext(r)
 		entries := make([]SyncEntry, len(body.Records))
 		for i, r := range body.Records {
 			entries[i] = SyncEntry{
@@ -121,7 +150,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 	}))
 
 	mux.HandleFunc("POST /api/v1/blobs", auth(func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-ETerm-Tenant")
+		tenant := tenantFromContext(r)
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBlobBytes+1)
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -181,7 +210,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 	})
 
 	mux.HandleFunc("DELETE /api/v1/blobs/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
-		if err := engine.DeleteBlob(r.Header.Get("X-ETerm-Tenant"), r.PathValue("id")); err != nil {
+		if err := engine.DeleteBlob(tenantFromContext(r), r.PathValue("id")); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
@@ -189,7 +218,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 	}))
 
 	mux.HandleFunc("POST /api/v1/shares", auth(func(w http.ResponseWriter, r *http.Request) {
-		tenant := r.Header.Get("X-ETerm-Tenant")
+		tenant := tenantFromContext(r)
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		var body struct {
 			PeerID    string `json:"peer_id"`
@@ -236,7 +265,7 @@ func NewHTTPHandlerWithPeers(engine *Engine, apiKey string, peers *PeerRegistry)
 	}))
 
 	mux.HandleFunc("DELETE /api/v1/shares/{token}", auth(func(w http.ResponseWriter, r *http.Request) {
-		if err := engine.DeleteShare(r.Header.Get("X-ETerm-Tenant"), r.PathValue("token")); err != nil {
+		if err := engine.DeleteShare(tenantFromContext(r), r.PathValue("token")); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

@@ -43,12 +43,13 @@ func NewEngine(database *gorm.DB) (*Engine, error) {
 			return nil, err
 		}
 	}
-	if err := database.AutoMigrate(&SyncEntry{}, &BlobEntry{}, &ShareEntry{}); err != nil {
+	if err := database.AutoMigrate(&SyncEntry{}, &BlobEntry{}, &ShareEntry{}, &WebSession{}); err != nil {
 		return nil, err
 	}
 	engine := &Engine{DB: database}
 	_ = engine.CleanupExpiredBlobs()
 	_ = engine.CleanupExpiredShares()
+	_ = engine.CleanupExpiredWebSessions()
 	return engine, nil
 }
 

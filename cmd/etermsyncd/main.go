@@ -57,10 +57,15 @@ func main() {
 		for range ticker.C {
 			_ = engine.CleanupExpiredBlobs()
 			_ = engine.CleanupExpiredShares()
+			_ = engine.CleanupExpiredWebSessions()
 		}
 	}()
 
-	handler := syncd.NewHTTPHandler(engine, *apiKey)
+	tlsEnabled := *certFile != "" && *keyFile != ""
+	if !tlsEnabled {
+		log.Printf("WARNING: TLS disabled (-cert/-key not set); /api/v1/web/login returns 503 and web sessions cannot be created")
+	}
+	handler := syncd.NewHTTPHandlerWithTLS(engine, *apiKey, syncd.NewPeerRegistry(), tlsEnabled)
 	fmt.Fprintf(os.Stderr, "etermsyncd listening on %s\n", *listen)
 
 	if *certFile != "" && *keyFile != "" {
