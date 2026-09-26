@@ -340,8 +340,17 @@ func (a *WebAuth) resetLogin(keys ...string) {
 	}
 }
 
+// webLoginTLSOK reports whether the request arrived over TLS, either
+// terminated directly (r.TLS) or at a reverse proxy (X-Forwarded-Proto).
+func webLoginTLSOK(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 func (a *WebAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !a.tls {
+	if !webLoginTLSOK(r) {
 		http.Error(w, "web login requires TLS", http.StatusServiceUnavailable)
 		return
 	}

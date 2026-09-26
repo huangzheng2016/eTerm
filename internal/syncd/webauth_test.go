@@ -41,6 +41,7 @@ func webPostLogin(t *testing.T, baseURL, password string) *http.Response {
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("X-Forwarded-Proto", "https")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -162,12 +163,51 @@ func TestWebLoginKnownByHostRecord(t *testing.T) {
 	webSessionCookie(t, webPostLogin(t, srv.URL, "pw-host"))
 }
 
-func TestWebLoginRequiresTLS(t *testing.T) {
-	srv, _, peers, _ := webServer(t, "secret", false)
+func TestWebLoginTLSCheck(t *testing.T) {
+	engine := testEngine(t)
+	peers := NewPeerRegistry()
+	web := NewWebAuth(engine, peers, false)
 	webRegisterPeer(peers, etersync.TenantIDFromPassphrase("pw"), "peer-a")
-	resp := webPostLogin(t, srv.URL, "pw")
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d", resp.StatusCode)
+	handler := newHTTPHandler(engine, "secret", peers, web)
+
+	post := func(client *http.Client, baseURL, xfp string) *http.Response {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{"password": "pw"})
+		req, err := http.NewRequest("POST", baseURL+"/api/v1/web/login", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if xfp != "" {
+			req.Header.Set("X-Forwarded-Proto", xfp)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+
+	tlsSrv := httptest.NewTLSServer(handler)
+	t.Cleanup(tlsSrv.Close)
+	if resp := post(tlsSrv.Client(), tlsSrv.URL, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("direct TLS: status = %d", resp.StatusCode)
+	}
+
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	if resp := post(srv.Client(), srv.URL, "https"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("X-Forwarded-Proto https: status = %d", resp.StatusCode)
+	}
+	for _, xfp := range []string{"", "http"} {
+		resp := post(srv.Client(), srv.URL, xfp)
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("X-Forwarded-Proto %q: status = %d", xfp, resp.StatusCode)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		if strings.TrimSpace(string(b)) != "web login requires TLS" {
+			t.Fatalf("X-Forwarded-Proto %q: body = %q", xfp, b)
+		}
 	}
 }
 
