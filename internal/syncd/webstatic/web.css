@@ -1,0 +1,71 @@
+html, body { margin: 0; height: 100%; background: #1b1b1b; color: #ccc; font: 13px/1.4 system-ui, sans-serif; }
+body { display: flex; flex-direction: column; }
+#app { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.btn { background: #222; color: #ccc; border: 1px solid #333; border-radius: 3px; padding: 4px 10px; font: inherit; cursor: pointer; }
+.btn.on { background: #3a4a5a; color: #fff; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+/* Terminal screen: top bar + xterm + mobile chrome (keys bar, lock, paste). */
+.tscreen { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.tscreen .bar { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 6px 10px; background: #111; }
+.tscreen .bar .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tscreen .bar .meta { color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tscreen .bar .spacer { flex: 1; }
+.tscreen .bar .btns { display: flex; gap: 12px; margin-left: auto; }
+.tscreen .term { flex: 1; min-height: 0; padding: 4px; box-sizing: border-box; }
+.tscreen .term .xterm-viewport { overscroll-behavior: contain; }
+.keysbar { position: fixed; left: 0; right: 0; bottom: 0; display: none; gap: 6px; padding: 6px; background: #111; border-top: 1px solid #333; overflow-x: auto; z-index: 20; }
+.keysbar .btn { min-width: 40px; padding: 8px 10px; flex: none; }
+.lockoverlay { position: fixed; left: 0; right: 0; bottom: 0; display: none; z-index: 25; background: transparent; touch-action: none; }
+.pastebg { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); z-index: 30; }
+.pastebox { width: min(90%, 560px); background: #161616; border: 1px solid #333; border-radius: 4px; padding: 10px; }
+.pastebox textarea { width: 100%; height: 40vh; box-sizing: border-box; background: #0d0d0d; color: #ccc; border: 1px solid #333; font: 13px/1.4 monospace; }
+.pastebox .row { margin-top: 8px; display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Login view. */
+.loginwrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.logincard { width: min(92%, 320px); background: #161616; border: 1px solid #333; border-radius: 6px; padding: 20px; }
+.logincard h1 { margin: 0 0 14px; font-size: 18px; text-align: center; }
+.logincard input { width: 100%; box-sizing: border-box; background: #0d0d0d; color: #ccc; border: 1px solid #333; border-radius: 3px; padding: 8px 10px; font: inherit; }
+.logincard .btn { width: 100%; margin-top: 10px; padding: 8px 0; }
+.logincard .err { color: #d66; min-height: 1.4em; margin-top: 8px; text-align: center; }
+
+/* Devices view. */
+.devwrap { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; box-sizing: border-box; }
+.devhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.devhead h1 { font-size: 16px; margin: 0; }
+.devhead .meta { color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devhead .spacer { flex: 1; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.card { background: #161616; border: 1px solid #333; border-radius: 6px; padding: 10px 12px; }
+.card.off { opacity: .45; }
+.card .title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card .title .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .badge { color: #6c6; font-size: 12px; white-space: nowrap; }
+.card .badge.off { color: #888; }
+.card .sub { color: #888; font-size: 12px; margin: 4px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.card .panel { margin-top: 8px; border-top: 1px solid #2a2a2a; padding-top: 8px; display: none; }
+.card .panel.open { display: block; }
+.card .panel .empty { color: #777; font-size: 12px; }
+.card .panel .item { display: block; width: 100%; text-align: left; background: none; border: none; color: #ccc; padding: 6px 4px; font: inherit; cursor: pointer; border-radius: 3px; }
+.card .panel .item:hover { background: #222; }
+.card .panel .item .m { color: #888; font-size: 12px; }
+
+/* Fingerprint dialog. */
+.fpb { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); z-index: 40; padding: 16px; }
+.fpb .box { width: min(94%, 460px); background: #161616; border: 1px solid #444; border-radius: 6px; padding: 14px; }
+.fpb h2 { margin: 0 0 8px; font-size: 15px; }
+.fpb .kv { color: #aaa; margin: 2px 0; word-break: break-all; }
+.fpb .kv b { color: #ccc; font-weight: 600; }
+.fpb .fp { font-family: ui-monospace, monospace; font-size: 12px; background: #0d0d0d; border: 1px solid #2a2a2a; border-radius: 3px; padding: 8px; margin: 8px 0; word-break: break-all; user-select: all; }
+.fpb .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+.fpb .row .btn { padding: 6px 14px; }
+
+@media (max-width: 480px) {
+  .tscreen .bar { gap: 4px 8px; padding: 4px 8px; }
+  .tscreen .bar .btns { gap: 8px; }
+  .cards { grid-template-columns: 1fr; }
+  .devhead { flex-wrap: wrap; }
+}
