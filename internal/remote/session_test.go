@@ -456,6 +456,45 @@ func TestOpenErrReturnsError(t *testing.T) {
 	}
 }
 
+func TestOpenErrFingerprintUnconfirmedShowsMessage(t *testing.T) {
+	payload, _ := json.Marshal(relay.OpenErrPayload{
+		Code:        relay.CodeFingerprintUnconfirmed,
+		Message:     "host example.com:22 fingerprint not confirmed",
+		HostSyncID:  "hs1",
+		Alias:       "example",
+		Hostname:    "example.com",
+		Port:        22,
+		Fingerprint: "SHA256:abc",
+		Alg:         "sha256",
+	})
+	server := openServer(t, func(ctx context.Context, c *websocket.Conn, f relay.Frame) {
+		sendFrame(c, ctx, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: payload})
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err == nil || err.Error() != "host example.com:22 fingerprint not confirmed" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestOpenErrOtherCodeKeepsRawPayload(t *testing.T) {
+	payload := []byte(`{"code":"peer_rejected","message":"some detail"}`)
+	server := openServer(t, func(ctx context.Context, c *websocket.Conn, f relay.Frame) {
+		sendFrame(c, ctx, relay.Frame{Type: relay.FrameOpenErr, StreamID: f.StreamID, Payload: payload})
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := Open(ctx, server.URL, "", "", false, "peer-a", "local", "", 24, 80)
+	if err == nil || err.Error() != string(payload) {
+		t.Fatalf("err = %v, want raw payload", err)
+	}
+}
+
 func TestOpenRetriesPeerOffline(t *testing.T) {
 	oldDelay := peerOfflineRetryDelay
 	peerOfflineRetryDelay = time.Millisecond
