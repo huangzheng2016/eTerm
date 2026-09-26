@@ -293,6 +293,8 @@ func newHTTPHandler(engine *Engine, apiKey string, peers *PeerRegistry, web *Web
 		relayHub.shareWS(engine, w, r)
 	})
 
+	RegisterWebRoutes(mux)
+
 	return mux
 }
 
